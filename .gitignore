@@ -1,3 +1,4 @@
 [bB]uild
 .cache/
 .vscode/
+log*
