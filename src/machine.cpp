@@ -1,9 +1,1377 @@
 #include "machine.hpp"
 
+#include <bitset>
+#include <cstdint>
+#include <elfio/elfio.hpp>
+#include <iomanip>
+#include <iostream>
+#include <ostream>
+#include <sstream>
+#include <stdexcept>
+
+#include "helper.hpp"
+#include "types.hpp"
+
 namespace dawn {
 
-machine_t::machine_t() {}
+machine_t::machine_t(uint64_t memory_size, uint64_t memory_page_size)
+    : _memory(memory_size, memory_page_size) {
+  for (uint32_t i = 0; i < 32; i++) _registers[i] = 0;
+  _privilege_mode = privilege_mode_t::e_machine;
+}
 
 machine_t::~machine_t() {}
 
-} // namespace dawn
+bool machine_t::load_elf_and_set_program_counter(
+    const std::filesystem::path& path) {
+  ELFIO::elfio reader;
+  if (!reader.load(path)) return false;
+  for (uint32_t i = 0; i < reader.segments.size(); i++) {
+    const ELFIO::segment* segment         = reader.segments[i];
+    ELFIO::Elf64_Addr     virtual_address = segment->get_virtual_address();
+    ELFIO::Elf_Xword      file_size       = segment->get_file_size();
+    ELFIO::Elf_Xword      memory_size     = segment->get_memory_size();
+    if (segment->get_type() != ELFIO::PT_LOAD) continue;
+
+    if (!_memory.memcpy_host_to_guest(virtual_address, segment->get_data(),
+                                      file_size)) {
+      throw std::runtime_error(
+          "Error: elf was not able to be loaded in memory");
+    }
+    if (memory_size) {
+      // TODO: add a memset_guest similar to memcpy_host_to_guest
+      for (uint32_t i = 0; i < memory_size - file_size; i++) {
+        _memory.store<8>(virtual_address + file_size + i, 0);
+      }
+    }
+  }
+  _program_counter = reader.get_entry();
+  return true;
+}
+
+void machine_t::handle_trap(exception_code_t cause_code, uint64_t value) {
+  _write_csr(MEPC, _program_counter);
+  _write_csr(MCAUSE, (uint64_t)cause_code);
+  _write_csr(MTVAL, value);
+  uint64_t mstatus         = _read_csr(MSTATUS);
+  uint64_t current_mie_bit = (mstatus & MSTATUS_MIE_MASK) ? 1 : 0;
+  mstatus                  = (mstatus & ~MSTATUS_MPP_MASK) |
+            ((static_cast<uint64_t>(_privilege_mode) << MSTATUS_MPP_SHIFT) &
+             MSTATUS_MPP_MASK);
+  mstatus = (mstatus & ~MSTATUS_MPIE_MASK) |
+            ((current_mie_bit << MSTATUS_MPIE_SHIFT) & MSTATUS_MPIE_MASK);
+  mstatus &= ~MSTATUS_MIE_MASK;
+  _write_csr(MSTATUS, mstatus);  // Write the updated MSTATUS back
+  _privilege_mode       = privilege_mode_t::e_machine;
+  uint64_t mtvec        = _read_csr(MTVEC);
+  uint64_t mtvec_base   = mtvec & MTVEC_BASE_ALIGN_MASK;
+  uint64_t mtvec_mode   = mtvec & MTVEC_MODE_MASK;
+  bool     is_interrupt = ((uint64_t)cause_code & MCAUSE_INTERRUPT_BIT) != 0;
+  if (mtvec_mode == 0b01 && is_interrupt) {
+    uint64_t interrupt_code = (uint64_t)cause_code & ~MCAUSE_INTERRUPT_BIT;
+    _program_counter        = mtvec_base + (interrupt_code * 4);
+  } else {
+    _program_counter = mtvec_base;
+  }
+}
+
+uint64_t machine_t::_read_csr(uint16_t address) {
+  switch (address) {
+    case MSTATUS:
+      return _csr[MSTATUS];
+    case MTVEC:
+      return _csr[MTVEC];
+    case MEPC:
+      return _csr[MEPC];
+    case MCAUSE:
+      return _csr[MCAUSE];
+    case MTVAL:
+      return _csr[MTVAL];
+    default:
+      return 0;
+  }
+}
+void machine_t::_write_csr(uint16_t address, uint64_t value) {
+  switch (address) {
+    case MSTATUS: {
+      uint64_t writeable_mask = 0;
+      writeable_mask |= MSTATUS_MIE_MASK;
+      writeable_mask |= MSTATUS_MPIE_MASK;
+      writeable_mask |= MSTATUS_MPP_MASK;
+      _csr[MSTATUS] =
+          (_csr[MSTATUS] & ~writeable_mask) | (value & writeable_mask);
+    } break;
+    case MTVEC: {
+      uint64_t mode_bits = value & MTVEC_MODE_MASK;
+      uint64_t base_addr = value & MTVEC_BASE_ALIGN_MASK;
+      // TODO: trap if mode bits are reserved
+      _csr[MTVEC] = base_addr | mode_bits;
+    } break;
+    case MEPC:
+      _csr[MEPC] = value;
+      break;
+    case MCAUSE:
+      _csr[MCAUSE] = value;
+      break;
+    case MTVAL:
+      _csr[MTVAL] = value;
+      break;
+    default:
+      return;
+  }
+}
+// TODO: proper privilege checks
+uint64_t machine_t::read_csr(uint32_t _instruction) {
+  instruction_t instruction;
+  reinterpret_cast<uint32_t&>(instruction) = _instruction;
+  privilege_mode_t min_privilege_mode =
+      static_cast<privilege_mode_t>((instruction.as.i_type.imm() >> 8) & 0b11);
+  if (_privilege_mode < min_privilege_mode) {
+    handle_trap(exception_code_t::e_illegal_instruction, _instruction);
+  }
+  return _read_csr(instruction.as.i_type.imm());
+}
+void machine_t::write_csr(uint32_t _instruction, uint64_t value) {
+  instruction_t instruction;
+  reinterpret_cast<uint32_t&>(instruction) = _instruction;
+  privilege_mode_t min_privilege_mode =
+      static_cast<privilege_mode_t>((instruction.as.i_type.imm() >> 8) & 0b11);
+  if (_privilege_mode < min_privilege_mode) {
+    handle_trap(exception_code_t::e_illegal_instruction, _instruction);
+  }
+  if ((instruction.as.i_type.imm() >> 10) == 0b11) {
+    handle_trap(exception_code_t::e_illegal_instruction, _instruction);
+    return;
+  }
+  return _write_csr(instruction.as.i_type.imm(), value);
+}
+
+std::pair<uint32_t, uint64_t>
+machine_t::fetch_instruction_at_program_counter() {
+  // TODO: handle invalid loads
+  return {_memory.load<32>(_program_counter), _program_counter};
+}
+void machine_t::debug_disassemble_instruction(uint32_t      _instruction,
+                                              std::ostream& o) {
+  instruction_t instruction;
+  reinterpret_cast<uint32_t&>(instruction) = _instruction;
+
+  switch (instruction.opcode()) {
+    // imm[31:12] rd 0110111 LUI
+    case 0b0110111:  // LUI
+      o << "lui\n";
+      break;
+    // imm[31:12] rd 0010111 AUIPC
+    case 0b0010111:  // AUIPC
+      o << "auipc\n";
+      break;
+    // imm[20|10:1|11|19:12] rd 1101111 JAL
+    case 0b1101111: {  // JAL
+      o << "jal\n";
+    } break;
+    // imm[11:0] rs1 000 rd 1100111 JALR
+    case 0b1100111: {  // JALR
+      o << "jalr\n";
+    } break;
+
+    case 0b1100011:
+      switch (instruction.as.b_type.funct3()) {
+        // imm[12|10:5] rs2 rs1 000 imm[4:1|11] 1100011 BEQ
+        case 0b000:  // BEQ
+          o << "beq\n";
+          break;
+        // imm[12|10:5] rs2 rs1 001 imm[4:1|11] 1100011 BNE
+        case 0b001:  // BNE
+          o << "bne\n";
+          break;
+        // imm[12|10:5] rs2 rs1 100 imm[4:1|11] 1100011 BLT
+        case 0b100:  // BLT
+          o << "blt\n";
+          break;
+        // imm[12|10:5] rs2 rs1 101 imm[4:1|11] 1100011 BGE
+        case 0b101:  // BGE
+          o << "bge\n";
+          break;
+        // imm[12|10:5] rs2 rs1 110 imm[4:1|11] 1100011 BLTU
+        case 0b110:  // BLTU
+          o << "bltu\n";
+          break;
+        // imm[12|10:5] rs2 rs1 111 imm[4:1|11] 1100011 BGEU
+        case 0b111:  // BGEU
+          o << "bgeu\n";
+          break;
+        default:
+          // TODO: raise illegal instruction exception
+          std::stringstream ss;
+          ss << "Error: illegal instruction";
+          throw std::runtime_error(ss.str());
+      }
+      break;
+
+    case 0b0000011:
+      switch (instruction.as.i_type.funct3()) {
+        // imm[11:0] rs1 000 rd 0000011 LB
+        case 0b000:  // LB
+          o << "lb\n";
+          break;
+        // imm[11:0] rs1 001 rd 0000011 LH
+        case 0b001:  // LH
+          o << "lh\n";
+          break;
+        // imm[11:0] rs1 010 rd 0000011 LW
+        case 0b010:  // LW
+          o << "lw\n";
+          break;
+        // imm[11:0] rs1 100 rd 0000011 LBU
+        case 0b100:  // LBU
+          o << "lbu\n";
+          break;
+        // imm[11:0] rs1 101 rd 0000011 LHU
+        case 0b101:  // LHU
+          o << "lhu\n";
+          break;
+          // imm[11:0] rs1 110 rd 0000011 LWU
+        case 0b110:  // LWU
+          o << "lwu\n";
+          break;
+          // imm[11:0] rs1 011 rd 0000011 LD
+        case 0b011:  // LD
+          o << "ld\n";
+          break;
+        default:
+          // TODO: raise illegal instruction exception
+          std::stringstream ss;
+          ss << "Error: illegal instruction";
+          throw std::runtime_error(ss.str());
+      }
+      break;
+
+    case 0b0100011:
+      switch (instruction.as.s_type.funct3()) {
+        // imm[11:5] rs2 rs1 000 imm[4:0] 0100011 SB
+        case 0b000:  // SB
+          o << "sb\n";
+          break;
+        // imm[11:5] rs2 rs1 001 imm[4:0] 0100011 SH
+        case 0b001:  // SH
+          o << "sh\n";
+          break;
+        // imm[11:5] rs2 rs1 010 imm[4:0] 0100011 SW
+        case 0b010:  // SW
+          o << "sw\n";
+          break;
+        // imm[11:5] rs2 rs1 011 imm[4:0] 0100011 SD
+        case 0b011:  // SD
+          o << "sd\n";
+          break;
+        default:
+          // TODO: raise illegal instruction exception
+          std::stringstream ss;
+          ss << "Error: illegal instruction";
+          throw std::runtime_error(ss.str());
+      }
+      break;
+
+    case 0b0010011:
+      switch (instruction.as.i_type.funct3()) {
+        // imm[11:0] rs1 000 rd 0010011 ADDI
+        case 0b000:  // ADDI
+          o << "addi\n";
+          break;
+        // imm[11:0] rs1 010 rd 0010011 SLTI
+        case 0b010:  // SLTI
+          o << "slti\n";
+          break;
+        // imm[11:0] rs1 011 rd 0010011 SLTIU
+        case 0b011:  // SLTIU
+          o << "sltiu\n";
+          break;
+        // imm[11:0] rs1 100 rd 0010011 XORI
+        case 0b100:  // XORI
+          o << "xori\n";
+          break;
+        // imm[11:0] rs1 110 rd 0010011 ORI
+        case 0b110:  // ORI
+          o << "ori\n";
+          break;
+        // imm[11:0] rs1 111 rd 0010011 ANDI
+        case 0b111:  // ANDI
+          o << "andi\n";
+          break;
+        // 0000000 shamt rs1 001 rd 0010011 SLLI
+        case 0b001:  // SLLI
+          o << "slli\n";
+          break;
+
+        case 0b101:
+          switch (instruction.as.i_type.imm() >> 6) {
+            // 000000 shamt rs1 101 rd 0010011 SRLI
+            case 0b000000:  // SRLI
+              o << "srli\n";
+              break;
+            // 010000 shamt rs1 101 rd 0010011 SRAI
+            case 0b010000:  // SRAI
+              o << "srai\n";
+              break;
+            default:
+              // TODO: raise illegal instruction exception
+              std::stringstream ss;
+              ss << "Error: illegal instruction: ";
+              throw std::runtime_error(ss.str());
+          }
+          break;
+        default:
+          // TODO: raise illegal instruction exception
+          std::stringstream ss;
+          ss << "Error: illegal instruction";
+          throw std::runtime_error(ss.str());
+      }
+      break;
+
+    case 0b0110011:
+      switch (instruction.as.r_type.funct3()) {
+        case 0b000:
+          switch (instruction.as.r_type.funct7()) {
+            // 0000000 rs2 rs1 000 rd 0110011 ADD
+            case 0b0000000:  // ADD
+              o << "add\n";
+              break;
+            // 0100000 rs2 rs1 000 rd 0110011 SUB
+            case 0b0100000:  // SUB
+              o << "sub\n";
+              break;
+            default:
+              // TODO: raise illegal instruction exception
+              std::stringstream ss;
+              ss << "Error: illegal instruction";
+              throw std::runtime_error(ss.str());
+          }
+          break;
+
+        // 0000000 rs2 rs1 001 rd 0110011 SLL
+        case 0b001:  // SLL
+          o << "sll\n";
+          break;
+        // 0000000 rs2 rs1 010 rd 0110011 SLT
+        case 0b010:  // SLT
+          o << "slt\n";
+          break;
+        // 0000000 rs2 rs1 011 rd 0110011 SLTU
+        case 0b011:  // SLTU
+          o << "sltu\n";
+          break;
+        // 0000000 rs2 rs1 100 rd 0110011 XOR
+        case 0b100:  // XOR
+          o << "xor\n";
+          break;
+
+        case 0b101:
+          switch (instruction.as.r_type.funct7()) {
+            // 0000000 rs2 rs1 101 rd 0110011 SRL
+            case 0b0000000:  // SRL
+              o << "srl\n";
+              break;
+            // 0100000 rs2 rs1 101 rd 0110011 SRA
+            case 0b0100000:  // SRA
+              o << "sra\n";
+              break;
+            default:
+              // TODO: raise illegal instruction exception
+              std::stringstream ss;
+              ss << "Error: illegal instruction";
+              throw std::runtime_error(ss.str());
+          }
+          break;
+
+        // 0000000 rs2 rs1 110 rd 0110011 OR
+        case 0b110:  // OR
+          o << "or\n";
+          break;
+        // 0000000 rs2 rs1 111 rd 0110011 AND
+        case 0b111:  // AND
+          o << "and\n";
+          break;
+        default:
+          // TODO: raise illegal instruction exception
+          std::stringstream ss;
+          ss << "Error: illegal instruction";
+          throw std::runtime_error(ss.str());
+      }
+      break;
+
+    // fm pred succ rs1 000 rd 0001111 FENCE
+    case 0b0001111:  // FENCE
+      o << "fence\n";
+      break;
+      // // 1000 0011 0011 00000 000 00000 0001111 FENCE.TSO
+      // case 0b0001111:  // FENCE.TSO
+      //   break;
+      // // 0000 0001 0000 00000 000 00000 0001111 PAUSE
+      // case 0b0001111:  // PAUSE
+      //   break;
+
+    case 0b1110011:
+      switch (instruction.as.i_type.funct3()) {
+        case 0b000:
+          switch (instruction.as.i_type.imm()) {
+            // 000000000000 00000 000 00000 1110011 ECALL
+            case 0b000000000000:  // ECALL
+              o << "ecall\n";
+              break;
+            // 000000000001 00000 000 00000 1110011 EBREAK
+            case 0b000000000001:  // EBREAK
+              o << "ebreak\n";
+              break;
+            // 001100000010 00000 000 00000 1110011 EBREAK
+            case 0b001100000010:  // MRET
+              o << "mret\n";
+              break;
+            default:
+              // TODO: raise illegal instruction exception
+              std::stringstream ss;
+              ss << "Error: illegal instruction";
+              throw std::runtime_error(ss.str());
+          }
+          break;
+          // csr rs1 001 rd 1110011 CSRRW
+        case 0b001:  // CSRRW
+          o << "csrrw\n";
+          break;
+          // csr rs1 010 rd 1110011 CSRRS
+        case 0b010:  // CSRRS
+          o << "csrrs\n";
+          break;
+          // csr rs1 011 rd 1110011 CSRRC
+        case 0b011:  // CSRRC
+          o << "csrrc\n";
+          break;
+          // csr uimm 101 rd 1110011 CSRRWI
+        case 0b101:  // CSRRWI
+          o << "csrrwi\n";
+          break;
+          // csr uimm 110 rd 1110011 CSRRSI
+        case 0b110:  // CSRRSI
+          o << "csrrsi\n";
+          break;
+          // csr uimm 111 rd 1110011 CSRRCI
+        case 0b111:  // CSRRCI
+          o << "csrrci\n";
+          break;
+        default:
+          // TODO: raise illegal instruction exception
+          std::stringstream ss;
+          ss << "Error: illegal instruction";
+          throw std::runtime_error(ss.str());
+      }
+      break;
+
+    case 0b0011011:
+      switch (instruction.as.i_type.funct3()) {
+          // imm[11:0] rs1 000 rd 0011011 ADDIW
+        case 0b000:  // ADDIW
+          o << "addiw\n";
+          break;
+          // 0000000 shamt rs1 001 rd 0011011 SLLIW
+        case 0b001:  // SLLIW
+          o << "slliw\n";
+          break;
+        case 0b101:
+          switch (instruction.as.i_type.imm() >> 5) {
+              // 0000000 shamt rs1 101 rd 0011011 SRLIW
+            case 0b0000000:  // SRLIW
+              o << "srliw\n";
+              break;
+              // 0100000 shamt rs1 101 rd 0011011 SRAIW
+            case 0b0100000:  // SRAIW
+              o << "sraiw\n";
+              break;
+            default:
+              // TODO: raise illegal instruction exception
+              std::stringstream ss;
+              ss << "Error: illegal instruction";
+              throw std::runtime_error(ss.str());
+          }
+          break;
+        default:
+          // TODO: raise illegal instruction exception
+          std::stringstream ss;
+          ss << "Error: illegal instruction";
+          throw std::runtime_error(ss.str());
+      }
+      break;
+
+    case 0b0111011:
+      switch (instruction.as.r_type.funct3()) {
+        case 0b000:
+          switch (instruction.as.r_type.funct7()) {
+              // 0000000 rs2 rs1 000 rd 0111011 ADDW
+            case 0b0000000:  // ADDW
+              o << "addw\n";
+              break;
+              // 0100000 rs2 rs1 000 rd 0111011 SUBW
+            case 0b0100000:  // SUBW
+              o << "subw\n";
+              break;
+            default:
+              // TODO: raise illegal instruction exception
+              std::stringstream ss;
+              ss << "Error: illegal instruction";
+              throw std::runtime_error(ss.str());
+          }
+          break;
+
+          // 0000000 rs2 rs1 001 rd 0111011 SLLW
+        case 0b001:  // SLLW
+          o << "sllw\n";
+          break;
+
+        case 0b101:
+          switch (instruction.as.r_type.funct7()) {
+              // 0000000 rs2 rs1 101 rd 0111011 SRLW
+            case 0b0000000:  // SRLW
+              o << "srlw\n";
+              break;
+              // 0100000 rs2 rs1 101 rd 0111011 SRAW
+            case 0b0100000:  // SRAW
+              o << "sraw\n";
+              break;
+            default:
+              // TODO: raise illegal instruction exception
+              std::stringstream ss;
+              ss << "Error: illegal instruction";
+              throw std::runtime_error(ss.str());
+          }
+          break;
+        default:
+          // TODO: raise illegal instruction exception
+          std::stringstream ss;
+          ss << "Error: illegal instruction";
+          throw std::runtime_error(ss.str());
+      }
+      break;
+
+      // RV32/RV64 Zifencei Standard Extension
+      // imm[11:0] rs1 001 rd 0001111 FENCE.I
+
+      // RV32M Standard Extension
+      // 0000001 rs2 rs1 000 rd 0110011 MUL
+      // 0000001 rs2 rs1 001 rd 0110011 MULH
+      // 0000001 rs2 rs1 010 rd 0110011 MULHSU
+      // 0000001 rs2 rs1 011 rd 0110011 MULHU
+      // 0000001 rs2 rs1 100 rd 0110011 DIV
+      // 0000001 rs2 rs1 101 rd 0110011 DIVU
+      // 0000001 rs2 rs1 110 rd 0110011 REM
+      // 0000001 rs2 rs1 111 rd 0110011 REMU
+
+      // RV64M Standard Extension (in addition to RV32M)
+      // 0000001 rs2 rs1 000 rd 0111011 MULW
+      // 0000001 rs2 rs1 100 rd 0111011 DIVW
+      // 0000001 rs2 rs1 101 rd 0111011 DIVUW
+      // 0000001 rs2 rs1 110 rd 0111011 REMW
+      // 0000001 rs2 rs1 111 rd 0111011 REMUW
+
+      // RV32F Standard Extension
+      // imm[11:0] rs1 010 rd 0000111 FLW
+      // imm[11:5] rs2 rs1 010 imm[4:0] 0100111 FSW
+      // rs3 00 rs2 rs1 rm rd 1000011 FMADD.S
+      // rs3 00 rs2 rs1 rm rd 1000111 FMSUB.S
+      // rs3 00 rs2 rs1 rm rd 1001011 FNMSUB.S
+      // rs3 00 rs2 rs1 rm rd 1001111 FNMADD.S
+      // 0000000 rs2 rs1 rm rd 1010011 FADD.S
+      // 0000100 rs2 rs1 rm rd 1010011 FSUB.S
+      // 0001000 rs2 rs1 rm rd 1010011 FMUL.S
+      // 0001100 rs2 rs1 rm rd 1010011 FDIV.S
+      // 0101100 00000 rs1 rm rd 1010011 FSQRT.S
+      // 0010000 rs2 rs1 000 rd 1010011 FSGNJ.S
+      // 0010000 rs2 rs1 001 rd 1010011 FSGNJN.S
+      // 0010000 rs2 rs1 010 rd 1010011 FSGNJX.S
+      // 0010100 rs2 rs1 000 rd 1010011 FMIN.S
+      // 0010100 rs2 rs1 001 rd 1010011 FMAX.S
+      // 1100000 00000 rs1 rm rd 1010011 FCVT.W.S
+      // 1100000 00001 rs1 rm rd 1010011 FCVT.WU.S
+      // 1110000 00000 rs1 000 rd 1010011 FMV.X.W
+      // 1010000 rs2 rs1 010 rd 1010011 FEQ.S
+      // 1010000 rs2 rs1 001 rd 1010011 FLT.S
+      // 1010000 rs2 rs1 000 rd 1010011 FLE.S
+      // 1110000 00000 rs1 001 rd 1010011 FCLASS.S
+      // 1101000 00000 rs1 rm rd 1010011 FCVT.S.W
+      // 1101000 00001 rs1 rm rd 1010011 FCVT.S.WU
+      // 1111000 00000 rs1 000 rd 1010011 FMV.W.X
+      //
+      // RV64F Standard Extension (in addition to RV32F)
+      // 1100000 00010 rs1 rm rd 1010011 FCVT.L.S
+      // 1100000 00011 rs1 rm rd 1010011 FCVT.LU.S
+      // 1101000 00010 rs1 rm rd 1010011 FCVT.S.L
+      // 1101000 00011 rs1 rm rd 1010011 FCVT.S.LU
+
+      // RV32D Standard Extension
+      // imm[11:0] rs1 011 rd 0000111 FLD
+      // imm[11:5] rs2 rs1 011 imm[4:0] 0100111 FSD
+      // rs3 01 rs2 rs1 rm rd 1000011 FMADD.D
+      // rs3 01 rs2 rs1 rm rd 1000111 FMSUB.D
+      // rs3 01 rs2 rs1 rm rd 1001011 FNMSUB.D
+      // rs3 01 rs2 rs1 rm rd 1001111 FNMADD.D
+      // 0000001 rs2 rs1 rm rd 1010011 FADD.D
+      // 0000101 rs2 rs1 rm rd 1010011 FSUB.D
+      // 0001001 rs2 rs1 rm rd 1010011 FMUL.D
+      // 0001101 rs2 rs1 rm rd 1010011 FDIV.D
+      // 0101101 00000 rs1 rm rd 1010011 FSQRT.D
+      // 0010001 rs2 rs1 000 rd 1010011 FSGNJ.D
+      // 0010001 rs2 rs1 001 rd 1010011 FSGNJN.D
+      // 0010001 rs2 rs1 010 rd 1010011 FSGNJX.D
+      // 0010101 rs2 rs1 000 rd 1010011 FMIN.D
+      // 0010101 rs2 rs1 001 rd 1010011 FMAX.D
+      // 0100000 00001 rs1 rm rd 1010011 FCVT.S.D
+      // 0100001 00000 rs1 rm rd 1010011 FCVT.D.S
+      // 1010001 rs2 rs1 010 rd 1010011 FEQ.D
+      // 1010001 rs2 rs1 001 rd 1010011 FLT.D
+      // 1010001 rs2 rs1 000 rd 1010011 FLE.D
+      // 1110001 00000 rs1 001 rd 1010011 FCLASS.D
+      // 1100001 00000 rs1 rm rd 1010011 FCVT.W.D
+      // 1100001 00001 rs1 rm rd 1010011 FCVT.WU.D
+      // 1101001 00000 rs1 rm rd 1010011 FCVT.D.W
+      // 1101001 00001 rs1 rm rd 1010011 FCVT.D.WU
+
+      // RV64D Standard Extension (in addition to RV32D)
+      // 1100001 00010 rs1 rm rd 1010011 FCVT.L.D
+      // 1100001 00011 rs1 rm rd 1010011 FCVT.LU.D
+      // 1110001 00000 rs1 000 rd 1010011 FMV.X.D
+      // 1101001 00010 rs1 rm rd 1010011 FCVT.D.L
+      // 1101001 00011 rs1 rm rd 1010011 FCVT.D.LU
+      // 1111001 00000 rs1 000 rd 1010011 FMV.D.X
+    default:
+      // TODO: raise illegal instruction exception
+      std::stringstream ss;
+      ss << "Error: illegal instruction";
+      throw std::runtime_error(ss.str());
+  }
+}
+void machine_t::decode_and_execute_instruction(uint32_t _instruction) {
+  instruction_t instruction;
+  reinterpret_cast<uint32_t&>(instruction) = _instruction;
+  _registers[0]                            = 0;
+  switch (instruction.opcode()) {
+    // imm[31:12] rd 0110111 LUI
+    case 0b0110111:  // LUI
+      _registers[instruction.as.u_type.rd()] =
+          ::dawn::sext(instruction.as.u_type.imm() << 12, 32);
+      _program_counter += 4;
+      break;
+    // imm[31:12] rd 0010111 AUIPC
+    case 0b0010111:  // AUIPC
+      _registers[instruction.as.u_type.rd()] =
+          _program_counter +
+          ::dawn::sext(instruction.as.u_type.imm() << 12, 32);
+      _program_counter += 4;
+      break;
+    // imm[20|10:1|11|19:12] rd 1101111 JAL
+    case 0b1101111: {  // JAL
+      uint64_t address = _program_counter + instruction.as.j_type.imm_sext();
+      // TODO: raise misaligned jump exception
+      _registers[instruction.as.j_type.rd()] = _program_counter + 4;
+      _program_counter                       = address;
+    } break;
+    // imm[11:0] rs1 000 rd 1100111 JALR
+    case 0b1100111: {  // JALR
+      uint64_t address = _program_counter + 4;
+      // TODO: raise misaligned jump exception
+      _program_counter = (_registers[instruction.as.i_type.rs1()] +
+                          instruction.as.i_type.imm_sext()) &
+                         (~1u);
+      _registers[instruction.as.i_type.rd()] = address;
+    } break;
+
+    case 0b1100011:
+      switch (instruction.as.b_type.funct3()) {
+        // imm[12|10:5] rs2 rs1 000 imm[4:1|11] 1100011 BEQ
+        case 0b000:  // BEQ
+          if (_registers[instruction.as.b_type.rs1()] ==
+              _registers[instruction.as.b_type.rs2()])
+            // TODO: raise misaligned branch exception
+            _program_counter =
+                _program_counter + instruction.as.b_type.imm_sext();
+          else
+            _program_counter += 4;
+          break;
+        // imm[12|10:5] rs2 rs1 001 imm[4:1|11] 1100011 BNE
+        case 0b001:  // BNE
+          if (_registers[instruction.as.b_type.rs1()] !=
+              _registers[instruction.as.b_type.rs2()])
+            // TODO: raise misaligned branch exception
+            _program_counter =
+                _program_counter + instruction.as.b_type.imm_sext();
+          else
+            _program_counter += 4;
+          break;
+        // imm[12|10:5] rs2 rs1 100 imm[4:1|11] 1100011 BLT
+        case 0b100:  // BLT
+          if (static_cast<int64_t>(_registers[instruction.as.b_type.rs1()]) <
+              static_cast<int64_t>(_registers[instruction.as.b_type.rs2()]))
+            // TODO: raise misaligned branch exception
+            _program_counter =
+                _program_counter + instruction.as.b_type.imm_sext();
+          else
+            _program_counter += 4;
+          break;
+        // imm[12|10:5] rs2 rs1 101 imm[4:1|11] 1100011 BGE
+        case 0b101:  // BGE
+          if (static_cast<int64_t>(_registers[instruction.as.b_type.rs1()]) >=
+              static_cast<int64_t>(_registers[instruction.as.b_type.rs2()]))
+            // TODO: raise misaligned branch exception
+            _program_counter =
+                _program_counter + instruction.as.b_type.imm_sext();
+          else
+            _program_counter += 4;
+          break;
+        // imm[12|10:5] rs2 rs1 110 imm[4:1|11] 1100011 BLTU
+        case 0b110:  // BLTU
+          if (_registers[instruction.as.b_type.rs1()] <
+              _registers[instruction.as.b_type.rs2()])
+            // TODO: raise misaligned branch exception
+            _program_counter =
+                _program_counter + instruction.as.b_type.imm_sext();
+          else
+            _program_counter += 4;
+          break;
+        // imm[12|10:5] rs2 rs1 111 imm[4:1|11] 1100011 BGEU
+        case 0b111:  // BGEU
+          if (_registers[instruction.as.b_type.rs1()] >=
+              _registers[instruction.as.b_type.rs2()])
+            // TODO: raise misaligned branch exception
+            _program_counter =
+                _program_counter + instruction.as.b_type.imm_sext();
+          else
+            _program_counter += 4;
+          break;
+        default:
+          // TODO: raise illegal instruction exception
+          std::stringstream ss;
+          ss << "Error: illegal instruction";
+          throw std::runtime_error(ss.str());
+      }
+      break;
+
+    case 0b0000011:
+      // TODO: handle invalid address
+      switch (instruction.as.i_type.funct3()) {
+        // imm[11:0] rs1 000 rd 0000011 LB
+        case 0b000:  // LB
+          _registers[instruction.as.i_type.rd()] = static_cast<int8_t>(
+              _memory.load<8>(_registers[instruction.as.i_type.rs1()] +
+                              instruction.as.i_type.imm_sext()));
+          _program_counter += 4;
+          break;
+        // imm[11:0] rs1 001 rd 0000011 LH
+        case 0b001:  // LH
+          _registers[instruction.as.i_type.rd()] = static_cast<int16_t>(
+              _memory.load<16>(_registers[instruction.as.i_type.rs1()] +
+                               instruction.as.i_type.imm_sext()));
+          _program_counter += 4;
+          break;
+        // imm[11:0] rs1 010 rd 0000011 LW
+        case 0b010:  // LW
+          _registers[instruction.as.i_type.rd()] = static_cast<int32_t>(
+              _memory.load<32>(_registers[instruction.as.i_type.rs1()] +
+                               instruction.as.i_type.imm_sext()));
+          _program_counter += 4;
+          break;
+        // imm[11:0] rs1 100 rd 0000011 LBU
+        case 0b100:  // LBU
+          _registers[instruction.as.i_type.rd()] =
+              _memory.load<8>(_registers[instruction.as.i_type.rs1()] +
+                              instruction.as.i_type.imm_sext());
+          _program_counter += 4;
+          break;
+        // imm[11:0] rs1 101 rd 0000011 LHU
+        case 0b101:  // LHU
+          _registers[instruction.as.i_type.rd()] =
+              _memory.load<16>(_registers[instruction.as.i_type.rs1()] +
+                               instruction.as.i_type.imm_sext());
+          _program_counter += 4;
+          break;
+          // imm[11:0] rs1 110 rd 0000011 LWU
+        case 0b110:  // LWU
+          _registers[instruction.as.i_type.rd()] =
+              _memory.load<32>(_registers[instruction.as.i_type.rs1()] +
+                               instruction.as.i_type.imm_sext());
+          _program_counter += 4;
+          break;
+          // imm[11:0] rs1 011 rd 0000011 LD
+        case 0b011:  // LD
+          _registers[instruction.as.i_type.rd()] =
+              _memory.load<64>(_registers[instruction.as.i_type.rs1()] +
+                               instruction.as.i_type.imm_sext());
+          _program_counter += 4;
+          break;
+        default:
+          // TODO: raise illegal instruction exception
+          std::stringstream ss;
+          ss << "Error: illegal instruction";
+          throw std::runtime_error(ss.str());
+      }
+      break;
+
+    case 0b0100011:
+      // TODO: handle invalid address
+      switch (instruction.as.s_type.funct3()) {
+        // imm[11:5] rs2 rs1 000 imm[4:0] 0100011 SB
+        case 0b000:  // SB
+          _memory.store<8>(_registers[instruction.as.s_type.rs1()] +
+                               instruction.as.s_type.imm_sext(),
+                           _registers[instruction.as.s_type.rs2()]);
+          _program_counter += 4;
+          break;
+        // imm[11:5] rs2 rs1 001 imm[4:0] 0100011 SH
+        case 0b001:  // SH
+          _memory.store<16>(_registers[instruction.as.s_type.rs1()] +
+                                instruction.as.s_type.imm_sext(),
+                            _registers[instruction.as.s_type.rs2()]);
+          _program_counter += 4;
+          break;
+        // imm[11:5] rs2 rs1 010 imm[4:0] 0100011 SW
+        case 0b010:  // SW
+          _memory.store<32>(_registers[instruction.as.s_type.rs1()] +
+                                instruction.as.s_type.imm_sext(),
+                            _registers[instruction.as.s_type.rs2()]);
+          _program_counter += 4;
+          break;
+        // imm[11:5] rs2 rs1 011 imm[4:0] 0100011 SD
+        case 0b011:  // SD
+          _memory.store<64>(_registers[instruction.as.s_type.rs1()] +
+                                instruction.as.s_type.imm_sext(),
+                            _registers[instruction.as.s_type.rs2()]);
+          _program_counter += 4;
+          break;
+        default:
+          // TODO: raise illegal instruction exception
+          std::stringstream ss;
+          ss << "Error: illegal instruction";
+          throw std::runtime_error(ss.str());
+      }
+      break;
+
+    case 0b0010011:
+      switch (instruction.as.i_type.funct3()) {
+        // imm[11:0] rs1 000 rd 0010011 ADDI
+        case 0b000:  // ADDI
+          _registers[instruction.as.i_type.rd()] =
+              _registers[instruction.as.i_type.rs1()] +
+              instruction.as.i_type.imm_sext();
+          _program_counter += 4;
+          break;
+        // imm[11:0] rs1 010 rd 0010011 SLTI
+        case 0b010:  // SLTI
+          _registers[instruction.as.i_type.rd()] =
+              static_cast<int64_t>(_registers[instruction.as.i_type.rs1()]) <
+              instruction.as.i_type.imm_sext();
+          _program_counter += 4;
+          break;
+        // imm[11:0] rs1 011 rd 0010011 SLTIU
+        case 0b011:  // SLTIU
+          _registers[instruction.as.i_type.rd()] =
+              _registers[instruction.as.i_type.rs1()] <
+              instruction.as.i_type.imm_sext();
+          _program_counter += 4;
+          break;
+        // imm[11:0] rs1 100 rd 0010011 XORI
+        case 0b100:  // XORI
+          _registers[instruction.as.i_type.rd()] =
+              _registers[instruction.as.i_type.rs1()] ^
+              instruction.as.i_type.imm_sext();
+          _program_counter += 4;
+          break;
+        // imm[11:0] rs1 110 rd 0010011 ORI
+        case 0b110:  // ORI
+          _registers[instruction.as.i_type.rd()] =
+              _registers[instruction.as.i_type.rs1()] |
+              instruction.as.i_type.imm_sext();
+          _program_counter += 4;
+          break;
+        // imm[11:0] rs1 111 rd 0010011 ANDI
+        case 0b111:  // ANDI
+          _registers[instruction.as.i_type.rd()] =
+              _registers[instruction.as.i_type.rs1()] &
+              instruction.as.i_type.imm_sext();
+          _program_counter += 4;
+          break;
+        // 0000000 shamt rs1 001 rd 0010011 SLLI
+        case 0b001:  // SLLI
+          _registers[instruction.as.i_type.rd()] =
+              _registers[instruction.as.i_type.rs1()]
+              << instruction.as.i_type.shamt();
+          _program_counter += 4;
+          break;
+
+        case 0b101:
+          switch (instruction.as.i_type.imm() >> 6) {
+            // 000000 shamt rs1 101 rd 0010011 SRLI
+            case 0b000000:  // SRLI
+              _registers[instruction.as.i_type.rd()] =
+                  _registers[instruction.as.i_type.rs1()] >>
+                  instruction.as.i_type.shamt();
+              _program_counter += 4;
+              break;
+            // 010000 shamt rs1 101 rd 0010011 SRAI
+            case 0b010000:  // SRAI
+              _registers[instruction.as.i_type.rd()] =
+                  static_cast<int64_t>(
+                      _registers[instruction.as.i_type.rs1()]) >>
+                  instruction.as.i_type.shamt();
+              _program_counter += 4;
+              break;
+            default:
+              // TODO: raise illegal instruction exception
+              std::stringstream ss;
+              ss << "Error: illegal instruction";
+              throw std::runtime_error(ss.str());
+          }
+          break;
+        default:
+          // TODO: raise illegal instruction exception
+          std::stringstream ss;
+          ss << "Error: illegal instruction";
+          throw std::runtime_error(ss.str());
+      }
+      break;
+
+    case 0b0110011:
+      switch (instruction.as.r_type.funct3()) {
+        case 0b000:
+          switch (instruction.as.r_type.funct7()) {
+            // 0000000 rs2 rs1 000 rd 0110011 ADD
+            case 0b0000000:  // ADD
+              _registers[instruction.as.r_type.rd()] =
+                  _registers[instruction.as.r_type.rs1()] +
+                  _registers[instruction.as.r_type.rs2()];
+              _program_counter += 4;
+              break;
+            // 0100000 rs2 rs1 000 rd 0110011 SUB
+            case 0b0100000:  // SUB
+              _registers[instruction.as.r_type.rd()] =
+                  _registers[instruction.as.r_type.rs1()] -
+                  _registers[instruction.as.r_type.rs2()];
+              _program_counter += 4;
+              break;
+            default:
+              // TODO: raise illegal instruction exception
+              std::stringstream ss;
+              ss << "Error: illegal instruction";
+              throw std::runtime_error(ss.str());
+          }
+          break;
+
+        // 0000000 rs2 rs1 001 rd 0110011 SLL
+        case 0b001:  // SLL
+          _registers[instruction.as.r_type.rd()] =
+              _registers[instruction.as.r_type.rs1()]
+              << (_registers[instruction.as.r_type.rs2()] & 0b111111);
+          _program_counter += 4;
+          break;
+        // 0000000 rs2 rs1 010 rd 0110011 SLT
+        case 0b010:  // SLT
+          _registers[instruction.as.r_type.rd()] =
+              static_cast<int64_t>(_registers[instruction.as.r_type.rs1()]) <
+              static_cast<int64_t>(_registers[instruction.as.r_type.rs2()]);
+          _program_counter += 4;
+          break;
+        // 0000000 rs2 rs1 011 rd 0110011 SLTU
+        case 0b011:  // SLTU
+          _registers[instruction.as.r_type.rd()] =
+              _registers[instruction.as.r_type.rs1()] <
+              _registers[instruction.as.r_type.rs2()];
+          _program_counter += 4;
+          break;
+        // 0000000 rs2 rs1 100 rd 0110011 XOR
+        case 0b100:  // XOR
+          _registers[instruction.as.r_type.rd()] =
+              _registers[instruction.as.r_type.rs1()] ^
+              _registers[instruction.as.r_type.rs2()];
+          _program_counter += 4;
+          break;
+
+        case 0b101:
+          switch (instruction.as.r_type.funct7()) {
+            // 0000000 rs2 rs1 101 rd 0110011 SRL
+            case 0b0000000:  // SRL
+              _registers[instruction.as.r_type.rd()] =
+                  _registers[instruction.as.r_type.rs1()] >>
+                  (_registers[instruction.as.r_type.rs2()] & 0b111111);
+              _program_counter += 4;
+              break;
+            // 0100000 rs2 rs1 101 rd 0110011 SRA
+            case 0b0100000:  // SRA
+              _registers[instruction.as.r_type.rd()] =
+                  static_cast<int64_t>(
+                      _registers[instruction.as.r_type.rs1()]) >>
+                  (_registers[instruction.as.r_type.rs2()] & 0b111111);
+              _program_counter += 4;
+              break;
+            default:
+              // TODO: raise illegal instruction exception
+              std::stringstream ss;
+              ss << "Error: illegal instruction";
+              throw std::runtime_error(ss.str());
+          }
+          break;
+
+        // 0000000 rs2 rs1 110 rd 0110011 OR
+        case 0b110:  // OR
+          _registers[instruction.as.r_type.rd()] =
+              _registers[instruction.as.r_type.rs1()] |
+              _registers[instruction.as.r_type.rs2()];
+          _program_counter += 4;
+          break;
+        // 0000000 rs2 rs1 111 rd 0110011 AND
+        case 0b111:  // AND
+          _registers[instruction.as.r_type.rd()] =
+              _registers[instruction.as.r_type.rs1()] &
+              _registers[instruction.as.r_type.rs2()];
+          _program_counter += 4;
+          break;
+        default:
+          // TODO: raise illegal instruction exception
+          std::stringstream ss;
+          ss << "Error: illegal instruction";
+          throw std::runtime_error(ss.str());
+      }
+      break;
+
+    // fm pred succ rs1 000 rd 0001111 FENCE
+    case 0b0001111:  // FENCE
+      std::cout << "Note: Fence encountered, fence is not implemented!\n";
+      _program_counter += 4;
+      break;
+      // // 1000 0011 0011 00000 000 00000 0001111 FENCE.TSO
+      // case 0b0001111:  // FENCE.TSO
+      //   break;
+      // // 0000 0001 0000 00000 000 00000 0001111 PAUSE
+      // case 0b0001111:  // PAUSE
+      //   break;
+
+    case 0b1110011:
+      switch (instruction.as.i_type.funct3()) {
+        case 0b000:
+          switch (instruction.as.i_type.imm()) {
+            // 000000000000 00000 000 00000 1110011 ECALL
+            case 0b000000000000:  // ECALL
+              switch (_registers[17]) {
+                case 93:
+                  std::cout << "Exit called with status: " << _registers[10]
+                            << '\n';
+                  exit(_registers[10]);
+                  break;
+                default:
+                  switch (_privilege_mode) {
+                    case privilege_mode_t::e_machine:
+                      handle_trap(exception_code_t::e_ecall_m_mode,
+                                  _program_counter);
+                      break;
+                    case privilege_mode_t::e_supervisor:
+                      handle_trap(exception_code_t::e_ecall_s_mode,
+                                  _program_counter);
+                      break;
+                    case privilege_mode_t::e_user:
+                      handle_trap(exception_code_t::e_ecall_u_mode,
+                                  _program_counter);
+                      break;
+                    default:
+                      // TODO: raise illegal instruction exception
+                      std::stringstream ss;
+                      ss << "Error: privilege mode not implemented, cannot "
+                            "handle "
+                            "ecall";
+                      throw std::runtime_error(ss.str());
+                  }
+              }
+              break;
+            // 000000000001 00000 000 00000 1110011 EBREAK
+            case 0b000000000001:  // EBREAK
+              break;
+            // 001100000010 00000 000 00000 1110011 EBREAK
+            case 0b001100000010: {  // MRET
+              uint64_t mstatus = _read_csr(MSTATUS);
+              uint64_t mpp = (mstatus & MSTATUS_MPP_MASK) >> MSTATUS_MPP_SHIFT;
+              uint64_t mpie =
+                  (mstatus & MSTATUS_MPIE_MASK) >> MSTATUS_MPIE_SHIFT;
+              _program_counter = _read_csr(MEPC);
+              _privilege_mode  = static_cast<privilege_mode_t>(mpp);
+              mstatus =
+                  (mstatus & ~MSTATUS_MIE_MASK) | (mpie << MSTATUS_MIE_SHIFT);
+              mstatus =
+                  (mstatus & ~MSTATUS_MPIE_MASK) | (1U << MSTATUS_MPIE_SHIFT);
+              mstatus =
+                  (mstatus & ~MSTATUS_MPP_MASK) | (0b11U << MSTATUS_MPP_SHIFT);
+              _write_csr(MSTATUS, mstatus);
+            } break;
+            default:
+              // TODO: raise illegal instruction exception
+              std::stringstream ss;
+              ss << "Error: illegal instruction";
+              throw std::runtime_error(ss.str());
+          }
+          break;
+          // csr rs1 001 rd 1110011 CSRRW
+        case 0b001: {  // CSRRW
+          uint64_t t = _csr[instruction.as.i_type.imm()];
+          _csr[instruction.as.i_type.imm()] =
+              _registers[instruction.as.i_type.rs1()];
+          _registers[instruction.as.i_type.rd()] = t;
+          _program_counter += 4;
+        } break;
+          // csr rs1 010 rd 1110011 CSRRS
+        case 0b010: {  // CSRRS
+          uint64_t t = _csr[instruction.as.i_type.imm()];
+          _csr[instruction.as.i_type.imm()] =
+              t | _registers[instruction.as.i_type.rs1()];
+          _registers[instruction.as.i_type.rd()] = t;
+          _program_counter += 4;
+        } break;
+          // csr rs1 011 rd 1110011 CSRRC
+        case 0b011:  // CSRRC
+          break;
+          // csr uimm 101 rd 1110011 CSRRWI
+        case 0b101: {  // CSRRWI
+          uint64_t t                        = _csr[instruction.as.i_type.imm()];
+          _csr[instruction.as.i_type.imm()] = instruction.as.i_type.rs1();
+          _registers[instruction.as.i_type.rd()] = t;
+          _program_counter += 4;
+        } break;
+          // csr uimm 110 rd 1110011 CSRRSI
+        case 0b110:  // CSRRSI
+          break;
+          // csr uimm 111 rd 1110011 CSRRCI
+        case 0b111:  // CSRRCI
+          break;
+        default:
+          // TODO: raise illegal instruction exception
+          std::stringstream ss;
+          ss << "Error: illegal instruction";
+          throw std::runtime_error(ss.str());
+      }
+      break;
+
+    case 0b0011011:
+      switch (instruction.as.i_type.funct3()) {
+          // imm[11:0] rs1 000 rd 0011011 ADDIW
+        case 0b000:  // ADDIW
+          _registers[instruction.as.i_type.rd()] = ::dawn::sext(
+              static_cast<uint32_t>(_registers[instruction.as.i_type.rs1()]) +
+                  static_cast<int32_t>(instruction.as.i_type.imm_sext()),
+              32);
+          _program_counter += 4;
+          break;
+          // 0000000 shamt rs1 001 rd 0011011 SLLIW
+        case 0b001:  // SLLIW
+          _registers[instruction.as.i_type.rd()] = ::dawn::sext(
+              static_cast<uint32_t>(_registers[instruction.as.i_type.rs1()])
+                  << static_cast<uint32_t>(instruction.as.i_type.shamt_w()),
+              32);
+          _program_counter += 4;
+          break;
+        case 0b101:
+          switch (instruction.as.i_type.imm() >> 5) {
+              // 0000000 shamt rs1 101 rd 0011011 SRLIW
+            case 0b0000000:  // SRLIW
+              _registers[instruction.as.i_type.rd()] =
+                  ::dawn::sext(static_cast<uint32_t>(
+                                   _registers[instruction.as.i_type.rs1()]) >>
+                                   instruction.as.i_type.shamt_w(),
+                               32);
+              _program_counter += 4;
+              break;
+              // 0100000 shamt rs1 101 rd 0011011 SRAIW
+            case 0b0100000:  // SRAIW
+              _registers[instruction.as.i_type.rd()] =
+                  ::dawn::sext(static_cast<int32_t>(
+                                   _registers[instruction.as.i_type.rs1()]) >>
+                                   instruction.as.i_type.shamt_w(),
+                               32);
+              _program_counter += 4;
+              break;
+            default:
+              // TODO: raise illegal instruction exception
+              std::stringstream ss;
+              ss << "Error: illegal instruction";
+              throw std::runtime_error(ss.str());
+          }
+          break;
+        default:
+          // TODO: raise illegal instruction exception
+          std::stringstream ss;
+          ss << "Error: illegal instruction";
+          throw std::runtime_error(ss.str());
+      }
+      break;
+
+    case 0b0111011:
+      switch (instruction.as.r_type.funct3()) {
+        case 0b000:
+          switch (instruction.as.r_type.funct7()) {
+              // 0000000 rs2 rs1 000 rd 0111011 ADDW
+            case 0b0000000:  // ADDW
+              _registers[instruction.as.r_type.rd()] =
+                  ::dawn::sext(static_cast<uint32_t>(
+                                   _registers[instruction.as.r_type.rs1()]) +
+                                   static_cast<uint32_t>(
+                                       _registers[instruction.as.r_type.rs2()]),
+                               32);
+              _program_counter += 4;
+              break;
+              // 0100000 rs2 rs1 000 rd 0111011 SUBW
+            case 0b0100000:  // SUBW
+              _registers[instruction.as.r_type.rd()] =
+                  ::dawn::sext(static_cast<uint32_t>(
+                                   _registers[instruction.as.r_type.rs1()]) -
+                                   static_cast<uint32_t>(
+                                       _registers[instruction.as.r_type.rs2()]),
+                               32);
+              _program_counter += 4;
+              break;
+            default:
+              // TODO: raise illegal instruction exception
+              std::stringstream ss;
+              ss << "Error: illegal instruction";
+              throw std::runtime_error(ss.str());
+          }
+          break;
+
+          // 0000000 rs2 rs1 001 rd 0111011 SLLW
+        case 0b001:  // SLLW
+          _registers[instruction.as.r_type.rd()] =
+              static_cast<int32_t>(_registers[instruction.as.r_type.rs1()])
+              << (_registers[instruction.as.r_type.rs2()] & 0b11111);
+          _program_counter += 4;
+          break;
+
+        case 0b101:
+          switch (instruction.as.r_type.funct7()) {
+              // 0000000 rs2 rs1 101 rd 0111011 SRLW
+            case 0b0000000:  // SRLW
+              _registers[instruction.as.r_type.rd()] = ::dawn::sext(
+                  static_cast<uint32_t>(
+                      _registers[instruction.as.r_type.rs1()]) >>
+                      (_registers[instruction.as.r_type.rs2()] & 0b11111),
+                  32);
+              _program_counter += 4;
+              break;
+              // 0100000 rs2 rs1 101 rd 0111011 SRAW
+            case 0b0100000:  // SRAW
+              _registers[instruction.as.r_type.rd()] =
+                  static_cast<int64_t>(static_cast<int32_t>(
+                      _registers[instruction.as.r_type.rs1()])) >>
+                  (_registers[instruction.as.r_type.rs2()] & 0b11111);
+              _program_counter += 4;
+              break;
+            default:
+              // TODO: raise illegal instruction exception
+              std::stringstream ss;
+              ss << "Error: illegal instruction";
+              throw std::runtime_error(ss.str());
+          }
+          break;
+        default:
+          // TODO: raise illegal instruction exception
+          std::stringstream ss;
+          ss << "Error: illegal instruction";
+          throw std::runtime_error(ss.str());
+      }
+      break;
+
+      // RV32/RV64 Zifencei Standard Extension
+      // imm[11:0] rs1 001 rd 0001111 FENCE.I
+
+      // RV32M Standard Extension
+      // 0000001 rs2 rs1 000 rd 0110011 MUL
+      // 0000001 rs2 rs1 001 rd 0110011 MULH
+      // 0000001 rs2 rs1 010 rd 0110011 MULHSU
+      // 0000001 rs2 rs1 011 rd 0110011 MULHU
+      // 0000001 rs2 rs1 100 rd 0110011 DIV
+      // 0000001 rs2 rs1 101 rd 0110011 DIVU
+      // 0000001 rs2 rs1 110 rd 0110011 REM
+      // 0000001 rs2 rs1 111 rd 0110011 REMU
+
+      // RV64M Standard Extension (in addition to RV32M)
+      // 0000001 rs2 rs1 000 rd 0111011 MULW
+      // 0000001 rs2 rs1 100 rd 0111011 DIVW
+      // 0000001 rs2 rs1 101 rd 0111011 DIVUW
+      // 0000001 rs2 rs1 110 rd 0111011 REMW
+      // 0000001 rs2 rs1 111 rd 0111011 REMUW
+
+      // RV32F Standard Extension
+      // imm[11:0] rs1 010 rd 0000111 FLW
+      // imm[11:5] rs2 rs1 010 imm[4:0] 0100111 FSW
+      // rs3 00 rs2 rs1 rm rd 1000011 FMADD.S
+      // rs3 00 rs2 rs1 rm rd 1000111 FMSUB.S
+      // rs3 00 rs2 rs1 rm rd 1001011 FNMSUB.S
+      // rs3 00 rs2 rs1 rm rd 1001111 FNMADD.S
+      // 0000000 rs2 rs1 rm rd 1010011 FADD.S
+      // 0000100 rs2 rs1 rm rd 1010011 FSUB.S
+      // 0001000 rs2 rs1 rm rd 1010011 FMUL.S
+      // 0001100 rs2 rs1 rm rd 1010011 FDIV.S
+      // 0101100 00000 rs1 rm rd 1010011 FSQRT.S
+      // 0010000 rs2 rs1 000 rd 1010011 FSGNJ.S
+      // 0010000 rs2 rs1 001 rd 1010011 FSGNJN.S
+      // 0010000 rs2 rs1 010 rd 1010011 FSGNJX.S
+      // 0010100 rs2 rs1 000 rd 1010011 FMIN.S
+      // 0010100 rs2 rs1 001 rd 1010011 FMAX.S
+      // 1100000 00000 rs1 rm rd 1010011 FCVT.W.S
+      // 1100000 00001 rs1 rm rd 1010011 FCVT.WU.S
+      // 1110000 00000 rs1 000 rd 1010011 FMV.X.W
+      // 1010000 rs2 rs1 010 rd 1010011 FEQ.S
+      // 1010000 rs2 rs1 001 rd 1010011 FLT.S
+      // 1010000 rs2 rs1 000 rd 1010011 FLE.S
+      // 1110000 00000 rs1 001 rd 1010011 FCLASS.S
+      // 1101000 00000 rs1 rm rd 1010011 FCVT.S.W
+      // 1101000 00001 rs1 rm rd 1010011 FCVT.S.WU
+      // 1111000 00000 rs1 000 rd 1010011 FMV.W.X
+      //
+      // RV64F Standard Extension (in addition to RV32F)
+      // 1100000 00010 rs1 rm rd 1010011 FCVT.L.S
+      // 1100000 00011 rs1 rm rd 1010011 FCVT.LU.S
+      // 1101000 00010 rs1 rm rd 1010011 FCVT.S.L
+      // 1101000 00011 rs1 rm rd 1010011 FCVT.S.LU
+
+      // RV32D Standard Extension
+      // imm[11:0] rs1 011 rd 0000111 FLD
+      // imm[11:5] rs2 rs1 011 imm[4:0] 0100111 FSD
+      // rs3 01 rs2 rs1 rm rd 1000011 FMADD.D
+      // rs3 01 rs2 rs1 rm rd 1000111 FMSUB.D
+      // rs3 01 rs2 rs1 rm rd 1001011 FNMSUB.D
+      // rs3 01 rs2 rs1 rm rd 1001111 FNMADD.D
+      // 0000001 rs2 rs1 rm rd 1010011 FADD.D
+      // 0000101 rs2 rs1 rm rd 1010011 FSUB.D
+      // 0001001 rs2 rs1 rm rd 1010011 FMUL.D
+      // 0001101 rs2 rs1 rm rd 1010011 FDIV.D
+      // 0101101 00000 rs1 rm rd 1010011 FSQRT.D
+      // 0010001 rs2 rs1 000 rd 1010011 FSGNJ.D
+      // 0010001 rs2 rs1 001 rd 1010011 FSGNJN.D
+      // 0010001 rs2 rs1 010 rd 1010011 FSGNJX.D
+      // 0010101 rs2 rs1 000 rd 1010011 FMIN.D
+      // 0010101 rs2 rs1 001 rd 1010011 FMAX.D
+      // 0100000 00001 rs1 rm rd 1010011 FCVT.S.D
+      // 0100001 00000 rs1 rm rd 1010011 FCVT.D.S
+      // 1010001 rs2 rs1 010 rd 1010011 FEQ.D
+      // 1010001 rs2 rs1 001 rd 1010011 FLT.D
+      // 1010001 rs2 rs1 000 rd 1010011 FLE.D
+      // 1110001 00000 rs1 001 rd 1010011 FCLASS.D
+      // 1100001 00000 rs1 rm rd 1010011 FCVT.W.D
+      // 1100001 00001 rs1 rm rd 1010011 FCVT.WU.D
+      // 1101001 00000 rs1 rm rd 1010011 FCVT.D.W
+      // 1101001 00001 rs1 rm rd 1010011 FCVT.D.WU
+
+      // RV64D Standard Extension (in addition to RV32D)
+      // 1100001 00010 rs1 rm rd 1010011 FCVT.L.D
+      // 1100001 00011 rs1 rm rd 1010011 FCVT.LU.D
+      // 1110001 00000 rs1 000 rd 1010011 FMV.X.D
+      // 1101001 00010 rs1 rm rd 1010011 FCVT.D.L
+      // 1101001 00011 rs1 rm rd 1010011 FCVT.D.LU
+      // 1111001 00000 rs1 000 rd 1010011 FMV.D.X
+    default:
+      // TODO: raise illegal instruction exception
+      std::stringstream ss;
+      ss << "Error: illegal instruction";
+      throw std::runtime_error(ss.str());
+  }
+}
+
+}  // namespace dawn

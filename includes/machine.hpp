@@ -1,13 +1,41 @@
-#ifndef MACHINE_HPP
-#define MACHINE_HPP
+#ifndef DAWN_MACHINE_HPP
+#define DAWN_MACHINE_HPP
+
+#include <cstdint>
+#include <filesystem>
+#include <unordered_map>
+
+#include "memory.hpp"
+#include "types.hpp"
 
 namespace dawn {
 
 struct machine_t {
-  machine_t();
+  machine_t(uint64_t memory_size, uint64_t memory_page_size);
   ~machine_t();
+
+  bool load_elf_and_set_program_counter(const std::filesystem::path& path);
+
+  void handle_trap(exception_code_t cause_code, uint64_t value);
+
+  std::pair<uint32_t, uint64_t> fetch_instruction_at_program_counter();
+  void debug_disassemble_instruction(uint32_t instruction, std::ostream& o);
+  void decode_and_execute_instruction(uint32_t instruction);
+
+  uint64_t _read_csr(uint16_t address);
+  void     _write_csr(uint16_t address, uint64_t value);
+  uint64_t read_csr(uint32_t instruction);
+  void     write_csr(uint32_t instruction, uint64_t value);
+
+  memory_t _memory;
+
+  uint64_t _registers[32];
+  uint64_t _program_counter;
+  // TODO: a better and faster unordered_map
+  std::unordered_map<uint64_t, uint64_t> _csr;
+  privilege_mode_t                       _privilege_mode;
 };
 
-} // namespace dawn
+}  // namespace dawn
 
-#endif // !MACHINE_HPP
+#endif  // !DAWN_MACHINE_HPP
