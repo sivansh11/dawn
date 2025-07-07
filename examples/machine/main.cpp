@@ -28,9 +28,9 @@ int main(int argc, char **argv) {
   while (running) {
     auto [instruction, program_counter] =
         machine.fetch_instruction_at_program_counter();
-    log << std::hex << "0x" << program_counter << ' ' << std::dec << std::hex
+    log << std::hex << program_counter << ' ' << std::dec << std::hex
         << std::setfill('0') << std::setw(8) << instruction << std::dec << " ";
-    log2 << std::hex << "0x" << program_counter << '\n';
+    log2 << std::hex << program_counter << '\n';
     machine.debug_disassemble_instruction(instruction, log);
     log << "Program Counter: " << std::hex << machine._program_counter << '\n';
     log << "Registers: \n";

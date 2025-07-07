@@ -76,23 +76,37 @@ void machine_t::handle_trap(exception_code_t cause_code, uint64_t value) {
 }
 
 uint64_t machine_t::_read_csr(uint16_t address) {
+  address = address & 0b111111111111;
   switch (address) {
-    case MSTATUS:
-      return _csr[MSTATUS];
-    case MTVEC:
-      return _csr[MTVEC];
-    case MEPC:
-      return _csr[MEPC];
-    case MCAUSE:
-      return _csr[MCAUSE];
-    case MTVAL:
-      return _csr[MTVAL];
-    default:
+    case MNSTATUS:  // not implemented returning 0
+    case SATP:      // not implemented returning 0
+    case PMPADDR0:  // not implemented returning 0
+    case PMPCFG0:   // not implemented returning 0
+    case MHARDID:
       return 0;
+    case MSTATUS:
+    case MIE:
+    case MEDELEG:
+    case MIDELEG:
+    case MTVEC:
+    case MEPC:
+    case MCAUSE:
+    case MTVAL:
+      return _csr[address];
+    default:
+      std::stringstream ss;
+      ss << "Error: csr read not implemented. " << std::hex << address;
+      throw std::runtime_error(ss.str());
   }
 }
 void machine_t::_write_csr(uint16_t address, uint64_t value) {
+  address = address & 0b111111111111;
   switch (address) {
+    case MNSTATUS:  // not implemented, ignoring writes
+    case SATP:      // not implemented, ignoring writes
+    case PMPADDR0:  // not implemented, ignoring writes
+    case PMPCFG0:   // not implemented, ignoring writes
+      break;
     case MSTATUS: {
       uint64_t writeable_mask = 0;
       writeable_mask |= MSTATUS_MIE_MASK;
@@ -108,16 +122,17 @@ void machine_t::_write_csr(uint16_t address, uint64_t value) {
       _csr[MTVEC] = base_addr | mode_bits;
     } break;
     case MEPC:
-      _csr[MEPC] = value;
-      break;
+    case MEDELEG:
+    case MIDELEG:
     case MCAUSE:
-      _csr[MCAUSE] = value;
-      break;
+    case MIE:
     case MTVAL:
-      _csr[MTVAL] = value;
+      _csr[address] = value;
       break;
     default:
-      return;
+      std::stringstream ss;
+      ss << "Error: csr write not implemented. " << std::hex << address;
+      throw std::runtime_error(ss.str());
   }
 }
 // TODO: proper privilege checks
@@ -136,14 +151,17 @@ void machine_t::write_csr(uint32_t _instruction, uint64_t value) {
   reinterpret_cast<uint32_t&>(instruction) = _instruction;
   privilege_mode_t min_privilege_mode =
       static_cast<privilege_mode_t>((instruction.as.i_type.imm() >> 8) & 0b11);
-  if (_privilege_mode < min_privilege_mode) {
+  if (_privilege_mode < min_privilege_mode &&
+      instruction.as.i_type.rs1() != 0) {
     handle_trap(exception_code_t::e_illegal_instruction, _instruction);
   }
-  if ((instruction.as.i_type.imm() >> 10) == 0b11) {
+  if ((instruction.as.i_type.imm() >> 10) == 0b11 &&
+      instruction.as.i_type.rs1() != 0) {
     handle_trap(exception_code_t::e_illegal_instruction, _instruction);
     return;
   }
-  return _write_csr(instruction.as.i_type.imm(), value);
+  if (instruction.as.i_type.rs1() != 0)
+    _write_csr(instruction.as.i_type.imm(), value);
 }
 
 std::pair<uint32_t, uint64_t>
@@ -1110,19 +1128,18 @@ void machine_t::decode_and_execute_instruction(uint32_t _instruction) {
               throw std::runtime_error(ss.str());
           }
           break;
+          // TODO: CSR instructions should use read and write
           // csr rs1 001 rd 1110011 CSRRW
         case 0b001: {  // CSRRW
-          uint64_t t = _csr[instruction.as.i_type.imm()];
-          _csr[instruction.as.i_type.imm()] =
-              _registers[instruction.as.i_type.rs1()];
+          uint64_t t = read_csr(_instruction);
+          write_csr(_instruction, _registers[instruction.as.i_type.rs1()]);
           _registers[instruction.as.i_type.rd()] = t;
           _program_counter += 4;
         } break;
           // csr rs1 010 rd 1110011 CSRRS
         case 0b010: {  // CSRRS
-          uint64_t t = _csr[instruction.as.i_type.imm()];
-          _csr[instruction.as.i_type.imm()] =
-              t | _registers[instruction.as.i_type.rs1()];
+          uint64_t t = read_csr(_instruction);
+          write_csr(_instruction, t | _registers[instruction.as.i_type.rs1()]);
           _registers[instruction.as.i_type.rd()] = t;
           _program_counter += 4;
         } break;
@@ -1131,8 +1148,8 @@ void machine_t::decode_and_execute_instruction(uint32_t _instruction) {
           break;
           // csr uimm 101 rd 1110011 CSRRWI
         case 0b101: {  // CSRRWI
-          uint64_t t                        = _csr[instruction.as.i_type.imm()];
-          _csr[instruction.as.i_type.imm()] = instruction.as.i_type.rs1();
+          uint64_t t = read_csr(_instruction);
+          write_csr(_instruction, instruction.as.i_type.rs1());
           _registers[instruction.as.i_type.rd()] = t;
           _program_counter += 4;
         } break;

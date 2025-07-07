@@ -173,6 +173,20 @@ enum class exception_code_t : uint32_t {
   e_ecall_m_mode                   = 11,
 };
 
+constexpr uint32_t MHARDID = 0xf14;
+
+// unimplemented
+constexpr uint32_t MNSTATUS = 0x744;
+constexpr uint32_t SATP     = 0x180;
+// TODO: better way to define PMPADDRs
+constexpr uint32_t PMPADDR0 = 0x3b0;
+// TODO: better way to define PMPCFGs
+constexpr uint32_t PMPCFG0 = 0x3a0;
+
+constexpr uint32_t MEDELEG = 0x302;
+constexpr uint32_t MIDELEG = 0x303;
+constexpr uint32_t MIE     = 0x304;
+
 constexpr uint32_t MSTATUS            = 0x300;
 constexpr uint32_t MSTATUS_MIE_SHIFT  = 3;
 constexpr uint32_t MSTATUS_MIE_MASK   = 1u << MSTATUS_MIE_SHIFT;
