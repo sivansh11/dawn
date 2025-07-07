@@ -1,6 +1,7 @@
 #include "machine.hpp"
 
 #include <bitset>
+#include <cassert>
 #include <cstdint>
 #include <elfio/elfio.hpp>
 #include <iomanip>
@@ -21,6 +22,11 @@ machine_t::machine_t(uint64_t memory_size, uint64_t memory_page_size)
 }
 
 machine_t::~machine_t() {}
+
+void machine_t::set_syscall(uint64_t number, syscall_t syscall) {
+  assert(!_syscalls.contains(number));
+  _syscalls[number] = syscall;
+}
 
 bool machine_t::load_elf_and_set_program_counter(
     const std::filesystem::path& path) {
@@ -1071,37 +1077,35 @@ void machine_t::decode_and_execute_instruction(uint32_t _instruction) {
         case 0b000:
           switch (instruction.as.i_type.imm()) {
             // 000000000000 00000 000 00000 1110011 ECALL
-            case 0b000000000000:  // ECALL
-              switch (_registers[17]) {
-                case 93:
-                  std::cout << "Exit called with status: " << _registers[10]
-                            << '\n';
-                  exit(_registers[10]);
-                  break;
-                default:
-                  switch (_privilege_mode) {
-                    case privilege_mode_t::e_machine:
-                      handle_trap(exception_code_t::e_ecall_m_mode,
-                                  _program_counter);
-                      break;
-                    case privilege_mode_t::e_supervisor:
-                      handle_trap(exception_code_t::e_ecall_s_mode,
-                                  _program_counter);
-                      break;
-                    case privilege_mode_t::e_user:
-                      handle_trap(exception_code_t::e_ecall_u_mode,
-                                  _program_counter);
-                      break;
-                    default:
-                      // TODO: raise illegal instruction exception
-                      std::stringstream ss;
-                      ss << "Error: privilege mode not implemented, cannot "
-                            "handle "
-                            "ecall";
-                      throw std::runtime_error(ss.str());
-                  }
+            case 0b000000000000: {  // ECALL
+              auto itr = _syscalls.find(_registers[17]);
+              if (itr != _syscalls.end()) {
+                itr->second(*this);
+                _program_counter += 4;
+              } else {
+                switch (_privilege_mode) {
+                  case privilege_mode_t::e_machine:
+                    handle_trap(exception_code_t::e_ecall_m_mode,
+                                _program_counter);
+                    break;
+                  case privilege_mode_t::e_supervisor:
+                    handle_trap(exception_code_t::e_ecall_s_mode,
+                                _program_counter);
+                    break;
+                  case privilege_mode_t::e_user:
+                    handle_trap(exception_code_t::e_ecall_u_mode,
+                                _program_counter);
+                    break;
+                  default:
+                    // TODO: raise illegal instruction exception
+                    std::stringstream ss;
+                    ss << "Error: privilege mode not implemented, cannot "
+                          "handle "
+                          "ecall";
+                    throw std::runtime_error(ss.str());
+                }
               }
-              break;
+            } break;
             // 000000000001 00000 000 00000 1110011 EBREAK
             case 0b000000000001:  // EBREAK
               break;

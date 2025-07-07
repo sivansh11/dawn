@@ -10,9 +10,15 @@
 
 namespace dawn {
 
+struct machine_t;
+
+typedef void (*syscall_t)(machine_t&);
+
 struct machine_t {
   machine_t(uint64_t memory_size, uint64_t memory_page_size);
   ~machine_t();
+
+  void set_syscall(uint64_t number, syscall_t syscall);
 
   bool load_elf_and_set_program_counter(const std::filesystem::path& path);
 
@@ -34,6 +40,8 @@ struct machine_t {
   // TODO: a better and faster unordered_map
   std::unordered_map<uint64_t, uint64_t> _csr;
   privilege_mode_t                       _privilege_mode;
+  // TODO: a better and faster unordered_map
+  std::unordered_map<uint64_t, syscall_t> _syscalls;
 };
 
 }  // namespace dawn

@@ -9,9 +9,17 @@
 
 #include "machine.hpp"
 
-int main(int argc, char **argv) {
+int main(int argc, char** argv) {
   if (argc < 2) throw std::runtime_error("Error: [dawn] [elf]");
   dawn::machine_t machine{1024 * 1024 * 1, 1024};
+  machine.set_syscall(
+      93, [](dawn::machine_t& machine) { exit(machine._registers[10]); });
+  machine.set_syscall(1000, [](dawn::machine_t& machine) {
+    uint64_t i = 0;
+    while (char ch = machine._memory.load<8>(machine._registers[10] + i++)) {
+      std::cout << ch;
+    }
+  });
   machine.load_elf_and_set_program_counter(argv[1]);
   bool     running = true;
   uint32_t address = std::numeric_limits<uint32_t>::max();
