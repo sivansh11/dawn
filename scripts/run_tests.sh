@@ -1,6 +1,6 @@
 #!/bin/bash
 
-if [ ! -d "tests" ]; then
+if [ ! -d "tests/riscv-tests/" ]; then
   git clone --recursive https://github.com/riscv-software-src/riscv-tests.git ./tests/riscv-tests
   if [ -z "$RISCV" ]; then
     echo "Error: RISCV environment variable is not set."
