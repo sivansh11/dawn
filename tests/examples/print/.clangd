@@ -1,0 +1,5 @@
+CompileFlags:
+  Add:
+    - "--sysroot=/usr/riscv64-elf/"
+    - "-I/usr/riscv64-elf/include/c++/14.1.0/"
+    - "-I/usr/riscv64-elf/include/c++/14.1.0/riscv64-elf"
