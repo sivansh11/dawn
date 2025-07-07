@@ -2,4 +2,4 @@
 .cache/
 .vscode/
 log*
-tests/
+riscv-tests/
