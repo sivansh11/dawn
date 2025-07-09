@@ -1,5 +1,6 @@
 // riscv64-unknown-elf-g++ -march=rv32i -mabi=ilp32 print.cpp
 
+#include <iostream>
 #include <utility>
 
 #define define_syscall(code, name, signature)                 \
@@ -25,6 +26,9 @@
 define_syscall(1000, my_print, void(const char *));
 
 int main() {
+  int i = 64;
+  std::cout << "Test\n";
+  std::cout << "i: " << i << '\n';
   my_print("hello, world! from riscv\n");
   return 0;
 }

@@ -34,6 +34,7 @@ struct machine_t {
   void     write_csr(uint32_t instruction, uint64_t value);
 
   memory_t _memory;
+  uint64_t _heap_address;
 
   uint64_t _registers[32];
   uint64_t _program_counter;

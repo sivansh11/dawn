@@ -10,6 +10,9 @@
 #include <sstream>
 #include <stdexcept>
 
+#include "elfio/elf_types.hpp"
+#include "elfio/elfio_section.hpp"
+#include "elfio/elfio_symbols.hpp"
 #include "helper.hpp"
 #include "types.hpp"
 
@@ -33,11 +36,12 @@ bool machine_t::load_elf_and_set_program_counter(
   ELFIO::elfio reader;
   if (!reader.load(path)) return false;
   for (uint32_t i = 0; i < reader.segments.size(); i++) {
-    const ELFIO::segment* segment         = reader.segments[i];
-    ELFIO::Elf64_Addr     virtual_address = segment->get_virtual_address();
-    ELFIO::Elf_Xword      file_size       = segment->get_file_size();
-    ELFIO::Elf_Xword      memory_size     = segment->get_memory_size();
+    const ELFIO::segment* segment = reader.segments[i];
     if (segment->get_type() != ELFIO::PT_LOAD) continue;
+
+    ELFIO::Elf64_Addr virtual_address = segment->get_virtual_address();
+    ELFIO::Elf_Xword  file_size       = segment->get_file_size();
+    ELFIO::Elf_Xword  memory_size     = segment->get_memory_size();
 
     if (!_memory.memcpy_host_to_guest(virtual_address, segment->get_data(),
                                       file_size)) {
@@ -50,6 +54,30 @@ bool machine_t::load_elf_and_set_program_counter(
         _memory.store<8>(virtual_address + file_size + i, 0);
       }
     }
+  }
+  for (uint32_t i = 0; i < reader.sections.size(); i++) {
+    ELFIO::section* section = reader.sections[i];
+    if (section->get_type() != ELFIO::SHT_SYMTAB) continue;
+    const ELFIO::symbol_section_accessor symbols(reader, section);
+
+    for (uint32_t j = 0; j < symbols.get_symbols_num(); j++) {
+      std::string       name;
+      ELFIO::Elf64_Addr value;
+      ELFIO::Elf_Xword  size;
+      unsigned char     bind;
+      unsigned char     type;
+      ELFIO::Elf_Half   section_index;
+      unsigned char     other;
+
+      symbols.get_symbol(j, name, value, size, bind, type, section_index,
+                         other);
+      if (name == "_end") {
+        _heap_address = value;
+        std::cout << value << '\n';
+        break;
+      }
+    }
+    assert(_heap_address != 0);
   }
   _program_counter = reader.get_entry();
   return true;

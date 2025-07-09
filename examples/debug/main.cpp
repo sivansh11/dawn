@@ -12,8 +12,38 @@
 int main(int argc, char** argv) {
   if (argc < 2) throw std::runtime_error("Error: [dawn] [elf]");
   dawn::machine_t machine{1024 * 1024 * 1, 1024};
+  // newlib exit
   machine.set_syscall(
       93, [](dawn::machine_t& machine) { exit(machine._registers[10]); });
+  // newlib brk
+  machine.set_syscall(214, [](dawn::machine_t& machine) {
+    uint64_t new_end = machine._registers[10];
+    std::cout << "new_end: " << std::hex << std::setw(8) << new_end
+              << " _heap_address: " << std::setw(8) << machine._heap_address
+              << std::dec << '\n';
+    if (new_end < machine._heap_address) {
+      new_end = machine._heap_address;
+    }
+    machine._registers[10] = new_end;
+  });
+  // newlib
+  machine.set_syscall(
+      57, [](dawn::machine_t& machine) { machine._registers[10] = 0; });
+  // newlib write
+  machine.set_syscall(64, [](dawn::machine_t& machine) {
+    int      vfd     = machine._registers[10];
+    uint64_t address = machine._registers[11];
+    size_t   len     = machine._registers[12];
+    if (vfd == 1 || vfd == 2) {
+      machine._registers[10] = len;
+    } else {
+      machine._registers[10] = -9;
+    }
+  });
+  // newlib fstat
+  machine.set_syscall(
+      80, [](dawn::machine_t& machine) { machine._registers[10] = -38; });
+  // my_print
   machine.set_syscall(1000, [](dawn::machine_t& machine) {
     uint64_t i = 0;
     while (char ch = machine._memory.load<8>(machine._registers[10] + i++)) {
@@ -39,6 +69,7 @@ int main(int argc, char** argv) {
     log << std::hex << program_counter << ' ' << std::dec << std::hex
         << std::setfill('0') << std::setw(8) << instruction << std::dec << " ";
     log2 << std::hex << program_counter << '\n';
+    log2.flush();
     machine.debug_disassemble_instruction(instruction, log);
     log << "Program Counter: " << std::hex << machine._program_counter << '\n';
     log << "Registers: \n";
@@ -47,7 +78,6 @@ int main(int argc, char** argv) {
           << machine._registers[i] << '\n';
     }
     log.flush();
-    log2.flush();
     if (!step) {
       if (program_counter == address) {
         getchar();
