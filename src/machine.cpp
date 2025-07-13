@@ -80,6 +80,7 @@ bool machine_t::load_elf_and_set_program_counter(
     assert(_heap_address != 0);
   }
   _program_counter = reader.get_entry();
+  _registers[2]    = _memory._size - 8;
   return true;
 }
 
