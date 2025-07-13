@@ -6,8 +6,8 @@
 static bool running = true;
 
 int main(int argc, char** argv) {
-  if (argc < 2) throw std::runtime_error("Error: [dawn] [elf]");
-  dawn::machine_t machine{1024 * 1024 * 1, 1024};
+  if (argc < 3) throw std::runtime_error("Error: [dawn] [memory size] [elf]");
+  dawn::machine_t machine{std::stoul(argv[1]), 1024};
   // newlib exit
   machine.set_syscall(93, [](dawn::machine_t& machine) {
     running = false;
@@ -48,11 +48,12 @@ int main(int argc, char** argv) {
   // my_print
   machine.set_syscall(1000, [](dawn::machine_t& machine) {
     uint64_t i = 0;
+    std::cout << "[ERROR]: ";
     while (char ch = machine._memory.load<8>(machine._registers[10] + i++)) {
       std::cout << ch;
     }
   });
-  machine.load_elf_and_set_program_counter(argv[1]);
+  machine.load_elf_and_set_program_counter(argv[2]);
   std::cout << std::hex << machine._program_counter << std::dec << '\n';
   while (running) {
     auto [instruction, program_counter] =
