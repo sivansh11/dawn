@@ -18,7 +18,9 @@ struct memory_t {
   memory_t(uint64_t size);
   ~memory_t();
 
-  uint64_t translate_guest_virtual_to_physical(uint64_t virtual_address);
+  uint64_t translate_host_to_guest_virtual(uintptr_t address);
+  uint64_t translate_guest_virtual_to_guest_physical(uint64_t virtual_address);
+  uint64_t translate_guest_virtual_to_host(uint64_t virtual_address);
 
   void insert_memory(uintptr_t addr, size_t size);
   bool is_region_in_memory(uintptr_t addr, size_t size);

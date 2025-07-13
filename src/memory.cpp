@@ -17,10 +17,18 @@ memory_t::memory_t(uint64_t size) : _size(size), _guest_base(0) {
 }
 memory_t::~memory_t() { delete[] _host_base; }
 
-uint64_t memory_t::translate_guest_virtual_to_physical(
+uint64_t memory_t::translate_host_to_guest_virtual(uintptr_t address) {
+  return address - reinterpret_cast<uint64_t>(_host_base) + _guest_base;
+}
+uint64_t memory_t::translate_guest_virtual_to_guest_physical(
     uint64_t virtual_address) {
   assert(virtual_address >= _guest_base);
   return virtual_address - _guest_base;
+}
+
+uint64_t memory_t::translate_guest_virtual_to_host(uint64_t virtual_address) {
+  return reinterpret_cast<uint64_t>(_host_base) +
+         translate_guest_virtual_to_guest_physical(virtual_address);
 }
 
 void memory_t::insert_memory(uintptr_t addr, size_t size) {
@@ -102,93 +110,81 @@ void write_as(uint8_t *dst, T value) {
 }
 
 uint64_t memory_t::_load_8(uint64_t virtual_address) {
-  if (!is_region_in_memory(reinterpret_cast<uintptr_t>(
-                               _host_base + translate_guest_virtual_to_physical(
-                                                virtual_address)),
+  if (!is_region_in_memory(translate_guest_virtual_to_host(virtual_address),
                            1)) {
     // TODO: propagate error to caller
     throw std::runtime_error("Error: failed to load 8");
   }
-  return read_as<uint8_t>(_host_base +
-                          translate_guest_virtual_to_physical(virtual_address));
+  return read_as<uint8_t>(reinterpret_cast<uint8_t *>(
+      translate_guest_virtual_to_host(virtual_address)));
 }
 uint64_t memory_t::_load_16(uint64_t virtual_address) {
-  if (!is_region_in_memory(reinterpret_cast<uintptr_t>(
-                               _host_base + translate_guest_virtual_to_physical(
-                                                virtual_address)),
+  if (!is_region_in_memory(translate_guest_virtual_to_host(virtual_address),
                            2)) {
     // TODO: propagate error to caller
     throw std::runtime_error("Error: failed to load 16");
   }
-  return read_as<uint16_t>(
-      _host_base + translate_guest_virtual_to_physical(virtual_address));
+  return read_as<uint16_t>(reinterpret_cast<uint8_t *>(
+      translate_guest_virtual_to_host(virtual_address)));
 }
 uint64_t memory_t::_load_32(uint64_t virtual_address) {
-  if (!is_region_in_memory(reinterpret_cast<uintptr_t>(
-                               _host_base + translate_guest_virtual_to_physical(
-                                                virtual_address)),
+  if (!is_region_in_memory(translate_guest_virtual_to_host(virtual_address),
                            4)) {
     // TODO: propagate error to caller
     throw std::runtime_error("Error: failed to load 32");
   }
-  return read_as<uint32_t>(
-      _host_base + translate_guest_virtual_to_physical(virtual_address));
+  return read_as<uint32_t>(reinterpret_cast<uint8_t *>(
+      translate_guest_virtual_to_host(virtual_address)));
 }
 uint64_t memory_t::_load_64(uint64_t virtual_address) {
-  if (!is_region_in_memory(reinterpret_cast<uintptr_t>(
-                               _host_base + translate_guest_virtual_to_physical(
-                                                virtual_address)),
+  if (!is_region_in_memory(translate_guest_virtual_to_host(virtual_address),
                            8)) {
     // TODO: propagate error to caller
     throw std::runtime_error("Error: failed to load 64");
   }
-  return read_as<uint64_t>(
-      _host_base + translate_guest_virtual_to_physical(virtual_address));
+  return read_as<uint64_t>(reinterpret_cast<uint8_t *>(
+      translate_guest_virtual_to_host(virtual_address)));
 }
 
 void memory_t::_store_8(uint64_t virtual_address, uint64_t value) {
-  if (!is_region_in_memory(reinterpret_cast<uintptr_t>(
-                               _host_base + translate_guest_virtual_to_physical(
-                                                virtual_address)),
+  if (!is_region_in_memory(translate_guest_virtual_to_host(virtual_address),
                            1)) {
     // TODO: propagate error to caller
     throw std::runtime_error("Error: failed to store 8");
   }
-  write_as<uint8_t>(
-      _host_base + translate_guest_virtual_to_physical(virtual_address), value);
+  write_as<uint8_t>(reinterpret_cast<uint8_t *>(
+                        translate_guest_virtual_to_host(virtual_address)),
+                    value);
 }
 void memory_t::_store_16(uint64_t virtual_address, uint64_t value) {
-  if (!is_region_in_memory(reinterpret_cast<uintptr_t>(
-                               _host_base + translate_guest_virtual_to_physical(
-                                                virtual_address)),
+  if (!is_region_in_memory(translate_guest_virtual_to_host(virtual_address),
                            2)) {
     // TODO: propagate error to caller
     throw std::runtime_error("Error: failed to store 16");
   }
-  write_as<uint16_t>(
-      _host_base + translate_guest_virtual_to_physical(virtual_address), value);
+  write_as<uint16_t>(reinterpret_cast<uint8_t *>(
+                         translate_guest_virtual_to_host(virtual_address)),
+                     value);
 }
 void memory_t::_store_32(uint64_t virtual_address, uint64_t value) {
-  if (!is_region_in_memory(reinterpret_cast<uintptr_t>(
-                               _host_base + translate_guest_virtual_to_physical(
-                                                virtual_address)),
+  if (!is_region_in_memory(translate_guest_virtual_to_host(virtual_address),
                            4)) {
     // TODO: propagate error to caller
     throw std::runtime_error("Error: failed to store 32");
   }
-  write_as<uint32_t>(
-      _host_base + translate_guest_virtual_to_physical(virtual_address), value);
+  write_as<uint32_t>(reinterpret_cast<uint8_t *>(
+                         translate_guest_virtual_to_host(virtual_address)),
+                     value);
 }
 void memory_t::_store_64(uint64_t virtual_address, uint64_t value) {
-  if (!is_region_in_memory(reinterpret_cast<uintptr_t>(
-                               _host_base + translate_guest_virtual_to_physical(
-                                                virtual_address)),
+  if (!is_region_in_memory(translate_guest_virtual_to_host(virtual_address),
                            8)) {
     // TODO: propagate error to caller
     throw std::runtime_error("Error: failed to store 64");
   }
-  write_as<uint64_t>(
-      _host_base + translate_guest_virtual_to_physical(virtual_address), value);
+  write_as<uint64_t>(reinterpret_cast<uint8_t *>(
+                         translate_guest_virtual_to_host(virtual_address)),
+                     value);
 }
 
 }  // namespace dawn

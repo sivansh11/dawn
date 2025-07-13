@@ -59,18 +59,16 @@ bool machine_t::load_elf_and_set_program_counter(
     ELFIO::Elf_Xword  file_size       = segment->get_file_size();
     ELFIO::Elf_Xword  memory_size     = segment->get_memory_size();
 
-    assert(file_size +
-               _memory.translate_guest_virtual_to_physical(virtual_address) <=
+    assert(file_size + _memory.translate_guest_virtual_to_guest_physical(
+                           virtual_address) <=
            _memory._size);
-    std::memcpy(
-        _memory._host_base +
-            _memory.translate_guest_virtual_to_physical(virtual_address),
-        segment->get_data(), file_size);
+    std::memcpy(reinterpret_cast<void*>(
+                    _memory.translate_guest_virtual_to_host(virtual_address)),
+                segment->get_data(), file_size);
     if (memory_size) {
       std::memset(
-          _memory._host_base +
-              _memory.translate_guest_virtual_to_physical(virtual_address) +
-              file_size,
+          reinterpret_cast<void*>(_memory.translate_guest_virtual_to_host(
+              virtual_address + file_size)),
           0, memory_size - file_size);
     }
   }
