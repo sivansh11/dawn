@@ -6,6 +6,7 @@
 #include <elfio/elfio.hpp>
 #include <iomanip>
 #include <iostream>
+#include <limits>
 #include <ostream>
 #include <sstream>
 #include <stdexcept>
@@ -19,7 +20,7 @@
 namespace dawn {
 
 machine_t::machine_t(uint64_t memory_size, uint64_t memory_page_size)
-    : _memory(memory_size, memory_page_size) {
+    : _memory(memory_size) {
   for (uint32_t i = 0; i < 32; i++) _registers[i] = 0;
   _privilege_mode = privilege_mode_t::e_machine;
 }
@@ -35,6 +36,8 @@ bool machine_t::load_elf_and_set_program_counter(
     const std::filesystem::path& path) {
   ELFIO::elfio reader;
   if (!reader.load(path)) return false;
+
+  uint64_t guest_base = std::numeric_limits<uint64_t>::max();
   for (uint32_t i = 0; i < reader.segments.size(); i++) {
     const ELFIO::segment* segment = reader.segments[i];
     if (segment->get_type() != ELFIO::PT_LOAD) continue;
@@ -43,16 +46,32 @@ bool machine_t::load_elf_and_set_program_counter(
     ELFIO::Elf_Xword  file_size       = segment->get_file_size();
     ELFIO::Elf_Xword  memory_size     = segment->get_memory_size();
 
-    if (!_memory.memcpy_host_to_guest(virtual_address, segment->get_data(),
-                                      file_size)) {
-      throw std::runtime_error(
-          "Error: elf was not able to be loaded in memory");
-    }
+    guest_base = std::min(guest_base, virtual_address);
+  }
+
+  _memory._guest_base = guest_base;
+
+  for (uint32_t i = 0; i < reader.segments.size(); i++) {
+    const ELFIO::segment* segment = reader.segments[i];
+    if (segment->get_type() != ELFIO::PT_LOAD) continue;
+
+    ELFIO::Elf64_Addr virtual_address = segment->get_virtual_address();
+    ELFIO::Elf_Xword  file_size       = segment->get_file_size();
+    ELFIO::Elf_Xword  memory_size     = segment->get_memory_size();
+
+    assert(file_size +
+               _memory.translate_guest_virtual_to_physical(virtual_address) <=
+           _memory._size);
+    std::memcpy(
+        _memory._host_base +
+            _memory.translate_guest_virtual_to_physical(virtual_address),
+        segment->get_data(), file_size);
     if (memory_size) {
-      // TODO: add a memset_guest similar to memcpy_host_to_guest
-      for (uint32_t i = 0; i < memory_size - file_size; i++) {
-        _memory.store<8>(virtual_address + file_size + i, 0);
-      }
+      std::memset(
+          _memory._host_base +
+              _memory.translate_guest_virtual_to_physical(virtual_address) +
+              file_size,
+          0, memory_size - file_size);
     }
   }
   for (uint32_t i = 0; i < reader.sections.size(); i++) {
@@ -73,7 +92,6 @@ bool machine_t::load_elf_and_set_program_counter(
                          other);
       if (name == "_end") {
         _heap_address = value;
-        std::cout << value << '\n';
         break;
       }
     }

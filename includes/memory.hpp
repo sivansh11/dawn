@@ -3,47 +3,25 @@
 
 #include <cstddef>
 #include <cstdint>
-#include <limits>
 #include <stdexcept>
-#include <unordered_map>
+#include <vector>
 
 namespace dawn {
 
-/*
- * invalid_address will be returned if
- * translate_virtual_address_to_physical_address fails
- */
-constexpr uint64_t invalid_address = std::numeric_limits<uint64_t>::max();
-
-/*
- * create a memory of size and define pages of page_size
- */
 struct memory_t {
-  memory_t(uint64_t size, uint64_t page_size);
+  struct range_t {
+    uintptr_t _start;
+    uintptr_t _end;
+    bool operator<(const range_t &other) const { return _start < other._start; }
+  };
+
+  memory_t(uint64_t size);
   ~memory_t();
 
-  /*
-   * returns virtual_page_number, offset and physical_address
-   */
-  std::tuple<uint64_t, uint64_t, uint64_t>
-  _translate_virtual_address_to_physical_address(uint64_t virtual_address);
-  /*
-   * helper, calls _translate_virtual_address_to_physical_address internally,
-   * ignores physical_page_number and offset
-   */
-  uint64_t translate_virtual_address_to_physical_address(
-      uint64_t virtual_address);
+  uint64_t translate_guest_virtual_to_physical(uint64_t virtual_address);
 
-  /*
-   * copies host memory to guest, returns false if it failes for any reason
-   */
-  bool memcpy_host_to_guest(uint64_t    guest_dst_virtual_address,
-                            const void *host_src_address, uint64_t size);
-  /*
-   * copies guest memory to host, returns false if it failes for any reason
-   */
-  bool memcpy_guest_to_host(void    *host_dst_address,
-                            uint64_t guest_src_virtual_address, uint64_t size);
+  void insert_memory(uintptr_t addr, size_t size);
+  bool is_region_in_memory(uintptr_t addr, size_t size);
 
   // clang-format off
   template <size_t size>
@@ -74,13 +52,11 @@ struct memory_t {
   void _store_32(uint64_t virtual_address, uint64_t value);
   void _store_64(uint64_t virtual_address, uint64_t value);
 
+  std::vector<range_t> _ranges;
+
   uint64_t _size;
-  uint64_t _page_size;
-  uint8_t *_data;
-  // TODO: look for better implementations of _page_table, and a better page
-  // allocation scheme
-  std::unordered_map<uint64_t, uint64_t> _page_table;
-  uint64_t                               _next_free_page = 0;
+  uint64_t _guest_base;
+  uint8_t *_host_base;
 };
 
 }  // namespace dawn

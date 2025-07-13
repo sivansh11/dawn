@@ -1,158 +1,194 @@
 #include "memory.hpp"
 
+#include <algorithm>
+#include <cassert>
+#include <cstdint>
 #include <cstring>
+#include <ios>
+#include <iostream>
+#include <limits>
 #include <stdexcept>
-#include <tuple>
 
 namespace dawn {
 
-memory_t::memory_t(uint64_t size, uint64_t page_size)
-    : _size(size), _page_size(page_size) {
-  _data = new uint8_t[_size];
+memory_t::memory_t(uint64_t size) : _size(size), _guest_base(0) {
+  _host_base = new uint8_t[_size];
+  insert_memory(reinterpret_cast<uintptr_t>(_host_base), _size);
 }
-memory_t::~memory_t() { delete[] _data; }
+memory_t::~memory_t() { delete[] _host_base; }
 
-std::tuple<uint64_t, uint64_t, uint64_t>
-memory_t::_translate_virtual_address_to_physical_address(
+uint64_t memory_t::translate_guest_virtual_to_physical(
     uint64_t virtual_address) {
-  uint64_t virtual_page_number = virtual_address / _page_size;
-  uint64_t offset              = virtual_address % _page_size;
-  auto     itr                 = _page_table.find(virtual_page_number);
-  if (itr != _page_table.end()) {
-    // found page in page table
-    uint64_t physical_page_number = itr->second;
-    uint64_t physical_address = (physical_page_number * _page_size) + offset;
-    if (physical_address >= _size)
-      return {virtual_page_number, offset, invalid_address};
-    return {virtual_page_number, offset, physical_address};
+  assert(virtual_address >= _guest_base);
+  return virtual_address - _guest_base;
+}
+
+void memory_t::insert_memory(uintptr_t addr, size_t size) {
+  assert(size);  // size cant be 0
+  uintptr_t start = addr;
+  uintptr_t end   = start + size;
+  range_t   range{start, end};
+
+  auto itr = std::upper_bound(_ranges.begin(), _ranges.end(), range);
+  // check for overlaps
+  if (itr != _ranges.begin()) {
+    auto prev_itr = itr - 1;
+    if (std::max(range._start, prev_itr->_start) <
+        std::min(range._end, prev_itr->_end))
+      throw std::runtime_error("Error: Overlap detected in memory");
   }
-  uint64_t physical_page_number    = _next_free_page++;
-  _page_table[virtual_page_number] = physical_page_number;
-  uint64_t physical_address = (physical_page_number * _page_size) + offset;
-  if (physical_address >= _size)
-    return {virtual_page_number, offset, invalid_address};
-  return {virtual_page_number, offset, physical_address};
+  if (itr != _ranges.end()) {
+    if (std::max(range._start, itr->_start) < std::min(range._end, itr->_end))
+      throw std::runtime_error("Error: Overlap detected in memory");
+  }
+  // check if can merge
+  if (itr != _ranges.begin()) {
+    auto prev_itr = itr - 1;
+    if (prev_itr->_end == range._start) {
+      range._start = prev_itr->_start;
+      itr          = _ranges.erase(prev_itr);
+    }
+  }
+  if (itr != _ranges.end()) {
+    if (range._end == itr->_start) {
+      range._end = itr->_end;
+      itr        = _ranges.erase(itr);
+    }
+  }
+  _ranges.insert(itr, range);
 }
 
-uint64_t memory_t::translate_virtual_address_to_physical_address(
-    uint64_t virtual_address) {
-  auto [virtual_page_number, offset, physical_address] =
-      _translate_virtual_address_to_physical_address(virtual_address);
-  return physical_address;
-}
+bool memory_t::is_region_in_memory(uintptr_t addr, size_t size) {
+  assert(size);  // size cant be 0
+  uintptr_t start = addr;
+  uintptr_t end   = start + size;
 
-bool memory_t::memcpy_host_to_guest(uint64_t    guest_dst_virtual_address,
-                                    const void *host_src_address,
-                                    uint64_t    size) {
-  uint64_t       bytes_remaining = size;
-  const uint8_t *current_host_src =
-      reinterpret_cast<const uint8_t *>(host_src_address);
-  uint64_t current_guest_virtual_address = guest_dst_virtual_address;
+  uintptr_t current = start;
 
-  while (bytes_remaining) {
-    auto [virtual_page_number, offset, physical_address] =
-        _translate_virtual_address_to_physical_address(
-            current_guest_virtual_address);
-    if (physical_address == invalid_address) return false;
-    uint64_t bytes_copiable_in_current_page = _page_size - offset;
-    uint64_t bytes_to_copy_in_current_page =
-        std::min(bytes_remaining, bytes_copiable_in_current_page);
-    if (physical_address + bytes_to_copy_in_current_page > _size) return false;
-    std::memcpy(_data + physical_address, current_host_src,
-                bytes_to_copy_in_current_page);
-    current_host_src += bytes_to_copy_in_current_page;
-    current_guest_virtual_address += bytes_to_copy_in_current_page;
-    bytes_remaining -= bytes_to_copy_in_current_page;
+  auto itr =
+      std::lower_bound(_ranges.begin(), _ranges.end(),
+                       range_t{start, std::numeric_limits<uintptr_t>::max()});
+  if (itr != _ranges.begin()) {
+    if ((itr - 1)->_end > start) {
+      itr--;
+    }
+  }
+  while (current < end) {
+    if (itr == _ranges.end() || itr->_start > current) {
+      return false;
+    }
+    if (current >= itr->_start && current < itr->_end) {
+      current = std::min(end, itr->_end);
+    } else
+      itr++;
   }
   return true;
 }
 
-bool memory_t::memcpy_guest_to_host(void    *host_dst_address,
-                                    uint64_t guest_src_virtual_address,
-                                    uint64_t size) {
-  if (!host_dst_address) return false;
-  uint64_t bytes_remaining  = size;
-  uint8_t *current_host_dst = reinterpret_cast<uint8_t *>(host_dst_address);
-  uint64_t current_guest_virtual_address = guest_src_virtual_address;
+template <typename T>
+T read_as(const uint8_t *src) {
+  // TODO: add check for T is u8/u16/u32/u64
+  // TODO: assert src
+  T result;
+  std::memcpy(&result, src, sizeof(T));
+  return result;
+}
 
-  while (bytes_remaining) {
-    auto [virtual_page_number, offset, physical_address] =
-        _translate_virtual_address_to_physical_address(
-            current_guest_virtual_address);
-    // if a page does not exist, does that mean we read nothing ?
-    if (physical_address == invalid_address) return false;
-    uint64_t bytes_copiable_in_current_page = _page_size - offset;
-    uint64_t bytes_to_copy_in_current_page =
-        std::min(bytes_remaining, bytes_copiable_in_current_page);
-    if (physical_address + bytes_to_copy_in_current_page > _size) return false;
-    std::memcpy(current_host_dst, _data + physical_address,
-                bytes_to_copy_in_current_page);
-    current_host_dst += bytes_to_copy_in_current_page;
-    current_guest_virtual_address += bytes_to_copy_in_current_page;
-    bytes_remaining -= bytes_to_copy_in_current_page;
-  }
-  return true;
+template <typename T>
+void write_as(uint8_t *dst, T value) {
+  // TODO: add check for T is u8/u16/u32/u64
+  // TODO: assert dst
+  std::memcpy(dst, &value, sizeof(T));
 }
 
 uint64_t memory_t::_load_8(uint64_t virtual_address) {
-  uint8_t value;
-  if (!memcpy_guest_to_host(&value, virtual_address, 1)) {
+  if (!is_region_in_memory(reinterpret_cast<uintptr_t>(
+                               _host_base + translate_guest_virtual_to_physical(
+                                                virtual_address)),
+                           1)) {
     // TODO: propagate error to caller
     throw std::runtime_error("Error: failed to load 8");
   }
-  return value;
+  return read_as<uint8_t>(_host_base +
+                          translate_guest_virtual_to_physical(virtual_address));
 }
 uint64_t memory_t::_load_16(uint64_t virtual_address) {
-  uint16_t value;
-  if (!memcpy_guest_to_host(&value, virtual_address, 2)) {
+  if (!is_region_in_memory(reinterpret_cast<uintptr_t>(
+                               _host_base + translate_guest_virtual_to_physical(
+                                                virtual_address)),
+                           2)) {
     // TODO: propagate error to caller
     throw std::runtime_error("Error: failed to load 16");
   }
-  return value;
+  return read_as<uint16_t>(
+      _host_base + translate_guest_virtual_to_physical(virtual_address));
 }
 uint64_t memory_t::_load_32(uint64_t virtual_address) {
-  uint32_t value;
-  if (!memcpy_guest_to_host(&value, virtual_address, 4)) {
+  if (!is_region_in_memory(reinterpret_cast<uintptr_t>(
+                               _host_base + translate_guest_virtual_to_physical(
+                                                virtual_address)),
+                           4)) {
     // TODO: propagate error to caller
     throw std::runtime_error("Error: failed to load 32");
   }
-  return value;
+  return read_as<uint32_t>(
+      _host_base + translate_guest_virtual_to_physical(virtual_address));
 }
 uint64_t memory_t::_load_64(uint64_t virtual_address) {
-  uint64_t value;
-  if (!memcpy_guest_to_host(&value, virtual_address, 8)) {
+  if (!is_region_in_memory(reinterpret_cast<uintptr_t>(
+                               _host_base + translate_guest_virtual_to_physical(
+                                                virtual_address)),
+                           8)) {
     // TODO: propagate error to caller
     throw std::runtime_error("Error: failed to load 64");
   }
-  return value;
+  return read_as<uint64_t>(
+      _host_base + translate_guest_virtual_to_physical(virtual_address));
 }
 
 void memory_t::_store_8(uint64_t virtual_address, uint64_t value) {
-  uint8_t value_8 = static_cast<uint8_t>(value);
-  if (!memcpy_host_to_guest(virtual_address, &value_8, 1)) {
+  if (!is_region_in_memory(reinterpret_cast<uintptr_t>(
+                               _host_base + translate_guest_virtual_to_physical(
+                                                virtual_address)),
+                           1)) {
     // TODO: propagate error to caller
     throw std::runtime_error("Error: failed to store 8");
   }
+  write_as<uint8_t>(
+      _host_base + translate_guest_virtual_to_physical(virtual_address), value);
 }
 void memory_t::_store_16(uint64_t virtual_address, uint64_t value) {
-  uint16_t value_16 = static_cast<uint16_t>(value);
-  if (!memcpy_host_to_guest(virtual_address, &value_16, 2)) {
+  if (!is_region_in_memory(reinterpret_cast<uintptr_t>(
+                               _host_base + translate_guest_virtual_to_physical(
+                                                virtual_address)),
+                           2)) {
     // TODO: propagate error to caller
     throw std::runtime_error("Error: failed to store 16");
   }
+  write_as<uint16_t>(
+      _host_base + translate_guest_virtual_to_physical(virtual_address), value);
 }
 void memory_t::_store_32(uint64_t virtual_address, uint64_t value) {
-  uint32_t value_32 = static_cast<uint32_t>(value);
-  if (!memcpy_host_to_guest(virtual_address, &value_32, 4)) {
+  if (!is_region_in_memory(reinterpret_cast<uintptr_t>(
+                               _host_base + translate_guest_virtual_to_physical(
+                                                virtual_address)),
+                           4)) {
     // TODO: propagate error to caller
     throw std::runtime_error("Error: failed to store 32");
   }
+  write_as<uint32_t>(
+      _host_base + translate_guest_virtual_to_physical(virtual_address), value);
 }
 void memory_t::_store_64(uint64_t virtual_address, uint64_t value) {
-  if (!memcpy_host_to_guest(virtual_address, &value, 8)) {
+  if (!is_region_in_memory(reinterpret_cast<uintptr_t>(
+                               _host_base + translate_guest_virtual_to_physical(
+                                                virtual_address)),
+                           8)) {
     // TODO: propagate error to caller
     throw std::runtime_error("Error: failed to store 64");
   }
+  write_as<uint64_t>(
+      _host_base + translate_guest_virtual_to_physical(virtual_address), value);
 }
 
 }  // namespace dawn
