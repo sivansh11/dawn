@@ -23,12 +23,17 @@
     return fn(std::forward<args_t>(args)...);                 \
   }
 
-define_syscall(1000, my_print, void(const char *));
+define_syscall(1000, log_error, void(const char *));
 
 int main() {
-  int i = 64;
-  std::cout << "Test\n";
-  std::cout << "i: " << i << '\n';
-  my_print("hello, world! from riscv\n");
+  // std::cout works, because of newlib
+  std::cout << "test\n";
+  // custom syscall also works
+  log_error("test\n");
+
+  int *i = new int;
+  *i     = 5;
+  std::cout << *i << '\n';
+  delete i;
   return 0;
 }
