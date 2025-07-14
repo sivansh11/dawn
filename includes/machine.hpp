@@ -4,6 +4,7 @@
 #include <cstdint>
 #include <filesystem>
 #include <functional>
+#include <limits>
 #include <unordered_map>
 
 #include "memory.hpp"
@@ -34,6 +35,8 @@ struct machine_t {
   uint64_t read_csr(uint32_t instruction);
   void     write_csr(uint32_t instruction, uint64_t value);
 
+  void simulate(uint64_t steps = std::numeric_limits<uint64_t>::max());
+
   memory_t _memory;
   uint64_t _heap_address;
 
@@ -44,6 +47,8 @@ struct machine_t {
   privilege_mode_t                       _privilege_mode;
   // TODO: a better and faster unordered_map
   std::unordered_map<uint64_t, syscall_t> _syscalls;
+  // internal
+  bool _running = true;
 };
 
 }  // namespace dawn

@@ -209,6 +209,15 @@ void machine_t::write_csr(uint32_t _instruction, uint64_t value) {
     _write_csr(instruction.as.i_type.imm(), value);
 }
 
+void machine_t::simulate(uint64_t steps) {
+  for (uint64_t i = 0; i < steps; i++) {
+    if (!_running) return;
+    auto [instruction, program_counter] =
+        fetch_instruction_at_program_counter();
+    decode_and_execute_instruction(instruction);
+  }
+}
+
 std::pair<uint32_t, uint64_t>
 machine_t::fetch_instruction_at_program_counter() {
   // TODO: handle invalid loads
