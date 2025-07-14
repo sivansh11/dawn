@@ -3,6 +3,7 @@
 
 #include <cstdint>
 #include <filesystem>
+#include <functional>
 #include <unordered_map>
 
 #include "memory.hpp"
@@ -12,7 +13,7 @@ namespace dawn {
 
 struct machine_t;
 
-typedef void (*syscall_t)(machine_t&);
+using syscall_t = std::function<void(machine_t&)>;
 
 struct machine_t {
   machine_t(uint64_t memory_size, uint64_t memory_page_size);
