@@ -61,11 +61,21 @@ My emulator implements only **Machine Mode**, the highest privilege level. While
 
 ### The ELF Format and Memory
 
-Compiled programs are typically stored in the ELF (Executable and Linkable Format). An ELF file contains the machine code, data, and metadata about how to load the program into memory. One crucial piece of metadata is the **virtual address**. In a typical OS, the loader and hardware work together to map these virtual addresses to actual physical addresses in RAM.
+ELF (Executable and Linkable Format) is a widely used standard for storing compiled programs. An ELF file contains the machine code, data, and metadata crucial for the program's execution.
 
-My emulator leverages this. It reads the ELF file and loads the program segments into its own emulated memory. However, since I control the entire environment, I can simplify memory management. By using a **custom linker script**, I can instruct the compiler to produce an ELF file where the virtual addresses are either identical to the physical addresses or follow a simple, predictable mapping. This avoids the need for a complex page table system, making the emulator faster and simpler.
+A key aspect of ELF is its organization into loadable sections. These sections represent different parts of the program, such as:
 
-As a potential future optimization, one could even abandon ELF in favor of a simpler format like **BFLT (Binary Flat Format)**. BFLT is a lightweight format that doesn't use virtual addresses, making it trivial to load.
+- .text: Contains the executable machine code instructions.
+
+- .data: Holds initialized global and static variables.
+
+- .rodata: Stores read-only data, like string literals.
+
+- .bss: Reserves space for uninitialized global and static variables (these don't take up space in the file but are allocated at runtime and zeroed out).
+
+The ELF file also includes an ELF header and a program header table. The ELF header provides a "roadmap" to the file's structure, including information about the entry point, which indicates where the program execution should begin. The program header table, in particular, describes how the various loadable sections (often grouped into segments) should be placed into memory when the program is run. Each entry in this table specifies the size, file offset, and memory location for a particular segment.
+
+While ELF offers robust capabilities for complex memory management and shared libraries, simpler execution environments might benefit from alternative formats. One such alternative is BFLT (Binary Flat Format). BFLT is a lightweight format that streamlines the loading process by typically consolidating all code and data into a single, contiguous block. This eliminates the need for intricate memory mapping mechanisms, making it trivial to load and potentially faster for specific use cases, especially in environments without a Memory Management Unit (MMU).
 
 ### Memory Management and Sharing
 
