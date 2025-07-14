@@ -36,8 +36,8 @@ struct machine_t {
   memory_t _memory;
   uint64_t _heap_address;
 
-  uint64_t _registers[32];
-  uint64_t _program_counter;
+  std::array<uint64_t, 32> _registers;
+  uint64_t                 _program_counter;
   // TODO: a better and faster unordered_map
   std::unordered_map<uint64_t, uint64_t> _csr;
   privilege_mode_t                       _privilege_mode;
