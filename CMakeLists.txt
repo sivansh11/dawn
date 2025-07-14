@@ -27,6 +27,12 @@ target_link_libraries(dawn
   PUBLIC elfio
 )
 
+if (DAWN_PROFILER)
+  target_compile_options(dawn
+    PUBLIC -pg
+  )
+endif()
+
 if (DAWN_BUILD_EXAMPLES)
   add_subdirectory(examples)
 endif()
