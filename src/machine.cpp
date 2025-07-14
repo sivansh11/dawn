@@ -816,10 +816,7 @@ void machine_t::decode_and_execute_instruction(uint32_t _instruction) {
             _program_counter += 4;
           break;
         default:
-          // TODO: raise illegal instruction exception
-          std::stringstream ss;
-          ss << "Error: illegal instruction";
-          throw std::runtime_error(ss.str());
+          handle_trap(exception_code_t::e_illegal_instruction, _instruction);
       }
       break;
 
@@ -876,10 +873,7 @@ void machine_t::decode_and_execute_instruction(uint32_t _instruction) {
           _program_counter += 4;
           break;
         default:
-          // TODO: raise illegal instruction exception
-          std::stringstream ss;
-          ss << "Error: illegal instruction";
-          throw std::runtime_error(ss.str());
+          handle_trap(exception_code_t::e_illegal_instruction, _instruction);
       }
       break;
 
@@ -915,10 +909,7 @@ void machine_t::decode_and_execute_instruction(uint32_t _instruction) {
           _program_counter += 4;
           break;
         default:
-          // TODO: raise illegal instruction exception
-          std::stringstream ss;
-          ss << "Error: illegal instruction";
-          throw std::runtime_error(ss.str());
+          handle_trap(exception_code_t::e_illegal_instruction, _instruction);
       }
       break;
 
@@ -992,17 +983,12 @@ void machine_t::decode_and_execute_instruction(uint32_t _instruction) {
               _program_counter += 4;
               break;
             default:
-              // TODO: raise illegal instruction exception
-              std::stringstream ss;
-              ss << "Error: illegal instruction";
-              throw std::runtime_error(ss.str());
+              handle_trap(exception_code_t::e_illegal_instruction,
+                          _instruction);
           }
           break;
         default:
-          // TODO: raise illegal instruction exception
-          std::stringstream ss;
-          ss << "Error: illegal instruction";
-          throw std::runtime_error(ss.str());
+          handle_trap(exception_code_t::e_illegal_instruction, _instruction);
       }
       break;
 
@@ -1025,10 +1011,8 @@ void machine_t::decode_and_execute_instruction(uint32_t _instruction) {
               _program_counter += 4;
               break;
             default:
-              // TODO: raise illegal instruction exception
-              std::stringstream ss;
-              ss << "Error: illegal instruction";
-              throw std::runtime_error(ss.str());
+              handle_trap(exception_code_t::e_illegal_instruction,
+                          _instruction);
           }
           break;
 
@@ -1079,10 +1063,8 @@ void machine_t::decode_and_execute_instruction(uint32_t _instruction) {
               _program_counter += 4;
               break;
             default:
-              // TODO: raise illegal instruction exception
-              std::stringstream ss;
-              ss << "Error: illegal instruction";
-              throw std::runtime_error(ss.str());
+              handle_trap(exception_code_t::e_illegal_instruction,
+                          _instruction);
           }
           break;
 
@@ -1101,10 +1083,7 @@ void machine_t::decode_and_execute_instruction(uint32_t _instruction) {
           _program_counter += 4;
           break;
         default:
-          // TODO: raise illegal instruction exception
-          std::stringstream ss;
-          ss << "Error: illegal instruction";
-          throw std::runtime_error(ss.str());
+          handle_trap(exception_code_t::e_illegal_instruction, _instruction);
       }
       break;
 
@@ -1177,10 +1156,8 @@ void machine_t::decode_and_execute_instruction(uint32_t _instruction) {
               _write_csr(MSTATUS, mstatus);
             } break;
             default:
-              // TODO: raise illegal instruction exception
-              std::stringstream ss;
-              ss << "Error: illegal instruction";
-              throw std::runtime_error(ss.str());
+              handle_trap(exception_code_t::e_illegal_instruction,
+                          _instruction);
           }
           break;
           // TODO: CSR instructions should use read and write
@@ -1215,10 +1192,7 @@ void machine_t::decode_and_execute_instruction(uint32_t _instruction) {
         case 0b111:  // CSRRCI
           break;
         default:
-          // TODO: raise illegal instruction exception
-          std::stringstream ss;
-          ss << "Error: illegal instruction";
-          throw std::runtime_error(ss.str());
+          handle_trap(exception_code_t::e_illegal_instruction, _instruction);
       }
       break;
 
@@ -1261,17 +1235,12 @@ void machine_t::decode_and_execute_instruction(uint32_t _instruction) {
               _program_counter += 4;
               break;
             default:
-              // TODO: raise illegal instruction exception
-              std::stringstream ss;
-              ss << "Error: illegal instruction";
-              throw std::runtime_error(ss.str());
+              handle_trap(exception_code_t::e_illegal_instruction,
+                          _instruction);
           }
           break;
         default:
-          // TODO: raise illegal instruction exception
-          std::stringstream ss;
-          ss << "Error: illegal instruction";
-          throw std::runtime_error(ss.str());
+          handle_trap(exception_code_t::e_illegal_instruction, _instruction);
       }
       break;
 
@@ -1300,10 +1269,8 @@ void machine_t::decode_and_execute_instruction(uint32_t _instruction) {
               _program_counter += 4;
               break;
             default:
-              // TODO: raise illegal instruction exception
-              std::stringstream ss;
-              ss << "Error: illegal instruction";
-              throw std::runtime_error(ss.str());
+              handle_trap(exception_code_t::e_illegal_instruction,
+                          _instruction);
           }
           break;
 
@@ -1335,17 +1302,12 @@ void machine_t::decode_and_execute_instruction(uint32_t _instruction) {
               _program_counter += 4;
               break;
             default:
-              // TODO: raise illegal instruction exception
-              std::stringstream ss;
-              ss << "Error: illegal instruction";
-              throw std::runtime_error(ss.str());
+              handle_trap(exception_code_t::e_illegal_instruction,
+                          _instruction);
           }
           break;
         default:
-          // TODO: raise illegal instruction exception
-          std::stringstream ss;
-          ss << "Error: illegal instruction";
-          throw std::runtime_error(ss.str());
+          handle_trap(exception_code_t::e_illegal_instruction, _instruction);
       }
       break;
 
@@ -1439,10 +1401,7 @@ void machine_t::decode_and_execute_instruction(uint32_t _instruction) {
       // 1101001 00011 rs1 rm rd 1010011 FCVT.D.LU
       // 1111001 00000 rs1 000 rd 1010011 FMV.D.X
     default:
-      // TODO: raise illegal instruction exception
-      std::stringstream ss;
-      ss << "Error: illegal instruction";
-      throw std::runtime_error(ss.str());
+      handle_trap(exception_code_t::e_illegal_instruction, _instruction);
   }
 }
 
