@@ -49,9 +49,9 @@ void brk_handler(dawn::machine_t& machine) {
  * @param machine The machine instance.
  */
 void write_handler(dawn::machine_t& machine) {
-  int vfd = machine._registers[10];
+  int      vfd     = machine._registers[10];
   uint64_t address = machine._registers[11];
-  size_t len = machine._registers[12];
+  size_t   len     = machine._registers[12];
   if (vfd == 1 || vfd == 2) {
     for (uint64_t i = address; i < address + len; i++) {
       std::cout << (char)machine._memory.load<8>(i);
@@ -89,11 +89,11 @@ int main(int argc, char** argv) {
   dawn::machine_t machine{memory_size, page_size};
 
   // Register handlers for newlib syscalls. These are invoked by `ecall`.
-  machine.set_syscall(93, exit_handler);    // exit
-  machine.set_syscall(214, brk_handler);    // brk
-  machine.set_syscall(64, write_handler);   // write
-  machine.set_syscall(57, close_handler);   // close
-  machine.set_syscall(80, fstat_handler);   // fstat
+  machine.set_syscall(93, exit_handler);   // exit
+  machine.set_syscall(214, brk_handler);   // brk
+  machine.set_syscall(64, write_handler);  // write
+  machine.set_syscall(57, close_handler);  // close
+  machine.set_syscall(80, fstat_handler);  // fstat
 
   // Allocate a 64-byte shared memory region on the host.
   uint8_t* shared_memory = new uint8_t[64];
