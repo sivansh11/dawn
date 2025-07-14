@@ -25,6 +25,10 @@ struct memory_t {
   void insert_memory(uintptr_t address, size_t size);
   bool is_region_in_memory(uintptr_t address, size_t size);
 
+  void memcpy_host_to_guest(uint64_t dst, const void *src, uint64_t size);
+  void memcpy_guest_to_host(void *dst, uint64_t src, uint64_t size);
+  void memset(uint64_t dst, int value, uint64_t size);
+
   // clang-format off
   template <size_t size>
   uint64_t load(uint64_t virtual_address) {
