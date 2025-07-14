@@ -31,9 +31,9 @@ uint64_t memory_t::translate_guest_virtual_to_host(uint64_t virtual_address) {
          translate_guest_virtual_to_guest_physical(virtual_address);
 }
 
-void memory_t::insert_memory(uintptr_t addr, size_t size) {
+void memory_t::insert_memory(uintptr_t address, size_t size) {
   assert(size);  // size cant be 0
-  uintptr_t start = addr;
+  uintptr_t start = address;
   uintptr_t end   = start + size;
   range_t   range{start, end};
 
@@ -66,9 +66,9 @@ void memory_t::insert_memory(uintptr_t addr, size_t size) {
   _ranges.insert(itr, range);
 }
 
-bool memory_t::is_region_in_memory(uintptr_t addr, size_t size) {
+bool memory_t::is_region_in_memory(uintptr_t address, size_t size) {
   assert(size);  // size cant be 0
-  uintptr_t start = addr;
+  uintptr_t start = address;
   uintptr_t end   = start + size;
 
   uintptr_t current = start;

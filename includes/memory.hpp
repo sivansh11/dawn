@@ -22,8 +22,8 @@ struct memory_t {
   uint64_t translate_guest_virtual_to_guest_physical(uint64_t virtual_address);
   uint64_t translate_guest_virtual_to_host(uint64_t virtual_address);
 
-  void insert_memory(uintptr_t addr, size_t size);
-  bool is_region_in_memory(uintptr_t addr, size_t size);
+  void insert_memory(uintptr_t address, size_t size);
+  bool is_region_in_memory(uintptr_t address, size_t size);
 
   // clang-format off
   template <size_t size>
