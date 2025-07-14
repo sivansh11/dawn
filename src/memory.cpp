@@ -96,19 +96,19 @@ bool memory_t::is_region_in_memory(uintptr_t address, size_t size) {
 void memory_t::memcpy_host_to_guest(uint64_t dst, const void *src,
                                     uint64_t size) {
   assert(src);
-  assert(is_region_in_memory(dst, size));
+  assert(is_region_in_memory(translate_guest_virtual_to_host(dst), size));
   std::memcpy(reinterpret_cast<void *>(translate_guest_virtual_to_host(dst)),
               src, size);
 }
 void memory_t::memcpy_guest_to_host(void *dst, uint64_t src, uint64_t size) {
   assert(dst);
-  assert(is_region_in_memory(src, size));
+  assert(is_region_in_memory(translate_guest_virtual_to_host(src), size));
   std::memcpy(dst,
               reinterpret_cast<void *>(translate_guest_virtual_to_host(src)),
               size);
 }
 void memory_t::memset(uint64_t dst, int value, uint64_t size) {
-  assert(is_region_in_memory(dst, size));
+  assert(is_region_in_memory(translate_guest_virtual_to_host(dst), size));
   std::memset(reinterpret_cast<void *>(translate_guest_virtual_to_host(dst)),
               value, size);
 }

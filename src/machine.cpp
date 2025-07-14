@@ -62,7 +62,7 @@ bool machine_t::load_elf_and_set_program_counter(
     _memory.memcpy_host_to_guest(
         virtual_address, reinterpret_cast<const void*>(segment->get_data()),
         file_size);
-    if (memory_size) {
+    if (memory_size - file_size) {
       _memory.memset(virtual_address + file_size, 0, memory_size - file_size);
     }
   }
