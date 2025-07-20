@@ -2,6 +2,7 @@
 #define DAWN_HELPER_HPP
 
 #include <cstdint>
+#include <ostream>
 
 namespace dawn {
 
@@ -19,6 +20,8 @@ constexpr inline uint32_t extract_bit_range(uint32_t value, uint32_t start,
 constexpr inline int64_t sext(uint64_t value, uint32_t imm_bit_width) {
   return (int64_t)(value << (64 - imm_bit_width)) >> (64 - imm_bit_width);
 }
+
+void debug_disassemble_instruction(uint32_t _instruction, std::ostream& o);
 
 }  // namespace dawn
 

@@ -80,7 +80,7 @@ int main(int argc, char** argv) {
           << " ";
       log2 << std::hex << program_counter << '\n';
       log2.flush();
-      machine.debug_disassemble_instruction(*instruction, log);
+      dawn::debug_disassemble_instruction(*instruction, log);
       log << "Program Counter: " << std::hex << machine._program_counter
           << '\n';
       log << "Registers: \n";
