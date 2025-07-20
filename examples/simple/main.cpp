@@ -54,7 +54,7 @@ void write_handler(dawn::machine_t& machine) {
   size_t   len     = machine._registers[12];
   if (vfd == 1 || vfd == 2) {
     for (uint64_t i = address; i < address + len; i++) {
-      std::cout << (char)machine._memory.load<8>(i);
+      std::cout << (char)*machine._memory.load<8>(i);
     }
     machine._registers[10] = len;
   } else {

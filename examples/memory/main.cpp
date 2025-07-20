@@ -32,7 +32,7 @@ int main(int argc, char** argv) {
     size_t   len     = machine._registers[12];
     if (vfd == 1 || vfd == 2) {
       for (uint64_t i = address; i < address + len; i++) {
-        std::cout << (char)machine._memory.load<8>(i);
+        std::cout << (char)*machine._memory.load<8>(i);
       }
       machine._registers[10] = len;
     } else {
@@ -49,7 +49,7 @@ int main(int argc, char** argv) {
   machine.set_syscall(1000, [](dawn::machine_t& machine) {
     uint64_t i = 0;
     std::cout << "[ERROR]: ";
-    while (char ch = machine._memory.load<8>(machine._registers[10] + i++)) {
+    while (char ch = *machine._memory.load<8>(machine._registers[10] + i++)) {
       std::cout << ch;
     }
   });
@@ -67,7 +67,7 @@ int main(int argc, char** argv) {
   while (running) {
     auto [instruction, program_counter] =
         machine.fetch_instruction_at_program_counter();
-    machine.decode_and_execute_instruction(instruction);
+    if (instruction) machine.decode_and_execute_instruction(*instruction);
   }
 
   for (uint32_t i = 0; i < 5; i++) {
