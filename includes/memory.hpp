@@ -3,6 +3,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <optional>
 #include <stdexcept>
 #include <vector>
 
@@ -31,7 +32,7 @@ struct memory_t {
 
   // clang-format off
   template <size_t size>
-  uint64_t load(uint64_t virtual_address) {
+  std::optional<uint64_t> load(uint64_t virtual_address) {
     if constexpr (size == 8) return _load_8(virtual_address);
     else if constexpr (size == 16) return _load_16(virtual_address);
     else if constexpr (size == 32) return _load_32(virtual_address);
@@ -39,24 +40,24 @@ struct memory_t {
     else throw std::runtime_error("Error: unknown size load");
   }
   template <size_t size>
-  void store(uint64_t virtual_address, uint64_t value) {
-    if constexpr (size == 8) _store_8(virtual_address, value);
-    else if constexpr (size == 16) _store_16(virtual_address, value);
-    else if constexpr (size == 32) _store_32(virtual_address, value);
-    else if constexpr (size == 64) _store_64(virtual_address, value);
+  bool store(uint64_t virtual_address, uint64_t value) {
+    if constexpr (size == 8) return _store_8(virtual_address, value);
+    else if constexpr (size == 16) return _store_16(virtual_address, value);
+    else if constexpr (size == 32) return _store_32(virtual_address, value);
+    else if constexpr (size == 64) return _store_64(virtual_address, value);
     else throw std::runtime_error("Error: unknown size store");
   }
   // clang-format on
 
-  uint64_t _load_8(uint64_t virtual_address);
-  uint64_t _load_16(uint64_t virtual_address);
-  uint64_t _load_32(uint64_t virtual_address);
-  uint64_t _load_64(uint64_t virtual_address);
+  std::optional<uint64_t> _load_8(uint64_t virtual_address);
+  std::optional<uint64_t> _load_16(uint64_t virtual_address);
+  std::optional<uint64_t> _load_32(uint64_t virtual_address);
+  std::optional<uint64_t> _load_64(uint64_t virtual_address);
 
-  void _store_8(uint64_t virtual_address, uint64_t value);
-  void _store_16(uint64_t virtual_address, uint64_t value);
-  void _store_32(uint64_t virtual_address, uint64_t value);
-  void _store_64(uint64_t virtual_address, uint64_t value);
+  bool _store_8(uint64_t virtual_address, uint64_t value);
+  bool _store_16(uint64_t virtual_address, uint64_t value);
+  bool _store_32(uint64_t virtual_address, uint64_t value);
+  bool _store_64(uint64_t virtual_address, uint64_t value);
 
   std::vector<range_t> _ranges;
 

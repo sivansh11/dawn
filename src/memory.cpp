@@ -129,82 +129,78 @@ void write_as(uint8_t *dst, T value) {
   std::memcpy(dst, &value, sizeof(T));
 }
 
-uint64_t memory_t::_load_8(uint64_t virtual_address) {
+std::optional<uint64_t> memory_t::_load_8(uint64_t virtual_address) {
   if (!is_region_in_memory(translate_guest_virtual_to_host(virtual_address),
                            1)) {
-    // TODO: propagate error to caller
-    throw std::runtime_error("Error: failed to load 8");
+    return std::nullopt;
   }
   return read_as<uint8_t>(reinterpret_cast<uint8_t *>(
       translate_guest_virtual_to_host(virtual_address)));
 }
-uint64_t memory_t::_load_16(uint64_t virtual_address) {
+std::optional<uint64_t> memory_t::_load_16(uint64_t virtual_address) {
   if (!is_region_in_memory(translate_guest_virtual_to_host(virtual_address),
                            2)) {
-    // TODO: propagate error to caller
-    throw std::runtime_error("Error: failed to load 16");
+    return std::nullopt;
   }
   return read_as<uint16_t>(reinterpret_cast<uint8_t *>(
       translate_guest_virtual_to_host(virtual_address)));
 }
-uint64_t memory_t::_load_32(uint64_t virtual_address) {
+std::optional<uint64_t> memory_t::_load_32(uint64_t virtual_address) {
   if (!is_region_in_memory(translate_guest_virtual_to_host(virtual_address),
                            4)) {
-    // TODO: propagate error to caller
-    throw std::runtime_error("Error: failed to load 32");
+    return std::nullopt;
   }
   return read_as<uint32_t>(reinterpret_cast<uint8_t *>(
       translate_guest_virtual_to_host(virtual_address)));
 }
-uint64_t memory_t::_load_64(uint64_t virtual_address) {
+std::optional<uint64_t> memory_t::_load_64(uint64_t virtual_address) {
   if (!is_region_in_memory(translate_guest_virtual_to_host(virtual_address),
                            8)) {
-    // TODO: propagate error to caller
-    throw std::runtime_error("Error: failed to load 64");
+    return std::nullopt;
   }
   return read_as<uint64_t>(reinterpret_cast<uint8_t *>(
       translate_guest_virtual_to_host(virtual_address)));
 }
 
-void memory_t::_store_8(uint64_t virtual_address, uint64_t value) {
+bool memory_t::_store_8(uint64_t virtual_address, uint64_t value) {
   if (!is_region_in_memory(translate_guest_virtual_to_host(virtual_address),
                            1)) {
-    // TODO: propagate error to caller
-    throw std::runtime_error("Error: failed to store 8");
+    return false;
   }
   write_as<uint8_t>(reinterpret_cast<uint8_t *>(
                         translate_guest_virtual_to_host(virtual_address)),
                     value);
+  return true;
 }
-void memory_t::_store_16(uint64_t virtual_address, uint64_t value) {
+bool memory_t::_store_16(uint64_t virtual_address, uint64_t value) {
   if (!is_region_in_memory(translate_guest_virtual_to_host(virtual_address),
                            2)) {
-    // TODO: propagate error to caller
-    throw std::runtime_error("Error: failed to store 16");
+    return false;
   }
   write_as<uint16_t>(reinterpret_cast<uint8_t *>(
                          translate_guest_virtual_to_host(virtual_address)),
                      value);
+  return true;
 }
-void memory_t::_store_32(uint64_t virtual_address, uint64_t value) {
+bool memory_t::_store_32(uint64_t virtual_address, uint64_t value) {
   if (!is_region_in_memory(translate_guest_virtual_to_host(virtual_address),
                            4)) {
-    // TODO: propagate error to caller
-    throw std::runtime_error("Error: failed to store 32");
+    return false;
   }
   write_as<uint32_t>(reinterpret_cast<uint8_t *>(
                          translate_guest_virtual_to_host(virtual_address)),
                      value);
+  return true;
 }
-void memory_t::_store_64(uint64_t virtual_address, uint64_t value) {
+bool memory_t::_store_64(uint64_t virtual_address, uint64_t value) {
   if (!is_region_in_memory(translate_guest_virtual_to_host(virtual_address),
                            8)) {
-    // TODO: propagate error to caller
-    throw std::runtime_error("Error: failed to store 64");
+    return false;
   }
   write_as<uint64_t>(reinterpret_cast<uint8_t *>(
                          translate_guest_virtual_to_host(virtual_address)),
                      value);
+  return true;
 }
 
 }  // namespace dawn
