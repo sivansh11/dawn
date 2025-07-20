@@ -4,9 +4,11 @@
 #include <cassert>
 #include <cstdint>
 #include <elfio/elfio.hpp>
+#include <exception>
 #include <iomanip>
 #include <iostream>
 #include <limits>
+#include <optional>
 #include <ostream>
 #include <sstream>
 #include <stdexcept>
@@ -214,14 +216,24 @@ void machine_t::simulate(uint64_t steps) {
     if (!_running) return;
     auto [instruction, program_counter] =
         fetch_instruction_at_program_counter();
-    decode_and_execute_instruction(instruction);
+    if (instruction) decode_and_execute_instruction(*instruction);
   }
 }
 
-std::pair<uint32_t, uint64_t>
+std::pair<std::optional<uint32_t>, uint64_t>
 machine_t::fetch_instruction_at_program_counter() {
   // TODO: handle invalid loads
-  return {_memory.load<32>(_program_counter), _program_counter};
+  if (_program_counter % 4 != 0) {
+    handle_trap(exception_code_t::e_instruction_address_misaligned,
+                _program_counter);
+    return {std::nullopt, _program_counter};
+  }
+  std::optional<uint64_t> value = _memory.load<32>(_program_counter);
+  if (!value) {
+    handle_trap(exception_code_t::e_load_access_fault, _program_counter);
+    return {std::nullopt, _program_counter};
+  }
+  return {*value, _program_counter};
 }
 void machine_t::debug_disassemble_instruction(uint32_t      _instruction,
                                               std::ostream& o) {
@@ -272,8 +284,7 @@ void machine_t::debug_disassemble_instruction(uint32_t      _instruction,
         case 0b111:  // BGEU
           o << "bgeu\n";
           break;
-        default:
-          // TODO: raise illegal instruction exception
+        default:  // TODO: raise illegal instruction exception
           std::stringstream ss;
           ss << "Error: illegal instruction";
           throw std::runtime_error(ss.str());
@@ -739,14 +750,22 @@ void machine_t::decode_and_execute_instruction(uint32_t _instruction) {
     // imm[20|10:1|11|19:12] rd 1101111 JAL
     case 0b1101111: {  // JAL
       uint64_t address = _program_counter + instruction.as.j_type.imm_sext();
-      // TODO: raise misaligned jump exception
+      if (address % 4 != 0) {
+        handle_trap(exception_code_t::e_instruction_address_misaligned,
+                    address);
+        break;
+      }
       _registers[instruction.as.j_type.rd()] = _program_counter + 4;
       _program_counter                       = address;
     } break;
     // imm[11:0] rs1 000 rd 1100111 JALR
     case 0b1100111: {  // JALR
       uint64_t address = _program_counter + 4;
-      // TODO: raise misaligned jump exception
+      if (address % 4 != 0) {
+        handle_trap(exception_code_t::e_instruction_address_misaligned,
+                    address);
+        break;
+      }
       _program_counter = (_registers[instruction.as.i_type.rs1()] +
                           instruction.as.i_type.imm_sext()) &
                          (~1u);
@@ -758,61 +777,91 @@ void machine_t::decode_and_execute_instruction(uint32_t _instruction) {
         // imm[12|10:5] rs2 rs1 000 imm[4:1|11] 1100011 BEQ
         case 0b000:  // BEQ
           if (_registers[instruction.as.b_type.rs1()] ==
-              _registers[instruction.as.b_type.rs2()])
-            // TODO: raise misaligned branch exception
-            _program_counter =
+              _registers[instruction.as.b_type.rs2()]) {
+            uint64_t address =
                 _program_counter + instruction.as.b_type.imm_sext();
-          else
+            if (address % 4 != 0) {
+              handle_trap(exception_code_t::e_instruction_address_misaligned,
+                          address);
+              break;
+            }
+            _program_counter = address;
+          } else
             _program_counter += 4;
           break;
         // imm[12|10:5] rs2 rs1 001 imm[4:1|11] 1100011 BNE
         case 0b001:  // BNE
           if (_registers[instruction.as.b_type.rs1()] !=
-              _registers[instruction.as.b_type.rs2()])
-            // TODO: raise misaligned branch exception
-            _program_counter =
+              _registers[instruction.as.b_type.rs2()]) {
+            uint64_t address =
                 _program_counter + instruction.as.b_type.imm_sext();
-          else
+            if (address % 4 != 0) {
+              handle_trap(exception_code_t::e_instruction_address_misaligned,
+                          address);
+              break;
+            }
+            _program_counter = address;
+          } else
             _program_counter += 4;
           break;
         // imm[12|10:5] rs2 rs1 100 imm[4:1|11] 1100011 BLT
         case 0b100:  // BLT
           if (static_cast<int64_t>(_registers[instruction.as.b_type.rs1()]) <
-              static_cast<int64_t>(_registers[instruction.as.b_type.rs2()]))
-            // TODO: raise misaligned branch exception
-            _program_counter =
+              static_cast<int64_t>(_registers[instruction.as.b_type.rs2()])) {
+            uint64_t address =
                 _program_counter + instruction.as.b_type.imm_sext();
-          else
+            if (address % 4 != 0) {
+              handle_trap(exception_code_t::e_instruction_address_misaligned,
+                          address);
+              break;
+            }
+            _program_counter = address;
+          } else
             _program_counter += 4;
           break;
         // imm[12|10:5] rs2 rs1 101 imm[4:1|11] 1100011 BGE
         case 0b101:  // BGE
           if (static_cast<int64_t>(_registers[instruction.as.b_type.rs1()]) >=
-              static_cast<int64_t>(_registers[instruction.as.b_type.rs2()]))
-            // TODO: raise misaligned branch exception
-            _program_counter =
+              static_cast<int64_t>(_registers[instruction.as.b_type.rs2()])) {
+            uint64_t address =
                 _program_counter + instruction.as.b_type.imm_sext();
-          else
+            if (address % 4 != 0) {
+              handle_trap(exception_code_t::e_instruction_address_misaligned,
+                          address);
+              break;
+            }
+            _program_counter = address;
+          } else
             _program_counter += 4;
           break;
         // imm[12|10:5] rs2 rs1 110 imm[4:1|11] 1100011 BLTU
         case 0b110:  // BLTU
           if (_registers[instruction.as.b_type.rs1()] <
-              _registers[instruction.as.b_type.rs2()])
-            // TODO: raise misaligned branch exception
-            _program_counter =
+              _registers[instruction.as.b_type.rs2()]) {
+            uint64_t address =
                 _program_counter + instruction.as.b_type.imm_sext();
-          else
+            if (address % 4 != 0) {
+              handle_trap(exception_code_t::e_instruction_address_misaligned,
+                          address);
+              break;
+            }
+            _program_counter = address;
+          } else
             _program_counter += 4;
           break;
         // imm[12|10:5] rs2 rs1 111 imm[4:1|11] 1100011 BGEU
         case 0b111:  // BGEU
           if (_registers[instruction.as.b_type.rs1()] >=
-              _registers[instruction.as.b_type.rs2()])
-            // TODO: raise misaligned branch exception
-            _program_counter =
+              _registers[instruction.as.b_type.rs2()]) {
+            uint64_t address =
                 _program_counter + instruction.as.b_type.imm_sext();
-          else
+            if (address % 4 != 0) {
+              handle_trap(exception_code_t::e_instruction_address_misaligned,
+                          address);
+              break;
+            }
+            _program_counter = address;
+          } else
             _program_counter += 4;
           break;
         default:
@@ -824,54 +873,96 @@ void machine_t::decode_and_execute_instruction(uint32_t _instruction) {
       // TODO: handle invalid address
       switch (instruction.as.i_type.funct3()) {
         // imm[11:0] rs1 000 rd 0000011 LB
-        case 0b000:  // LB
-          _registers[instruction.as.i_type.rd()] = static_cast<int8_t>(
-              _memory.load<8>(_registers[instruction.as.i_type.rs1()] +
-                              instruction.as.i_type.imm_sext()));
+        case 0b000: {  // LB
+          uint64_t address = _registers[instruction.as.i_type.rs1()] +
+                             instruction.as.i_type.imm_sext();
+          // TODO: implement address misaligned trap
+          std::optional<uint64_t> value = _memory.load<8>(address);
+          if (!value) {
+            handle_trap(exception_code_t::e_load_access_fault, address);
+            break;
+          }
+          _registers[instruction.as.i_type.rd()] = static_cast<int8_t>(*value);
           _program_counter += 4;
-          break;
+        } break;
         // imm[11:0] rs1 001 rd 0000011 LH
-        case 0b001:  // LH
-          _registers[instruction.as.i_type.rd()] = static_cast<int16_t>(
-              _memory.load<16>(_registers[instruction.as.i_type.rs1()] +
-                               instruction.as.i_type.imm_sext()));
+        case 0b001: {  // LH
+          uint64_t address = _registers[instruction.as.i_type.rs1()] +
+                             instruction.as.i_type.imm_sext();
+          // TODO: implement address misaligned trap
+          std::optional<uint64_t> value = _memory.load<16>(address);
+          if (!value) {
+            handle_trap(exception_code_t::e_load_access_fault, address);
+            break;
+          }
+          _registers[instruction.as.i_type.rd()] = static_cast<int16_t>(*value);
           _program_counter += 4;
-          break;
+        } break;
         // imm[11:0] rs1 010 rd 0000011 LW
-        case 0b010:  // LW
-          _registers[instruction.as.i_type.rd()] = static_cast<int32_t>(
-              _memory.load<32>(_registers[instruction.as.i_type.rs1()] +
-                               instruction.as.i_type.imm_sext()));
+        case 0b010: {  // LW
+          uint64_t address = _registers[instruction.as.i_type.rs1()] +
+                             instruction.as.i_type.imm_sext();
+          // TODO: implement address misaligned trap
+          std::optional<uint64_t> value = _memory.load<32>(address);
+          if (!value) {
+            handle_trap(exception_code_t::e_load_access_fault, address);
+            break;
+          }
+          _registers[instruction.as.i_type.rd()] = static_cast<int32_t>(*value);
           _program_counter += 4;
-          break;
+        } break;
         // imm[11:0] rs1 100 rd 0000011 LBU
-        case 0b100:  // LBU
-          _registers[instruction.as.i_type.rd()] =
-              _memory.load<8>(_registers[instruction.as.i_type.rs1()] +
-                              instruction.as.i_type.imm_sext());
+        case 0b100: {  // LBU
+          uint64_t address = _registers[instruction.as.i_type.rs1()] +
+                             instruction.as.i_type.imm_sext();
+          // TODO: implement address misaligned trap
+          std::optional<uint64_t> value = _memory.load<8>(address);
+          if (!value) {
+            handle_trap(exception_code_t::e_load_access_fault, address);
+            break;
+          }
+          _registers[instruction.as.i_type.rd()] = *value;
           _program_counter += 4;
-          break;
+        } break;
         // imm[11:0] rs1 101 rd 0000011 LHU
-        case 0b101:  // LHU
-          _registers[instruction.as.i_type.rd()] =
-              _memory.load<16>(_registers[instruction.as.i_type.rs1()] +
-                               instruction.as.i_type.imm_sext());
+        case 0b101: {  // LHU
+          uint64_t address = _registers[instruction.as.i_type.rs1()] +
+                             instruction.as.i_type.imm_sext();
+          // TODO: implement address misaligned trap
+          std::optional<uint64_t> value = _memory.load<16>(address);
+          if (!value) {
+            handle_trap(exception_code_t::e_load_access_fault, address);
+            break;
+          }
+          _registers[instruction.as.i_type.rd()] = *value;
           _program_counter += 4;
-          break;
+        } break;
           // imm[11:0] rs1 110 rd 0000011 LWU
-        case 0b110:  // LWU
-          _registers[instruction.as.i_type.rd()] =
-              _memory.load<32>(_registers[instruction.as.i_type.rs1()] +
-                               instruction.as.i_type.imm_sext());
+        case 0b110: {  // LWU
+          uint64_t address = _registers[instruction.as.i_type.rs1()] +
+                             instruction.as.i_type.imm_sext();
+          // TODO: implement address misaligned trap
+          std::optional<uint64_t> value = _memory.load<32>(address);
+          if (!value) {
+            handle_trap(exception_code_t::e_load_access_fault, address);
+            break;
+          }
+          _registers[instruction.as.i_type.rd()] = *value;
           _program_counter += 4;
-          break;
+        } break;
           // imm[11:0] rs1 011 rd 0000011 LD
-        case 0b011:  // LD
-          _registers[instruction.as.i_type.rd()] =
-              _memory.load<64>(_registers[instruction.as.i_type.rs1()] +
-                               instruction.as.i_type.imm_sext());
+        case 0b011: {  // LD
+          uint64_t address = _registers[instruction.as.i_type.rs1()] +
+                             instruction.as.i_type.imm_sext();
+          // TODO: implement address misaligned trap
+          std::optional<uint64_t> value = _memory.load<64>(address);
+          if (!value) {
+            handle_trap(exception_code_t::e_load_access_fault, address);
+            break;
+          }
+          _registers[instruction.as.i_type.rd()] = *value;
           _program_counter += 4;
-          break;
+        } break;
         default:
           handle_trap(exception_code_t::e_illegal_instruction, _instruction);
       }
@@ -881,33 +972,53 @@ void machine_t::decode_and_execute_instruction(uint32_t _instruction) {
       // TODO: handle invalid address
       switch (instruction.as.s_type.funct3()) {
         // imm[11:5] rs2 rs1 000 imm[4:0] 0100011 SB
-        case 0b000:  // SB
-          _memory.store<8>(_registers[instruction.as.s_type.rs1()] +
-                               instruction.as.s_type.imm_sext(),
-                           _registers[instruction.as.s_type.rs2()]);
+        case 0b000: {  // SB
+          uint64_t address = _registers[instruction.as.s_type.rs1()] +
+                             instruction.as.s_type.imm_sext();
+          if (!_memory.store<8>(_registers[instruction.as.s_type.rs1()] +
+                                    instruction.as.s_type.imm_sext(),
+                                _registers[instruction.as.s_type.rs2()])) {
+            handle_trap(exception_code_t::e_store_access_fault, address);
+            break;
+          }
           _program_counter += 4;
-          break;
+        } break;
         // imm[11:5] rs2 rs1 001 imm[4:0] 0100011 SH
-        case 0b001:  // SH
-          _memory.store<16>(_registers[instruction.as.s_type.rs1()] +
-                                instruction.as.s_type.imm_sext(),
-                            _registers[instruction.as.s_type.rs2()]);
+        case 0b001: {  // SH
+          uint64_t address = _registers[instruction.as.s_type.rs1()] +
+                             instruction.as.s_type.imm_sext();
+          if (!_memory.store<16>(_registers[instruction.as.s_type.rs1()] +
+                                     instruction.as.s_type.imm_sext(),
+                                 _registers[instruction.as.s_type.rs2()])) {
+            handle_trap(exception_code_t::e_store_access_fault, address);
+            break;
+          }
           _program_counter += 4;
-          break;
+        } break;
         // imm[11:5] rs2 rs1 010 imm[4:0] 0100011 SW
-        case 0b010:  // SW
-          _memory.store<32>(_registers[instruction.as.s_type.rs1()] +
-                                instruction.as.s_type.imm_sext(),
-                            _registers[instruction.as.s_type.rs2()]);
+        case 0b010: {  // SW
+          uint64_t address = _registers[instruction.as.s_type.rs1()] +
+                             instruction.as.s_type.imm_sext();
+          if (!_memory.store<32>(_registers[instruction.as.s_type.rs1()] +
+                                     instruction.as.s_type.imm_sext(),
+                                 _registers[instruction.as.s_type.rs2()])) {
+            handle_trap(exception_code_t::e_store_access_fault, address);
+            break;
+          }
           _program_counter += 4;
-          break;
+        } break;
         // imm[11:5] rs2 rs1 011 imm[4:0] 0100011 SD
-        case 0b011:  // SD
-          _memory.store<64>(_registers[instruction.as.s_type.rs1()] +
-                                instruction.as.s_type.imm_sext(),
-                            _registers[instruction.as.s_type.rs2()]);
+        case 0b011: {  // SD
+          uint64_t address = _registers[instruction.as.s_type.rs1()] +
+                             instruction.as.s_type.imm_sext();
+          if (!_memory.store<64>(_registers[instruction.as.s_type.rs1()] +
+                                     instruction.as.s_type.imm_sext(),
+                                 _registers[instruction.as.s_type.rs2()])) {
+            handle_trap(exception_code_t::e_store_access_fault, address);
+            break;
+          }
           _program_counter += 4;
-          break;
+        } break;
         default:
           handle_trap(exception_code_t::e_illegal_instruction, _instruction);
       }

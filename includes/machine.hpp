@@ -26,7 +26,8 @@ struct machine_t {
 
   void handle_trap(exception_code_t cause_code, uint64_t value);
 
-  std::pair<uint32_t, uint64_t> fetch_instruction_at_program_counter();
+  std::pair<std::optional<uint32_t>, uint64_t>
+       fetch_instruction_at_program_counter();
   void debug_disassemble_instruction(uint32_t instruction, std::ostream& o);
   void decode_and_execute_instruction(uint32_t instruction);
 
