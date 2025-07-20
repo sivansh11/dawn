@@ -120,6 +120,11 @@ void machine_t::handle_trap(exception_code_t cause_code, uint64_t value) {
   } else {
     _program_counter = mtvec_base;
   }
+  if (!_program_counter) {
+    throw std::runtime_error("Error: trap address 0");
+    // TODO: default handle_trap handler, should print exception_code_t and exit
+    decode_and_execute_instruction(0b00110000001000000000000001110011);  // MRET
+  }
 }
 
 uint64_t machine_t::_read_csr(uint16_t address) {
@@ -735,7 +740,7 @@ void machine_t::decode_and_execute_instruction(uint32_t _instruction) {
             // 000000000001 00000 000 00000 1110011 EBREAK
             case 0b000000000001:  // EBREAK
               break;
-            // 001100000010 00000 000 00000 1110011 EBREAK
+            // 001100000010 00000 000 00000 1110011 MRET
             case 0b001100000010: {  // MRET
               uint64_t mstatus = _read_csr(MSTATUS);
               uint64_t mpp = (mstatus & MSTATUS_MPP_MASK) >> MSTATUS_MPP_SHIFT;
