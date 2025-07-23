@@ -88,6 +88,8 @@ bool machine_t::load_elf_and_set_program_counter(
   _memory.insert_memory(_memory.translate_guest_virtual_to_host(guest_max),
                         _memory._size - guest_max,
                         memory_protection_t::e_read_write);
+  // TODO: insert a byte with memory_protection_t::e_none to prevent
+  // stack overflow
   for (uint32_t i = 0; i < reader.sections.size(); i++) {
     ELFIO::section* section = reader.sections[i];
     if (section->get_type() != ELFIO::SHT_SYMTAB) continue;
