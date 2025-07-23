@@ -142,6 +142,7 @@ void machine_t::handle_trap(exception_code_t cause_code, uint64_t value) {
   }
   if (_program_counter == 0) {
     switch (cause_code) {
+      case exception_code_t::e_instruction_access_fault:
       case exception_code_t::e_load_access_fault:
       case exception_code_t::e_store_access_fault: {
         std::stringstream ss;
