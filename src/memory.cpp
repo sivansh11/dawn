@@ -6,14 +6,29 @@
 #include <cstring>
 #include <ios>
 #include <iostream>
+#include <iterator>
 #include <limits>
 #include <stdexcept>
 
 namespace dawn {
 
+std::string to_string(memory_protection_t protection) {
+  switch (protection) {
+    case memory_protection_t::e_none:
+      return "none";
+    case memory_protection_t::e_write:
+      return "write";
+    case memory_protection_t::e_read:
+      return "read";
+    case memory_protection_t::e_exec:
+      return "exec";
+    default:
+      throw std::runtime_error("Error: unknown protection");
+  }
+}
+
 memory_t::memory_t(uint64_t size) : _size(size), _guest_base(0) {
   _host_base = new uint8_t[_size];
-  insert_memory(reinterpret_cast<uintptr_t>(_host_base), _size);
 }
 memory_t::~memory_t() { delete[] _host_base; }
 
@@ -31,66 +46,48 @@ uint64_t memory_t::translate_guest_virtual_to_host(uint64_t virtual_address) {
          translate_guest_virtual_to_guest_physical(virtual_address);
 }
 
-void memory_t::insert_memory(uintptr_t address, size_t size) {
-  assert(size);  // size cant be 0
-  uintptr_t start = address;
-  uintptr_t end   = start + size;
-  range_t   range{start, end};
-
-  auto itr = std::upper_bound(_ranges.begin(), _ranges.end(), range);
-  // check for overlaps
-  if (itr != _ranges.begin()) {
-    auto prev_itr = itr - 1;
-    if (std::max(range._start, prev_itr->_start) <
-        std::min(range._end, prev_itr->_end))
-      throw std::runtime_error("Error: Overlap detected in memory");
+void memory_t::insert_memory(uintptr_t address, size_t size,
+                             memory_protection_t protection) {
+  assert(size);
+  range_t new_range{address, address + size, protection};
+  // TODO: optimise
+  for (const auto &range : _ranges) {
+    if (new_range.overlaps_with(range))
+      throw std::runtime_error("Error: overlap detected");
   }
-  if (itr != _ranges.end()) {
-    if (std::max(range._start, itr->_start) < std::min(range._end, itr->_end))
-      throw std::runtime_error("Error: Overlap detected in memory");
-  }
-  // check if can merge
-  if (itr != _ranges.begin()) {
-    auto prev_itr = itr - 1;
-    if (prev_itr->_end == range._start) {
-      range._start = prev_itr->_start;
-      itr          = _ranges.erase(prev_itr);
-    }
-  }
-  if (itr != _ranges.end()) {
-    if (range._end == itr->_start) {
-      range._end = itr->_end;
-      itr        = _ranges.erase(itr);
-    }
-  }
-  _ranges.insert(itr, range);
+  _ranges.insert(new_range);
 }
-
 bool memory_t::is_region_in_memory(uintptr_t address, size_t size) {
-  assert(size);  // size cant be 0
-  uintptr_t start = address;
-  uintptr_t end   = start + size;
+  assert(_ranges.size());  // atleast 1 range should be inserted
+  assert(size);
+  range_t range{address, address + size};
 
-  uintptr_t current = start;
+  auto itr = _ranges.lower_bound(range);
 
-  auto itr =
-      std::lower_bound(_ranges.begin(), _ranges.end(),
-                       range_t{start, std::numeric_limits<uintptr_t>::max()});
-  if (itr != _ranges.begin()) {
-    if ((itr - 1)->_end > start) {
-      itr--;
-    }
-  }
-  while (current < end) {
-    if (itr == _ranges.end() || itr->_start > current) {
-      return false;
-    }
-    if (current >= itr->_start && current < itr->_end) {
-      current = std::min(end, itr->_end);
-    } else
-      itr++;
-  }
-  return true;
+  if (itr != _ranges.end())
+    if (itr->contains(range)) return true;
+  if (itr == _ranges.begin()) return false;
+  itr = std::prev(itr);
+  if (itr->contains(range)) return true;
+  return false;
+}
+// TODO: remove code duplication ?
+bool memory_t::is_region_in_memory(uintptr_t address, size_t size,
+                                   memory_protection_t protection) {
+  assert(_ranges.size());  // atleast 1 range should be inserted
+  assert(size);
+  range_t range{address, address + size, protection};
+
+  auto itr = _ranges.lower_bound(range);
+
+  if (itr != _ranges.end())
+    if (itr->contains(range) && has_all(itr->_protection, protection))
+      return true;
+  if (itr == _ranges.begin()) return false;
+  itr = std::prev(itr);
+  if (itr->contains(range) && has_all(itr->_protection, protection))
+    return true;
+  return false;
 }
 
 void memory_t::memcpy_host_to_guest(uint64_t dst, const void *src,
@@ -130,32 +127,32 @@ void write_as(uint8_t *dst, T value) {
 }
 
 std::optional<uint64_t> memory_t::_load_8(uint64_t virtual_address) {
-  if (!is_region_in_memory(translate_guest_virtual_to_host(virtual_address),
-                           1)) {
+  if (!is_region_in_memory(translate_guest_virtual_to_host(virtual_address), 1,
+                           memory_protection_t::e_read)) {
     return std::nullopt;
   }
   return read_as<uint8_t>(reinterpret_cast<uint8_t *>(
       translate_guest_virtual_to_host(virtual_address)));
 }
 std::optional<uint64_t> memory_t::_load_16(uint64_t virtual_address) {
-  if (!is_region_in_memory(translate_guest_virtual_to_host(virtual_address),
-                           2)) {
+  if (!is_region_in_memory(translate_guest_virtual_to_host(virtual_address), 2,
+                           memory_protection_t::e_read)) {
     return std::nullopt;
   }
   return read_as<uint16_t>(reinterpret_cast<uint8_t *>(
       translate_guest_virtual_to_host(virtual_address)));
 }
 std::optional<uint64_t> memory_t::_load_32(uint64_t virtual_address) {
-  if (!is_region_in_memory(translate_guest_virtual_to_host(virtual_address),
-                           4)) {
+  if (!is_region_in_memory(translate_guest_virtual_to_host(virtual_address), 4,
+                           memory_protection_t::e_read)) {
     return std::nullopt;
   }
   return read_as<uint32_t>(reinterpret_cast<uint8_t *>(
       translate_guest_virtual_to_host(virtual_address)));
 }
 std::optional<uint64_t> memory_t::_load_64(uint64_t virtual_address) {
-  if (!is_region_in_memory(translate_guest_virtual_to_host(virtual_address),
-                           8)) {
+  if (!is_region_in_memory(translate_guest_virtual_to_host(virtual_address), 8,
+                           memory_protection_t::e_read)) {
     return std::nullopt;
   }
   return read_as<uint64_t>(reinterpret_cast<uint8_t *>(
@@ -163,8 +160,8 @@ std::optional<uint64_t> memory_t::_load_64(uint64_t virtual_address) {
 }
 
 bool memory_t::_store_8(uint64_t virtual_address, uint64_t value) {
-  if (!is_region_in_memory(translate_guest_virtual_to_host(virtual_address),
-                           1)) {
+  if (!is_region_in_memory(translate_guest_virtual_to_host(virtual_address), 1,
+                           memory_protection_t::e_write)) {
     return false;
   }
   write_as<uint8_t>(reinterpret_cast<uint8_t *>(
@@ -173,8 +170,8 @@ bool memory_t::_store_8(uint64_t virtual_address, uint64_t value) {
   return true;
 }
 bool memory_t::_store_16(uint64_t virtual_address, uint64_t value) {
-  if (!is_region_in_memory(translate_guest_virtual_to_host(virtual_address),
-                           2)) {
+  if (!is_region_in_memory(translate_guest_virtual_to_host(virtual_address), 2,
+                           memory_protection_t::e_write)) {
     return false;
   }
   write_as<uint16_t>(reinterpret_cast<uint8_t *>(
@@ -183,8 +180,8 @@ bool memory_t::_store_16(uint64_t virtual_address, uint64_t value) {
   return true;
 }
 bool memory_t::_store_32(uint64_t virtual_address, uint64_t value) {
-  if (!is_region_in_memory(translate_guest_virtual_to_host(virtual_address),
-                           4)) {
+  if (!is_region_in_memory(translate_guest_virtual_to_host(virtual_address), 4,
+                           memory_protection_t::e_write)) {
     return false;
   }
   write_as<uint32_t>(reinterpret_cast<uint8_t *>(
@@ -193,14 +190,23 @@ bool memory_t::_store_32(uint64_t virtual_address, uint64_t value) {
   return true;
 }
 bool memory_t::_store_64(uint64_t virtual_address, uint64_t value) {
-  if (!is_region_in_memory(translate_guest_virtual_to_host(virtual_address),
-                           8)) {
+  if (!is_region_in_memory(translate_guest_virtual_to_host(virtual_address), 8,
+                           memory_protection_t::e_write)) {
     return false;
   }
   write_as<uint64_t>(reinterpret_cast<uint8_t *>(
                          translate_guest_virtual_to_host(virtual_address)),
                      value);
   return true;
+}
+
+std::optional<uint64_t> memory_t::_fetch_32(uint64_t virtual_address) {
+  if (!is_region_in_memory(translate_guest_virtual_to_host(virtual_address), 4,
+                           memory_protection_t::e_exec)) {
+    return std::nullopt;
+  }
+  return read_as<uint32_t>(reinterpret_cast<uint8_t *>(
+      translate_guest_virtual_to_host(virtual_address)));
 }
 
 }  // namespace dawn
