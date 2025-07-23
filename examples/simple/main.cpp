@@ -61,10 +61,11 @@ int main(int argc, char** argv) {
   // shared memory between host and guest
   uint8_t* shared_memory = new uint8_t[64];
   // memory inserted into guest with read_write protection
-  machine._memory.insert_memory(reinterpret_cast<uintptr_t>(shared_memory), 64);
-  machine._memory.insert_memory(reinterpret_cast<uintptr_t>(shared_memory), 64,
-                                dawn::memory_protection_t::e_read_write);
-  std::memset(shared_memory, 0xFF, 64);
+  machine.insert_external_memory(shared_memory, 64,
+                                 dawn::memory_protection_t::e_read_write);
+  // essentially just std::memset(shared_memory, 0xff, 64);
+  // memory's memset memcpy* functions take guest virtual address rather than
+  // host address
   machine._memory.memset(machine._memory.translate_host_to_guest_virtual(
                              reinterpret_cast<uintptr_t>(shared_memory)),
                          0xff, 64);
