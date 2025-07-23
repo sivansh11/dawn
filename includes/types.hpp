@@ -177,6 +177,8 @@ enum class exception_code_t : uint32_t {
   e_ecall_m_mode                   = 11,
 };
 
+std::string to_string(const exception_code_t exception);
+
 constexpr uint32_t MHARDID = 0xf14;
 
 // unimplemented
