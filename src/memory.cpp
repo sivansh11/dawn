@@ -22,6 +22,15 @@ std::string to_string(memory_protection_t protection) {
       return "read";
     case memory_protection_t::e_exec:
       return "exec";
+
+    case memory_protection_t::e_read_write:
+      return "read_write";
+    case memory_protection_t::e_read_exec:
+      return "read_exec";
+    case memory_protection_t::e_write_exec:
+      return "write_exec";
+    case memory_protection_t::e_all:
+      return "all";
     default:
       throw std::runtime_error("Error: unknown protection");
   }
@@ -29,6 +38,7 @@ std::string to_string(memory_protection_t protection) {
 
 memory_t::memory_t(uint64_t size) : _size(size), _guest_base(0) {
   _host_base = new uint8_t[_size];
+  insert_memory(reinterpret_cast<uintptr_t>(_host_base), _size);
 }
 memory_t::~memory_t() { delete[] _host_base; }
 
@@ -46,6 +56,16 @@ uint64_t memory_t::translate_guest_virtual_to_host(uint64_t virtual_address) {
          translate_guest_virtual_to_guest_physical(virtual_address);
 }
 
+void memory_t::insert_memory(uintptr_t address, size_t size) {
+  assert(size);
+  range_t new_range{address, address + size};
+  // TODO: optimise
+  for (const auto &range : _ranges_no_protection) {
+    if (new_range.overlaps_with(range))
+      throw std::runtime_error("Error: overlap detected");
+  }
+  _ranges_no_protection.insert(new_range);
+}
 void memory_t::insert_memory(uintptr_t address, size_t size,
                              memory_protection_t protection) {
   assert(size);
@@ -58,15 +78,15 @@ void memory_t::insert_memory(uintptr_t address, size_t size,
   _ranges.insert(new_range);
 }
 bool memory_t::is_region_in_memory(uintptr_t address, size_t size) {
-  assert(_ranges.size());  // atleast 1 range should be inserted
+  assert(_ranges_no_protection.size());  // atleast 1 range should be inserted
   assert(size);
   range_t range{address, address + size};
 
-  auto itr = _ranges.lower_bound(range);
+  auto itr = _ranges_no_protection.lower_bound(range);
 
-  if (itr != _ranges.end())
+  if (itr != _ranges_no_protection.end())
     if (itr->contains(range)) return true;
-  if (itr == _ranges.begin()) return false;
+  if (itr == _ranges_no_protection.begin()) return false;
   itr = std::prev(itr);
   if (itr->contains(range)) return true;
   return false;
@@ -207,6 +227,12 @@ std::optional<uint64_t> memory_t::_fetch_32(uint64_t virtual_address) {
   }
   return read_as<uint32_t>(reinterpret_cast<uint8_t *>(
       translate_guest_virtual_to_host(virtual_address)));
+}
+
+std::ostream &operator<<(std::ostream &o, const memory_t::range_t &range) {
+  o << "range[" << std::hex << range._start << ", " << range._end << ") => "
+    << to_string(range._protection);
+  return o;
 }
 
 }  // namespace dawn

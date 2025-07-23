@@ -17,6 +17,7 @@
 #include "elfio/elfio_section.hpp"
 #include "elfio/elfio_symbols.hpp"
 #include "helper.hpp"
+#include "memory.hpp"
 #include "types.hpp"
 
 namespace dawn {
@@ -40,6 +41,7 @@ bool machine_t::load_elf_and_set_program_counter(
   if (!reader.load(path)) return false;
 
   uint64_t guest_base = std::numeric_limits<uint64_t>::max();
+  uint64_t guest_max  = std::numeric_limits<uint64_t>::min();
   for (uint32_t i = 0; i < reader.segments.size(); i++) {
     const ELFIO::segment* segment = reader.segments[i];
     if (segment->get_type() != ELFIO::PT_LOAD) continue;
@@ -49,6 +51,7 @@ bool machine_t::load_elf_and_set_program_counter(
     ELFIO::Elf_Xword  memory_size     = segment->get_memory_size();
 
     guest_base = std::min(guest_base, virtual_address);
+    guest_max  = std::max(guest_max, virtual_address + memory_size);
   }
 
   _memory._guest_base = guest_base;
@@ -60,14 +63,31 @@ bool machine_t::load_elf_and_set_program_counter(
     ELFIO::Elf64_Addr virtual_address = segment->get_virtual_address();
     ELFIO::Elf_Xword  file_size       = segment->get_file_size();
     ELFIO::Elf_Xword  memory_size     = segment->get_memory_size();
+    bool              is_read         = segment->get_flags() & ELFIO::PF_R;
+    bool              is_write        = segment->get_flags() & ELFIO::PF_W;
+    bool              is_exec         = segment->get_flags() & ELFIO::PF_X;
+
+    memory_protection_t protection{};
+    if (is_read) protection = protection | memory_protection_t::e_read;
+    if (is_write) protection = protection | memory_protection_t::e_write;
+    if (is_exec) protection = protection | memory_protection_t::e_exec;
 
     _memory.memcpy_host_to_guest(
         virtual_address, reinterpret_cast<const void*>(segment->get_data()),
         file_size);
+    _memory.insert_memory(
+        _memory.translate_guest_virtual_to_host(virtual_address), file_size,
+        protection);
     if (memory_size - file_size) {
       _memory.memset(virtual_address + file_size, 0, memory_size - file_size);
+      _memory.insert_memory(
+          _memory.translate_guest_virtual_to_host(virtual_address) + file_size,
+          memory_size - file_size, memory_protection_t::e_read_write);
     }
   }
+  _memory.insert_memory(_memory.translate_guest_virtual_to_host(guest_max),
+                        _memory._size - guest_max,
+                        memory_protection_t::e_read_write);
   for (uint32_t i = 0; i < reader.sections.size(); i++) {
     ELFIO::section* section = reader.sections[i];
     if (section->get_type() != ELFIO::SHT_SYMTAB) continue;
@@ -120,8 +140,30 @@ void machine_t::handle_trap(exception_code_t cause_code, uint64_t value) {
   } else {
     _program_counter = mtvec_base;
   }
-  if (!_program_counter) {
-    throw std::runtime_error("Error: trap address 0");
+  if (_program_counter == 0) {
+    switch (cause_code) {
+      case exception_code_t::e_load_access_fault:
+      case exception_code_t::e_store_access_fault: {
+        std::stringstream ss;
+        ss << "Error: " << to_string(cause_code) << '\n';
+        ss << std::hex << _memory.translate_guest_virtual_to_host(value)
+           << '\n';
+        ss << "ranges:\n";
+        for (auto range : _memory._ranges) {
+          ss << "\t" << range << '\n';
+        }
+        ss << "ranges_no_protection:\n";
+        for (auto range : _memory._ranges_no_protection) {
+          ss << "\t" << range << '\n';
+        }
+        throw std::runtime_error(ss.str());
+      } break;
+      default: {
+        std::stringstream ss;
+        ss << "Error: " << to_string(cause_code) << '\n';
+        throw std::runtime_error(ss.str());
+      }
+    }
     // TODO: default handle_trap handler, should print exception_code_t and exit
     decode_and_execute_instruction(0b00110000001000000000000001110011);  // MRET
   }
@@ -221,8 +263,17 @@ void machine_t::simulate(uint64_t steps) {
     if (!_running) return;
     auto [instruction, program_counter] =
         fetch_instruction_at_program_counter();
+#ifdef PRINT_PROGRAM_COUNTER
+    std::cout << std::hex << program_counter << std::dec << '\n';
+#endif  // !PRINT_PROGRAM_COUNTER
     if (instruction) decode_and_execute_instruction(*instruction);
   }
+}
+
+void machine_t::insert_external_memory(void* ptr, size_t size,
+                                       memory_protection_t protection) {
+  _memory.insert_memory(reinterpret_cast<uintptr_t>(ptr), size);
+  _memory.insert_memory(reinterpret_cast<uintptr_t>(ptr), size, protection);
 }
 
 std::pair<std::optional<uint32_t>, uint64_t>
@@ -233,9 +284,9 @@ machine_t::fetch_instruction_at_program_counter() {
                 _program_counter);
     return {std::nullopt, _program_counter};
   }
-  std::optional<uint64_t> value = _memory.load<32>(_program_counter);
+  std::optional<uint64_t> value = _memory.fetch<32>(_program_counter);
   if (!value) {
-    handle_trap(exception_code_t::e_load_access_fault, _program_counter);
+    handle_trap(exception_code_t::e_instruction_access_fault, _program_counter);
     return {std::nullopt, _program_counter};
   }
   return {*value, _program_counter};

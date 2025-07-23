@@ -5,6 +5,7 @@
 #include <cstdint>
 #include <flat_set>
 #include <optional>
+#include <ostream>
 #include <stdexcept>
 #include <vector>
 
@@ -70,6 +71,7 @@ struct memory_t {
   uint64_t translate_guest_virtual_to_guest_physical(uint64_t virtual_address);
   uint64_t translate_guest_virtual_to_host(uint64_t virtual_address);
 
+  void insert_memory(uintptr_t address, size_t size);
   void insert_memory(uintptr_t address, size_t size,
                      memory_protection_t protection);
   bool is_region_in_memory(uintptr_t address, size_t size);
@@ -117,11 +119,14 @@ struct memory_t {
   std::optional<uint64_t> _fetch_32(uint64_t virtual_address);
 
   std::flat_set<range_t> _ranges;
+  std::flat_set<range_t> _ranges_no_protection;
 
   uint64_t _size;
   uint64_t _guest_base;
   uint8_t *_host_base;
 };
+
+std::ostream &operator<<(std::ostream &o, const memory_t::range_t &range);
 
 }  // namespace dawn
 

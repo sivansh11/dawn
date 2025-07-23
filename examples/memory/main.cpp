@@ -2,6 +2,7 @@
 #include <stdexcept>
 
 #include "machine.hpp"
+#include "memory.hpp"
 
 static bool running = true;
 
@@ -57,7 +58,8 @@ int main(int argc, char** argv) {
   static uint32_t* host_memory = new uint32_t[1024];
   for (uint32_t i = 0; i < 1024; i++) host_memory[i] = 0;
   machine._memory.insert_memory(reinterpret_cast<uintptr_t>(host_memory),
-                                1024 * 4);
+                                1024 * 4,
+                                dawn::memory_protection_t::e_read_write);
   machine.set_syscall(1001, [](dawn::machine_t& machine) {
     machine._registers[10] = machine._memory.translate_host_to_guest_virtual(
         reinterpret_cast<uintptr_t>(host_memory));
