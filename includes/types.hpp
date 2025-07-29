@@ -2,6 +2,7 @@
 #define DAWN_TYPES_HPP
 
 #include <cstdint>
+#include <ostream>
 
 #include "helper.hpp"
 
@@ -153,16 +154,8 @@ struct instruction_t {
   } as;
   constexpr uint32_t opcode() const { return as.base.opcode; }
 };
-
 static_assert(sizeof(instruction_t) == 4, "instruction size should be 4 bytes");
 
-enum class privilege_mode_t : uint32_t {
-  e_user       = 0b00,
-  e_supervisor = 0b01,
-  e_machine    = 0b11,
-};
-
-// TODO: add others
 enum class exception_code_t : uint32_t {
   e_instruction_address_misaligned = 0,
   e_instruction_access_fault       = 1,
@@ -176,8 +169,6 @@ enum class exception_code_t : uint32_t {
   e_ecall_s_mode                   = 9,
   e_ecall_m_mode                   = 11,
 };
-
-std::string to_string(const exception_code_t exception);
 
 constexpr uint32_t MHARDID = 0xf14;
 
@@ -213,5 +204,11 @@ constexpr uint32_t MCAUSE_INTERRUPT_BIT = 0x80000000;
 constexpr uint32_t MTVAL = 0x343;
 
 }  // namespace dawn
+
+std::ostream& operator<<(std::ostream&              o,
+                         const dawn::instruction_t& instruction);
+
+std::ostream& operator<<(std::ostream&                o,
+                         const dawn::exception_code_t exception);
 
 #endif  // !DAWN_TYPES_HPP
