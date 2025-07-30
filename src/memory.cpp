@@ -184,3 +184,31 @@ bool memory_t::store_64(address_t addr, uint64_t value) const {
 }
 
 }  // namespace dawn
+
+std::ostream& operator<<(std::ostream&             o,
+                         dawn::memory_protection_t protection) {
+  if (dawn::has_all(protection, dawn::memory_protection_t::e_write))
+    o << "w";
+  else
+    o << "-";
+  if (dawn::has_all(protection, dawn::memory_protection_t::e_read))
+    o << "r";
+  else
+    o << "-";
+  if (dawn::has_all(protection, dawn::memory_protection_t::e_exec))
+    o << "x";
+  else
+    o << "-";
+  return o;
+}
+std::ostream& operator<<(std::ostream& o, dawn::memory_range_t range) {
+  o << range._protection << "\t" << std::hex << range._start << ":"
+    << range._end << std::dec;
+  return o;
+}
+std::ostream& operator<<(std::ostream& o, dawn::memory_t memory) {
+  for (const auto& range : memory._ranges) {
+    o << range << '\n';
+  }
+  return o;
+}
