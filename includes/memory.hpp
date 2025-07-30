@@ -109,6 +109,7 @@ struct memory_t {
 }  // namespace dawn
 
 std::ostream& operator<<(std::ostream& o, dawn::memory_protection_t protection);
+std::ostream& operator<<(std::ostream& o, dawn::memory_range_t range);
 std::ostream& operator<<(std::ostream& o, dawn::memory_t memory);
 
 #endif  // !DAWN_MEMORY_HPP

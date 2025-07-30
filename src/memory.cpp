@@ -10,6 +10,7 @@ namespace dawn {
 memory_t memory_t::create(void* ptr, size_t size) {
   memory_t memory{};
   memory._host_base = ptr;
+  memory.insert_memory(ptr, size, memory_protection_t::e_none);
   return memory;
 }
 
@@ -202,7 +203,7 @@ std::ostream& operator<<(std::ostream&             o,
   return o;
 }
 std::ostream& operator<<(std::ostream& o, dawn::memory_range_t range) {
-  o << range._protection << "\t" << std::hex << range._start << ":"
+  o << range._protection << " " << std::hex << range._start << " -> "
     << range._end << std::dec;
   return o;
 }
