@@ -38,10 +38,16 @@ inline bool has_any(memory_protection_t container, memory_protection_t check) {
 }
 
 struct memory_range_t {
-  void*               _start;
-  void*               _end;
-  memory_protection_t _protection = memory_protection_t::e_none;
-  inline bool         operator<(const memory_range_t& other) const {
+  void*                 _start;
+  void*                 _end;
+  memory_protection_t   _protection = memory_protection_t::e_none;
+  static memory_range_t create_from_start_and_size(
+      void* ptr, size_t size, memory_protection_t protection) {
+    memory_range_t range{._start = ptr, ._protection = protection};
+    range._end = reinterpret_cast<void*>(reinterpret_cast<size_t>(ptr) + size);
+    return range;
+  }
+  inline bool operator<(const memory_range_t& other) const {
     return _start < other._start;
   }
   inline bool operator==(const memory_range_t& other) const {
@@ -75,9 +81,9 @@ struct memory_t {
   void insert_memory(void* ptr, size_t size, memory_protection_t protection);
   bool is_region_in_memory(void* ptr, size_t size,
                            memory_protection_t protection) const;
-  void memcpy_host_to_guest(address_t dst, void* src, size_t size) const;
-  void memcpy_guest_to_host(void* dst, address_t src, size_t size) const;
-  void memset(address_t addr, int value, size_t size) const;
+  bool memcpy_host_to_guest(address_t dst, void* src, size_t size) const;
+  bool memcpy_guest_to_host(void* dst, address_t src, size_t size) const;
+  bool memset(address_t addr, int value, size_t size) const;
 
   // checks for exec memory protection
   std::optional<uint32_t> fetch_32(address_t addr) const;
@@ -89,10 +95,10 @@ struct memory_t {
   std::optional<uint64_t> load_64(address_t addr) const;
 
   // checks for write memory protection
-  void store_8(address_t addr, uint8_t value) const;
-  void store_16(address_t addr, uint16_t value) const;
-  void store_32(address_t addr, uint32_t value) const;
-  void store_64(address_t addr, uint64_t value) const;
+  bool store_8(address_t addr, uint8_t value) const;
+  bool store_16(address_t addr, uint16_t value) const;
+  bool store_32(address_t addr, uint32_t value) const;
+  bool store_64(address_t addr, uint64_t value) const;
 
   std::flat_set<memory_range_t> _ranges;  // ranges with memory protection
   void*                         _host_base{};
