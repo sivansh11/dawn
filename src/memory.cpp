@@ -89,7 +89,7 @@ bool memory_t::is_region_in_memory(void* ptr, size_t size,
   }
   return true;
 }
-bool memory_t::memcpy_host_to_guest(address_t dst, void* src,
+bool memory_t::memcpy_host_to_guest(address_t dst, const void* src,
                                     size_t size) const {
   if (!is_region_in_memory(translate_guest_to_host(dst), size,
                            memory_protection_t::e_write))

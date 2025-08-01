@@ -81,7 +81,7 @@ struct memory_t {
   void insert_memory(void* ptr, size_t size, memory_protection_t protection);
   bool is_region_in_memory(void* ptr, size_t size,
                            memory_protection_t protection) const;
-  bool memcpy_host_to_guest(address_t dst, void* src, size_t size) const;
+  bool memcpy_host_to_guest(address_t dst, const void* src, size_t size) const;
   bool memcpy_guest_to_host(void* dst, address_t src, size_t size) const;
   bool memset(address_t addr, int value, size_t size) const;
 
