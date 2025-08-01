@@ -11,6 +11,7 @@ memory_t memory_t::create(void* ptr, size_t size) {
   memory_t memory{};
   memory._host_base = ptr;
   memory.insert_memory(ptr, size, memory_protection_t::e_none);
+  memory._size = size;
   return memory;
 }
 

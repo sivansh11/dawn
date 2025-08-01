@@ -100,6 +100,7 @@ struct memory_t {
   bool store_32(address_t addr, uint32_t value) const;
   bool store_64(address_t addr, uint64_t value) const;
 
+  size_t                        _size;
   std::flat_set<memory_range_t> _ranges;  // ranges with memory protection
   void*                         _host_base{};
   address_t
