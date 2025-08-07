@@ -40,7 +40,9 @@ std::ostream& operator<<(std::ostream&                       o,
       break;
     case dawn::riscv::exception_code_t::e_ecall_m_mode:
       o << "ecall_m_mode";
+      break;
     default:
       throw std::runtime_error("Error: unknown exception");
   }
+  return o;
 }
