@@ -8,25 +8,143 @@
 
 namespace dawn {
 
+namespace riscv {
+
+enum class op_t : uint32_t {
+  e_lui       = 0b0110111,
+  e_auipc     = 0b0010111,
+  e_jal       = 0b1101111,
+  e_jalr      = 0b1100111,
+  e_branch    = 0b1100011,
+  e_load      = 0b0000011,
+  e_store     = 0b0100011,
+  e_i_type    = 0b0010011,
+  e_i_type_32 = 0b0011011,
+  e_r_type    = 0b0110011,
+  e_r_type_32 = 0b0111011,
+  e_fence     = 0b0001111,
+  e_system    = 0b1110011,
+};
+
+enum class branch_t : uint32_t {
+  e_beq  = 0b000,
+  e_bne  = 0b001,
+  e_blt  = 0b100,
+  e_bge  = 0b101,
+  e_bltu = 0b110,
+  e_bgeu = 0b111,
+};
+
+enum class srli_or_srai_t : uint32_t {
+  e_srli = 0b000000,
+  e_srai = 0b010000,
+};
+
+enum class srliw_or_sraiw_t : uint32_t {
+  e_srliw = 0b0000000,
+  e_sraiw = 0b0100000,
+};
+
+enum class sub_system_t : uint32_t {
+  e_ecall  = 0b000000000000,
+  e_ebreak = 0b000000000001,
+  e_mret   = 0b001100000010,
+};
+
+enum class i_type_func3_t : uint32_t {
+  e_lb  = 0b000,
+  e_lh  = 0b001,
+  e_lw  = 0b010,
+  e_lbu = 0b100,
+  e_lhu = 0b101,
+  e_lwu = 0b110,
+  e_ld  = 0b011,
+
+  e_addi         = 0b000,
+  e_slti         = 0b010,
+  e_sltiu        = 0b011,
+  e_xori         = 0b100,
+  e_ori          = 0b110,
+  e_andi         = 0b111,
+  e_slli         = 0b001,
+  e_srli_or_srai = 0b101,
+
+  e_addiw          = 0b000,
+  e_slliw          = 0b001,
+  e_srliw_or_sraiw = 0b101,
+
+  e_sub_system = 0b000,
+  e_csrrw      = 0b001,
+  e_csrrs      = 0b010,
+  e_csrrc      = 0b011,
+  e_csrrwi     = 0b101,
+  e_csrrsi     = 0b110,
+  e_csrrci     = 0b111,
+};
+
+enum class store_t : uint32_t {
+  e_sb = 0b000,
+  e_sh = 0b001,
+  e_sw = 0b010,
+  e_sd = 0b011,
+};
+
+enum class add_or_sub_t : uint32_t {
+  e_add = 0b0000000,
+  e_sub = 0b0100000,
+};
+
+enum class srl_or_sra_t : uint32_t {
+  e_srl = 0b0000000,
+  e_sra = 0b0100000,
+};
+
+enum class addw_or_subw_t : uint32_t {
+  e_addw = 0b0000000,
+  e_subw = 0b0100000,
+};
+
+enum class srlw_or_sraw_t : uint32_t {
+  e_srlw = 0b0000000,
+  e_sraw = 0b0100000,
+};
+
+enum class r_type_func3_t : uint32_t {
+  e_add_or_sub = 0b000,
+  e_sll        = 0b001,
+  e_slt        = 0b010,
+  e_sltu       = 0b011,
+  e_xor        = 0b100,
+  e_srl_or_sra = 0b101,
+  e_or         = 0b110,
+  e_and        = 0b111,
+
+  e_addw_or_subw = 0b000,
+  e_sllw         = 0b001,
+  e_srlw_or_sraw = 0b101,
+};
+
 struct base_t {
-  uint32_t opcode : 7;   // 0-6
-  uint32_t pad    : 25;  // 7-31
+  op_t     _opcode : 7;   // 0-6
+  uint32_t _pad    : 25;  // 7-31
+
+  constexpr op_t opcode() const { return _opcode; }
 };
 
 struct i_type_t {
-  uint32_t _opcode : 7;   // 0-6
-  uint32_t _rd     : 5;   // 7-11
-  uint32_t _funct3 : 3;   // 12-14
-  uint32_t _rs1    : 5;   // 15-19
-  uint32_t _imm    : 12;  // 20-31
+  op_t           _opcode : 7;   // 0-6
+  uint32_t       _rd     : 5;   // 7-11
+  i_type_func3_t _funct3 : 3;   // 12-14
+  uint32_t       _rs1    : 5;   // 15-19
+  uint32_t       _imm    : 12;  // 20-31
 
-  constexpr uint32_t opcode() const { return _opcode; }
-  constexpr uint32_t rd() const { return _rd; }
-  constexpr uint32_t funct3() const { return _funct3; }
-  constexpr uint32_t rs1() const { return _rs1; }
-  constexpr uint32_t imm() const { return _imm; }
-  constexpr int32_t  imm_sext() const { return ::dawn::sext(imm(), 12); }
-  constexpr uint32_t shamt() const {
+  constexpr op_t           opcode() const { return _opcode; }
+  constexpr uint32_t       rd() const { return _rd; }
+  constexpr i_type_func3_t funct3() const { return _funct3; }
+  constexpr uint32_t       rs1() const { return _rs1; }
+  constexpr uint32_t       imm() const { return _imm; }
+  constexpr int32_t        imm_sext() const { return ::dawn::sext(imm(), 12); }
+  constexpr uint32_t       shamt() const {
     return ::dawn::extract_bit_range(imm(), 0, 5);
   }
   constexpr uint32_t shamt_w() const {
@@ -35,15 +153,15 @@ struct i_type_t {
 };
 
 struct s_type_t {
-  uint32_t _opcode : 7;  // 0-6
+  op_t     _opcode : 7;  // 0-6
   uint32_t _imm1   : 5;  // 7-11
-  uint32_t _funct3 : 3;  // 12-14
+  store_t  _funct3 : 3;  // 12-14
   uint32_t _rs1    : 5;  // 15-19
   uint32_t _rs2    : 5;  // 20-24
   uint32_t _imm2   : 7;  // 25-31
 
-  constexpr uint32_t opcode() const { return _opcode; }
-  constexpr uint32_t funct3() const { return _funct3; }
+  constexpr op_t     opcode() const { return _opcode; }
+  constexpr store_t  funct3() const { return _funct3; }
   constexpr uint32_t rs1() const { return _rs1; }
   constexpr uint32_t rs2() const { return _rs2; }
   constexpr uint32_t imm() const { return (_imm2 << 5) | _imm1; }
@@ -51,46 +169,46 @@ struct s_type_t {
 };
 
 struct u_type_t {
-  uint32_t _opcode : 7;   // 0-6
+  op_t     _opcode : 7;   // 0-6
   uint32_t _rd     : 5;   // 7-11
   uint32_t _imm    : 20;  // 12-31
 
-  constexpr uint32_t opcode() const { return _opcode; }
+  constexpr op_t     opcode() const { return _opcode; }
   constexpr uint32_t rd() const { return _rd; }
   constexpr uint32_t imm() const { return _imm; }
   constexpr int32_t  imm_sext() const { return ::dawn::sext(imm(), 20); }
 };
 
 struct r_type_t {
-  uint32_t _opcode : 7;  // 0-6
-  uint32_t _rd     : 5;  // 7-11
-  uint32_t _funct3 : 3;  // 12-14
-  uint32_t _rs1    : 5;  // 15-19
-  uint32_t _rs2    : 5;  // 20-24
-  uint32_t _funct7 : 7;  // 25-31
+  op_t           _opcode : 7;  // 0-6
+  uint32_t       _rd     : 5;  // 7-11
+  r_type_func3_t _funct3 : 3;  // 12-14
+  uint32_t       _rs1    : 5;  // 15-19
+  uint32_t       _rs2    : 5;  // 20-24
+  uint32_t       _funct7 : 7;  // 25-31
 
-  constexpr uint32_t opcode() const { return _opcode; }
-  constexpr uint32_t rd() const { return _rd; }
-  constexpr uint32_t funct3() const { return _funct3; }
-  constexpr uint32_t rs1() const { return _rs1; }
-  constexpr uint32_t rs2() const { return _rs2; }
-  constexpr uint32_t funct7() const { return _funct7; }
+  constexpr op_t           opcode() const { return _opcode; }
+  constexpr uint32_t       rd() const { return _rd; }
+  constexpr r_type_func3_t funct3() const { return _funct3; }
+  constexpr uint32_t       rs1() const { return _rs1; }
+  constexpr uint32_t       rs2() const { return _rs2; }
+  constexpr uint32_t       funct7() const { return _funct7; }
 };
 
 struct b_type_t {
-  uint32_t _opcode : 7;  // 0-6
+  op_t     _opcode : 7;  // 0-6
   uint32_t _imm1   : 1;  // 7
   uint32_t _imm2   : 4;  // 8-11
-  uint32_t _funct3 : 3;  // 12-14
+  branch_t _funct3 : 3;  // 12-14
   uint32_t _rs1    : 5;  // 15-19
   uint32_t _rs2    : 5;  // 20-24
   uint32_t _imm3   : 6;  // 25-30
   uint32_t _imm4   : 1;  // 31
 
-  constexpr uint32_t opcode() const { return _opcode; }
+  constexpr op_t     opcode() const { return _opcode; }
   constexpr uint32_t imm1() const { return _imm1; }
   constexpr uint32_t imm2() const { return _imm2; }
-  constexpr uint32_t funct3() const { return _funct3; }
+  constexpr branch_t funct3() const { return _funct3; }
   constexpr uint32_t rs1() const { return _rs1; }
   constexpr uint32_t rs2() const { return _rs2; }
   constexpr uint32_t imm3() const { return _imm3; }
@@ -102,14 +220,14 @@ struct b_type_t {
 };
 
 struct j_type_t {
-  uint32_t _opcode : 7;   // 0-6
+  op_t     _opcode : 7;   // 0-6
   uint32_t _rd     : 5;   // 7-11
   uint32_t _imm1   : 8;   // 12-19
   uint32_t _imm2   : 1;   // 20
   uint32_t _imm3   : 10;  // 21-30
   uint32_t _imm4   : 1;   // 31
 
-  constexpr uint32_t opcode() const { return _opcode; }
+  constexpr op_t     opcode() const { return _opcode; }
   constexpr uint32_t rd() const { return _rd; }
   constexpr uint32_t imm1() const { return _imm1; }
   constexpr uint32_t imm2() const { return _imm2; }
@@ -122,7 +240,7 @@ struct j_type_t {
 };
 
 struct a_type_t {
-  uint32_t _opcode : 7;
+  op_t     _opcode : 7;
   uint32_t _rd     : 5;
   uint32_t _funct3 : 3;
   uint32_t _rs1    : 5;
@@ -131,7 +249,7 @@ struct a_type_t {
   uint32_t _aq     : 1;
   uint32_t _funct5 : 5;
 
-  constexpr uint32_t opcode() const { return _opcode; }
+  constexpr op_t     opcode() const { return _opcode; }
   constexpr uint32_t rd() const { return _rd; }
   constexpr uint32_t funct3() const { return _funct3; }
   constexpr uint32_t rs1() const { return _rs1; }
@@ -152,7 +270,7 @@ struct instruction_t {
     j_type_t j_type;
     // a_type_t a_type;
   } as;
-  constexpr uint32_t opcode() const { return as.base.opcode; }
+  constexpr op_t opcode() const { return as.base.opcode(); }
 };
 static_assert(sizeof(instruction_t) == 4, "instruction size should be 4 bytes");
 
@@ -203,12 +321,14 @@ constexpr uint32_t MCAUSE_INTERRUPT_BIT = 0x80000000;
 
 constexpr uint32_t MTVAL = 0x343;
 
+}  // namespace riscv
+
 }  // namespace dawn
 
-std::ostream& operator<<(std::ostream&              o,
-                         const dawn::instruction_t& instruction);
+std::ostream& operator<<(std::ostream&                     o,
+                         const dawn::riscv::instruction_t& instruction);
 
-std::ostream& operator<<(std::ostream&                o,
-                         const dawn::exception_code_t exception);
+std::ostream& operator<<(std::ostream&                       o,
+                         const dawn::riscv::exception_code_t exception);
 
 #endif  // !DAWN_TYPES_HPP

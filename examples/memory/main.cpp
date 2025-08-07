@@ -4,7 +4,7 @@
 #include <iostream>
 #include <vector>
 
-#include "memory.hpp"
+#include "dawn/memory.hpp"
 
 namespace {
 bool test_passed = true;
