@@ -435,8 +435,7 @@ bool state_t::decode_and_exec_instruction(uint32_t instruction) {
         case riscv::store_t::e_sb: {
           address_t addr =
               _reg[inst.as.s_type.rs1()] + inst.as.s_type.imm_sext();
-          if (!_memory.store_8(addr + inst.as.s_type.imm_sext(),
-                               inst.as.s_type.imm_sext())) {
+          if (!_memory.store_8(addr, _reg[inst.as.s_type.rs2()])) {
             handle_trap(riscv::exception_code_t::e_store_access_fault, addr);
             break;
           }
@@ -445,8 +444,7 @@ bool state_t::decode_and_exec_instruction(uint32_t instruction) {
         case riscv::store_t::e_sh: {
           address_t addr =
               _reg[inst.as.s_type.rs1()] + inst.as.s_type.imm_sext();
-          if (!_memory.store_16(addr + inst.as.s_type.imm_sext(),
-                                inst.as.s_type.imm_sext())) {
+          if (!_memory.store_16(addr, _reg[inst.as.s_type.rs2()])) {
             handle_trap(riscv::exception_code_t::e_store_access_fault, addr);
             break;
           }
@@ -455,8 +453,7 @@ bool state_t::decode_and_exec_instruction(uint32_t instruction) {
         case riscv::store_t::e_sw: {
           address_t addr =
               _reg[inst.as.s_type.rs1()] + inst.as.s_type.imm_sext();
-          if (!_memory.store_32(addr + inst.as.s_type.imm_sext(),
-                                inst.as.s_type.imm_sext())) {
+          if (!_memory.store_32(addr, _reg[inst.as.s_type.rs2()])) {
             handle_trap(riscv::exception_code_t::e_store_access_fault, addr);
             break;
           }
@@ -465,8 +462,7 @@ bool state_t::decode_and_exec_instruction(uint32_t instruction) {
         case riscv::store_t::e_sd: {
           address_t addr =
               _reg[inst.as.s_type.rs1()] + inst.as.s_type.imm_sext();
-          if (!_memory.store_64(addr + inst.as.s_type.imm_sext(),
-                                inst.as.s_type.imm_sext())) {
+          if (!_memory.store_64(addr, _reg[inst.as.s_type.rs2()])) {
             handle_trap(riscv::exception_code_t::e_store_access_fault, addr);
             break;
           }
