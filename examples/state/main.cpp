@@ -3,16 +3,23 @@
 
 #include "dawn/state.hpp"
 
-int main(int argc, char **argv) {
+int main(int argc, char** argv) {
   if (argc < 2) throw std::runtime_error("[state] [elf]!");
-  dawn::state_t state = *dawn::state_t::load_elf(argv[1]);
-
-  while (true) {
-    auto instruction = state.fetch_instruction();
-    if (!instruction) throw std::runtime_error("Failed to fetch instruction");
-    std::cout << std::hex << *instruction << std::dec << '\n';
-    state.decode_and_exec_instruction(*instruction);
+  auto s = dawn::state_t::load_elf(argv[1]);
+  if (!s) {
+    throw std::runtime_error("failed to load elf");
   }
+  auto state = *s;
 
-  return 0;
+  state.add_syscall(93, [](dawn::state_t& state) {
+    state._running = false;
+    if (state._reg[10] == 0)
+      std::cout << "passed\n";
+    else
+      std::cout << "failed\n";
+  });
+
+  state.simulate(1000000);
+
+  return state._running ? 1 : state._reg[10];
 }
