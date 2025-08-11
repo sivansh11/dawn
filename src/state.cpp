@@ -36,9 +36,9 @@ std::optional<state_t> state_t::load_elf(const std::filesystem::path& path) {
     guest_base = std::min(guest_base, virtual_address);
     guest_max  = std::max(guest_max, virtual_address + memory_size);
   }
-  state._memory =
-      memory_t::create(new uint8_t[1024 * 1024 * 4], 1024 * 1024 * 4);
 
+  uint8_t* base = new uint8_t[1024 * 1024 * 4];
+  state._memory            = memory_t::create(base, 1024 * 1024 * 4);
   state._memory.guest_base = guest_base;
 
   for (uint32_t i = 0; i < reader.segments.size(); i++) {
