@@ -635,7 +635,7 @@ bool state_t::decode_and_exec_instruction(uint32_t instruction) {
             } break;
             case riscv::srl_or_sra_t::e_sra: {
               _reg[inst.as.r_type.rd()] =
-                  static_cast<int64_t>(_reg[inst.as.r_type.rs1()]) ^
+                  static_cast<int64_t>(_reg[inst.as.r_type.rs1()]) >>
                   (_reg[inst.as.r_type.rs2()] & 0b111111);
               _pc += 4;
             } break;
