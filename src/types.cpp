@@ -42,7 +42,7 @@ std::ostream& operator<<(std::ostream&                       o,
       o << "ecall_m_mode";
       break;
     default:
-      throw std::runtime_error("Error: unknown exception");
+      dawn::error("Error: unknown exception");
   }
   return o;
 }

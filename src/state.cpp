@@ -197,7 +197,7 @@ void state_t::handle_trap(riscv::exception_code_t cause, uint64_t value) {
         std::stringstream ss;
         ss << "Error: " << cause << '\n';
         ss << "at: " << std::hex << _pc << std::dec << '\n';
-        throw std::runtime_error(ss.str());
+        error(ss.str().c_str());
     }
   }
 }
