@@ -560,8 +560,8 @@ bool state_t::decode_and_exec_instruction(uint32_t instruction) {
               static_cast<riscv::srliw_or_sraiw_t>(inst.as.i_type.imm() >> 5)) {
             case riscv::srliw_or_sraiw_t::e_srliw: {
               _reg[inst.as.i_type.rd()] =
-                  sext(static_cast<uint32_t>(_reg[inst.as.i_type.rs1()] >>
-                                             inst.as.i_type.shamt_w()),
+                  sext(static_cast<uint32_t>(_reg[inst.as.i_type.rs1()]) >>
+                                             inst.as.i_type.shamt_w(),
                        32);
               _pc += 4;
             } break;
