@@ -701,7 +701,7 @@ bool state_t::decode_and_exec_instruction(uint32_t instruction) {
               } break;
               case riscv::srlw_or_sraw_t::e_sraw: {
                 _reg[inst.as.r_type.rd()] =
-                    sext(static_cast<int64_t>(_reg[inst.as.r_type.rs1()]) >>
+                    sext(static_cast<int32_t>(_reg[inst.as.r_type.rs1()]) >>
                              (_reg[inst.as.r_type.rs2()] & 0b11111),
                          32);
                 _pc += 4;
