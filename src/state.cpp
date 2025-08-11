@@ -57,15 +57,17 @@ std::optional<state_t> state_t::load_elf(const std::filesystem::path& path) {
     if (is_write) protection = protection | memory_protection_t::e_write;
     if (is_exec) protection = protection | memory_protection_t::e_exec;
 
-    state._memory.memcpy_host_to_guest(
-        virtual_address, reinterpret_cast<const void*>(segment->get_data()),
-        file_size);
+    if (!state._memory.memcpy_host_to_guest(
+            virtual_address, reinterpret_cast<const void*>(segment->get_data()),
+            file_size))
+      return std::nullopt;
     state._memory.insert_memory(
         state._memory.translate_guest_to_host(virtual_address), file_size,
         protection);
     if (memory_size - file_size) {
-      state._memory.memset(virtual_address + file_size, 0,
-                           memory_size - file_size);
+      if (!state._memory.memset(virtual_address + file_size, 0,
+                                memory_size - file_size))
+        return std::nullopt;
       state._memory.insert_memory(
           reinterpret_cast<void*>(
               reinterpret_cast<size_t>(
