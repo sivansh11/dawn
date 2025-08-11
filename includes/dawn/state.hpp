@@ -5,6 +5,7 @@
 
 #include <cstdint>
 #include <filesystem>
+#include <limits>
 #include <optional>
 
 #include "memory.hpp"
@@ -18,9 +19,14 @@ using syscall_t = std::function<void(state_t&)>;
 
 struct state_t {
   static std::optional<state_t> load_elf(const std::filesystem::path& path);
+  bool                          add_syscall(uint64_t number, syscall_t syscall);
+  bool                          del_syscall(uint64_t number);
   std::optional<uint32_t>       fetch_instruction();
   bool decode_and_exec_instruction(uint32_t instruction);
   bool decode_and_jit_basic_block(uint32_t instruction);
+
+  void simulate(
+      uint64_t num_instructions = std::numeric_limits<uint64_t>::max());
 
  private:
   bool                    write_csr(uint32_t instruction, uint64_t value);

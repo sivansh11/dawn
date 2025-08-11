@@ -108,6 +108,20 @@ std::optional<state_t> state_t::load_elf(const std::filesystem::path& path) {
   return state;
 }
 
+bool state_t::add_syscall(uint64_t number, syscall_t syscall) {
+  auto itr = _syscalls.find(number);
+  if (itr != _syscalls.end()) return false;
+  _syscalls[number] = syscall;
+  return true;
+}
+
+bool state_t::del_syscall(uint64_t number) {
+  auto itr = _syscalls.find(number);
+  if (itr == _syscalls.end()) return false;
+  _syscalls.erase(number);
+  return true;
+}
+
 std::optional<uint32_t> state_t::fetch_instruction() {
   if (_pc % 4 != 0) {
     handle_trap(riscv::exception_code_t::e_instruction_address_misaligned, _pc);
@@ -787,5 +801,14 @@ bool state_t::decode_and_exec_instruction(uint32_t instruction) {
 }
 
 bool state_t::decode_and_jit_basic_block(uint32_t instruction) {}
+
+void state_t::simulate(uint64_t num_instructions) {
+  for (uint64_t instructions = 0; instructions < num_instructions;
+       instructions++) {
+    if (!_running) return;
+    auto instruction = fetch_instruction();
+    if (instruction) decode_and_exec_instruction(*instruction);
+  }
+}
 
 }  // namespace dawn
