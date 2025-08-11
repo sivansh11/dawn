@@ -629,7 +629,7 @@ bool state_t::decode_and_exec_instruction(uint32_t instruction) {
           switch (static_cast<riscv::srl_or_sra_t>(inst.as.r_type.funct7())) {
             case riscv::srl_or_sra_t::e_srl: {
               _reg[inst.as.r_type.rd()] =
-                  _reg[inst.as.r_type.rs1()] ^
+                  _reg[inst.as.r_type.rs1()] >>
                   (_reg[inst.as.r_type.rs2()] & 0b111111);
               _pc += 4;
             } break;
