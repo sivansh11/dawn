@@ -205,6 +205,7 @@ void state_t::handle_trap(riscv::exception_code_t cause, uint64_t value) {
 }
 
 bool state_t::decode_and_exec_instruction(uint32_t instruction) {
+  _reg[0] = 0;
   riscv::instruction_t inst;
   reinterpret_cast<uint32_t&>(inst) = instruction;
   switch (inst.as.base.opcode()) {
