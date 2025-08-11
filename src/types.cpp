@@ -1,34 +1,48 @@
-#include "types.hpp"
+#include "dawn/types.hpp"
 
-namespace dawn {
-
-std::string to_string(const exception_code_t exception) {
-  switch (exception) {
-    case exception_code_t::e_instruction_address_misaligned:
-      return "instruction_address_misaligned";
-    case exception_code_t::e_instruction_access_fault:
-      return "instruction_access_fault";
-    case exception_code_t::e_illegal_instruction:
-      return "illegal_instruction";
-    case exception_code_t::e_breakpoint:
-      return "breakpoint";
-    case exception_code_t::e_load_address_misaligned:
-      return "load_address_misaligned";
-    case exception_code_t::e_load_access_fault:
-      return "load_access_fault";
-    case exception_code_t::e_store_address_misaligned:
-      return "store_address_misaligned";
-    case exception_code_t::e_store_access_fault:
-      return "store_access_fault";
-    case exception_code_t::e_ecall_u_mode:
-      return "ecall_u_mode";
-    case exception_code_t::e_ecall_s_mode:
-      return "ecall_s_mode";
-    case exception_code_t::e_ecall_m_mode:
-      return "ecall_m_mode";
-    default:
-      throw std::runtime_error("Error: unknown exception");
-  }
+std::ostream& operator<<(std::ostream&                     o,
+                         const dawn::riscv::instruction_t& instruction) {
+  return o;
 }
 
-}  // namespace dawn
+std::ostream& operator<<(std::ostream&                       o,
+                         const dawn::riscv::exception_code_t exception) {
+  switch (exception) {
+    case dawn::riscv::exception_code_t::e_instruction_address_misaligned:
+      o << "instruction_address_misaligned";
+      break;
+    case dawn::riscv::exception_code_t::e_instruction_access_fault:
+      o << "instruction_access_fault";
+      break;
+    case dawn::riscv::exception_code_t::e_illegal_instruction:
+      o << "illegal_instruction";
+      break;
+    case dawn::riscv::exception_code_t::e_breakpoint:
+      o << "breakpoint";
+      break;
+    case dawn::riscv::exception_code_t::e_load_address_misaligned:
+      o << "load_address_misaligned";
+      break;
+    case dawn::riscv::exception_code_t::e_load_access_fault:
+      o << "load_access_fault";
+      break;
+    case dawn::riscv::exception_code_t::e_store_address_misaligned:
+      o << "store_address_misaligned";
+      break;
+    case dawn::riscv::exception_code_t::e_store_access_fault:
+      o << "store_access_fault";
+      break;
+    case dawn::riscv::exception_code_t::e_ecall_u_mode:
+      o << "ecall_u_mode";
+      break;
+    case dawn::riscv::exception_code_t::e_ecall_s_mode:
+      o << "ecall_s_mode";
+      break;
+    case dawn::riscv::exception_code_t::e_ecall_m_mode:
+      o << "ecall_m_mode";
+      break;
+    default:
+      dawn::error("Error: unknown exception");
+  }
+  return o;
+}

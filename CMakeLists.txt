@@ -15,6 +15,20 @@ FetchContent_Declare(
 )
 FetchContent_MakeAvailable(elfio)
 
+FetchContent_Declare(
+  asmjit
+  GIT_REPOSITORY https://github.com/asmjit/asmjit.git
+  GIT_TAG master
+)
+FetchContent_MakeAvailable(asmjit)
+
+FetchContent_Declare(
+  unordered_dense
+  GIT_REPOSITORY https://github.com/martinus/unordered_dense.git
+  GIT_TAG main
+)
+FetchContent_MakeAvailable(unordered_dense)
+
 file(GLOB_RECURSE SRC_FILES src/*.cpp)
 
 add_library(dawn ${SRC_FILES})
@@ -25,6 +39,8 @@ target_include_directories(dawn
 
 target_link_libraries(dawn
   PUBLIC elfio
+  PUBLIC asmjit
+  PUBLIC unordered_dense
 )
 
 if (DAWN_PROFILER)

@@ -1,238 +1,216 @@
-#include "memory.hpp"
+#include "dawn/memory.hpp"
 
-#include <algorithm>
 #include <cassert>
-#include <cstdint>
 #include <cstring>
-#include <ios>
-#include <iostream>
-#include <iterator>
-#include <limits>
-#include <stdexcept>
+#include <flat_set>
+#include <optional>
 
 namespace dawn {
 
-std::string to_string(memory_protection_t protection) {
-  switch (protection) {
-    case memory_protection_t::e_none:
-      return "none";
-    case memory_protection_t::e_write:
-      return "write";
-    case memory_protection_t::e_read:
-      return "read";
-    case memory_protection_t::e_exec:
-      return "exec";
-
-    case memory_protection_t::e_read_write:
-      return "read_write";
-    case memory_protection_t::e_read_exec:
-      return "read_exec";
-    case memory_protection_t::e_write_exec:
-      return "write_exec";
-    case memory_protection_t::e_all:
-      return "all";
-    default:
-      throw std::runtime_error("Error: unknown protection");
-  }
+memory_t memory_t::create(void* ptr, size_t size) {
+  memory_t memory{};
+  memory._host_base = ptr;
+  memory.insert_memory(ptr, size, memory_protection_t::e_none);
+  memory._size = size;
+  return memory;
 }
 
-memory_t::memory_t(uint64_t size) : _size(size), _guest_base(0) {
-  _host_base = new uint8_t[_size];
-  insert_memory(reinterpret_cast<uintptr_t>(_host_base), _size);
+address_t memory_t::translate_host_to_guest(void* ptr) const {
+  return reinterpret_cast<address_t>(ptr) -
+         reinterpret_cast<address_t>(_host_base) + guest_base;
 }
-memory_t::~memory_t() { delete[] _host_base; }
-
-uint64_t memory_t::translate_host_to_guest_virtual(uintptr_t address) {
-  return address - reinterpret_cast<uint64_t>(_host_base) + _guest_base;
-}
-uint64_t memory_t::translate_guest_virtual_to_guest_physical(
-    uint64_t virtual_address) {
-  assert(virtual_address >= _guest_base);
-  return virtual_address - _guest_base;
+void* memory_t::translate_guest_to_host(address_t addr) const {
+  return reinterpret_cast<void*>(reinterpret_cast<address_t>(_host_base) -
+                                 guest_base + addr);
 }
 
-uint64_t memory_t::translate_guest_virtual_to_host(uint64_t virtual_address) {
-  return reinterpret_cast<uint64_t>(_host_base) +
-         translate_guest_virtual_to_guest_physical(virtual_address);
-}
-
-void memory_t::insert_memory(uintptr_t address, size_t size) {
-  assert(size);
-  range_t new_range{address, address + size};
-  // TODO: optimise
-  for (const auto &range : _ranges_no_protection) {
-    if (new_range.overlaps_with(range))
-      throw std::runtime_error("Error: overlap detected");
-  }
-  _ranges_no_protection.insert(new_range);
-}
-void memory_t::insert_memory(uintptr_t address, size_t size,
+void memory_t::insert_memory(void* ptr, size_t size,
                              memory_protection_t protection) {
-  assert(size);
-  range_t new_range{address, address + size, protection};
-  // TODO: optimise
-  for (const auto &range : _ranges) {
-    if (new_range.overlaps_with(range))
-      throw std::runtime_error("Error: overlap detected");
+  // TODO: merge adjacent ranges with smae protection
+  memory_range_t range =
+      memory_range_t::create_from_start_and_size(ptr, size, protection);
+  std::flat_set<memory_range_t> new_ranges;
+  new_ranges.insert(range);
+  for (const auto& _range : _ranges) {
+    if (range.overlaps_with(_range)) {
+      // R1 == range
+      // R2 == _range
+      if (range.contains(_range)) {
+        // R1 ----------------
+        // R2     --------
+        // Do nothing
+      }
+      if (_range.contains(range)) {
+        // R1     --------
+        // R2 ----------------
+        // Break R2 into 2 subranges
+        if (_range._start != range._start)
+          new_ranges.insert(
+              memory_range_t{_range._start, range._start, _range._protection});
+        if (range._end != _range._end)
+          new_ranges.insert(
+              memory_range_t{range._end, _range._end, _range._protection});
+      }
+      if (_range._start > range._start && _range._end > range._end) {
+        // R1 ------------
+        // R2       ------------
+        // Break R2
+        new_ranges.insert(
+            memory_range_t{range._end, _range._end, _range._protection});
+      }
+      if (range._start > _range._start && range._end > _range._end) {
+        // R1       ------------
+        // R2 ------------
+        // Break R2
+        new_ranges.insert(
+            memory_range_t{_range._start, range._start, _range._protection});
+      }
+    } else {
+      new_ranges.insert(_range);
+    }
   }
-  _ranges.insert(new_range);
+  _ranges = new_ranges;
 }
-bool memory_t::is_region_in_memory(uintptr_t address, size_t size) {
-  assert(_ranges_no_protection.size());  // atleast 1 range should be inserted
+
+bool memory_t::is_region_in_memory(void* ptr, size_t size,
+                                   memory_protection_t protection) const {
   assert(size);
-  range_t range{address, address + size};
-
-  auto itr = _ranges_no_protection.lower_bound(range);
-
-  if (itr != _ranges_no_protection.end())
-    if (itr->contains(range)) return true;
-  if (itr == _ranges_no_protection.begin()) return false;
-  itr = std::prev(itr);
-  if (itr->contains(range)) return true;
-  return false;
-}
-// TODO: remove code duplication ?
-bool memory_t::is_region_in_memory(uintptr_t address, size_t size,
-                                   memory_protection_t protection) {
-  assert(_ranges.size());  // atleast 1 range should be inserted
-  assert(size);
-  range_t range{address, address + size, protection};
-
+  memory_range_t range =
+      memory_range_t::create_from_start_and_size(ptr, size, protection);
   auto itr = _ranges.lower_bound(range);
+  if (itr != _ranges.begin()) itr--;
 
-  if (itr != _ranges.end())
-    if (itr->contains(range) && has_all(itr->_protection, protection))
-      return true;
-  if (itr == _ranges.begin()) return false;
-  itr = std::prev(itr);
-  if (itr->contains(range) && has_all(itr->_protection, protection))
-    return true;
-  return false;
-}
-
-void memory_t::memcpy_host_to_guest(uint64_t dst, const void *src,
-                                    uint64_t size) {
-  assert(src);
-  assert(is_region_in_memory(translate_guest_virtual_to_host(dst), size));
-  std::memcpy(reinterpret_cast<void *>(translate_guest_virtual_to_host(dst)),
-              src, size);
-}
-void memory_t::memcpy_guest_to_host(void *dst, uint64_t src, uint64_t size) {
-  assert(dst);
-  assert(is_region_in_memory(translate_guest_virtual_to_host(src), size));
-  std::memcpy(dst,
-              reinterpret_cast<void *>(translate_guest_virtual_to_host(src)),
-              size);
-}
-void memory_t::memset(uint64_t dst, int value, uint64_t size) {
-  assert(is_region_in_memory(translate_guest_virtual_to_host(dst), size));
-  std::memset(reinterpret_cast<void *>(translate_guest_virtual_to_host(dst)),
-              value, size);
-}
-
-template <typename T>
-T read_as(const uint8_t *src) {
-  // TODO: add check for T is u8/u16/u32/u64
-  // TODO: assert src
-  T result;
-  std::memcpy(&result, src, sizeof(T));
-  return result;
-}
-
-template <typename T>
-void write_as(uint8_t *dst, T value) {
-  // TODO: add check for T is u8/u16/u32/u64
-  // TODO: assert dst
-  std::memcpy(dst, &value, sizeof(T));
-}
-
-std::optional<uint64_t> memory_t::_load_8(uint64_t virtual_address) {
-  if (!is_region_in_memory(translate_guest_virtual_to_host(virtual_address), 1,
-                           memory_protection_t::e_read)) {
-    return std::nullopt;
+  void* current = ptr;
+  void* end     = reinterpret_cast<void*>(reinterpret_cast<size_t>(ptr) + size);
+  while (current < end) {
+    while (itr != _ranges.end() && itr->_end <= current) itr++;
+    if (itr == _ranges.end() || itr->_start > current) return false;
+    if (!has_all(itr->_protection, protection)) return false;
+    current = itr->_end;
   }
-  return read_as<uint8_t>(reinterpret_cast<uint8_t *>(
-      translate_guest_virtual_to_host(virtual_address)));
-}
-std::optional<uint64_t> memory_t::_load_16(uint64_t virtual_address) {
-  if (!is_region_in_memory(translate_guest_virtual_to_host(virtual_address), 2,
-                           memory_protection_t::e_read)) {
-    return std::nullopt;
-  }
-  return read_as<uint16_t>(reinterpret_cast<uint8_t *>(
-      translate_guest_virtual_to_host(virtual_address)));
-}
-std::optional<uint64_t> memory_t::_load_32(uint64_t virtual_address) {
-  if (!is_region_in_memory(translate_guest_virtual_to_host(virtual_address), 4,
-                           memory_protection_t::e_read)) {
-    return std::nullopt;
-  }
-  return read_as<uint32_t>(reinterpret_cast<uint8_t *>(
-      translate_guest_virtual_to_host(virtual_address)));
-}
-std::optional<uint64_t> memory_t::_load_64(uint64_t virtual_address) {
-  if (!is_region_in_memory(translate_guest_virtual_to_host(virtual_address), 8,
-                           memory_protection_t::e_read)) {
-    return std::nullopt;
-  }
-  return read_as<uint64_t>(reinterpret_cast<uint8_t *>(
-      translate_guest_virtual_to_host(virtual_address)));
-}
-
-bool memory_t::_store_8(uint64_t virtual_address, uint64_t value) {
-  if (!is_region_in_memory(translate_guest_virtual_to_host(virtual_address), 1,
-                           memory_protection_t::e_write)) {
-    return false;
-  }
-  write_as<uint8_t>(reinterpret_cast<uint8_t *>(
-                        translate_guest_virtual_to_host(virtual_address)),
-                    value);
   return true;
 }
-bool memory_t::_store_16(uint64_t virtual_address, uint64_t value) {
-  if (!is_region_in_memory(translate_guest_virtual_to_host(virtual_address), 2,
-                           memory_protection_t::e_write)) {
+bool memory_t::memcpy_host_to_guest(address_t dst, const void* src,
+                                    size_t size) const {
+  // NOTE: no protection checking!
+  if (!is_region_in_memory(translate_guest_to_host(dst), size, {}))
     return false;
-  }
-  write_as<uint16_t>(reinterpret_cast<uint8_t *>(
-                         translate_guest_virtual_to_host(virtual_address)),
-                     value);
+  std::memcpy(translate_guest_to_host(dst), src, size);
   return true;
 }
-bool memory_t::_store_32(uint64_t virtual_address, uint64_t value) {
-  if (!is_region_in_memory(translate_guest_virtual_to_host(virtual_address), 4,
-                           memory_protection_t::e_write)) {
+bool memory_t::memcpy_guest_to_host(void* dst, address_t src,
+                                    size_t size) const {
+  // NOTE: no protection checking!
+  if (!is_region_in_memory(translate_guest_to_host(src), size, {}))
     return false;
-  }
-  write_as<uint32_t>(reinterpret_cast<uint8_t *>(
-                         translate_guest_virtual_to_host(virtual_address)),
-                     value);
+  std::memcpy(dst, translate_guest_to_host(src), size);
   return true;
 }
-bool memory_t::_store_64(uint64_t virtual_address, uint64_t value) {
-  if (!is_region_in_memory(translate_guest_virtual_to_host(virtual_address), 8,
-                           memory_protection_t::e_write)) {
+bool memory_t::memset(address_t addr, int value, size_t size) const {
+  // NOTE: no protection checking!
+  if (!is_region_in_memory(translate_guest_to_host(addr), size, {}))
     return false;
-  }
-  write_as<uint64_t>(reinterpret_cast<uint8_t *>(
-                         translate_guest_virtual_to_host(virtual_address)),
-                     value);
+  std::memset(translate_guest_to_host(addr), value, size);
   return true;
 }
 
-std::optional<uint64_t> memory_t::_fetch_32(uint64_t virtual_address) {
-  if (!is_region_in_memory(translate_guest_virtual_to_host(virtual_address), 4,
-                           memory_protection_t::e_exec)) {
+std::optional<uint32_t> memory_t::fetch_32(address_t addr) const {
+  uint32_t value;
+  if (!is_region_in_memory(translate_guest_to_host(addr), sizeof(value),
+                           memory_protection_t::e_exec))
     return std::nullopt;
-  }
-  return read_as<uint32_t>(reinterpret_cast<uint8_t *>(
-      translate_guest_virtual_to_host(virtual_address)));
+  std::memcpy(&value, translate_guest_to_host(addr), sizeof(value));
+  return value;
 }
 
-std::ostream &operator<<(std::ostream &o, const memory_t::range_t &range) {
-  o << "range[" << std::hex << range._start << ", " << range._end << ") => "
-    << to_string(range._protection);
-  return o;
+std::optional<uint8_t> memory_t::load_8(address_t addr) const {
+  uint8_t value;
+  if (!is_region_in_memory(translate_guest_to_host(addr), sizeof(value),
+                           memory_protection_t::e_read))
+    return std::nullopt;
+  std::memcpy(&value, translate_guest_to_host(addr), sizeof(value));
+  return value;
+}
+std::optional<uint16_t> memory_t::load_16(address_t addr) const {
+  uint16_t value;
+  if (!is_region_in_memory(translate_guest_to_host(addr), sizeof(value),
+                           memory_protection_t::e_read))
+    return std::nullopt;
+  std::memcpy(&value, translate_guest_to_host(addr), sizeof(value));
+  return value;
+}
+std::optional<uint32_t> memory_t::load_32(address_t addr) const {
+  uint32_t value;
+  if (!is_region_in_memory(translate_guest_to_host(addr), sizeof(value),
+                           memory_protection_t::e_read))
+    return std::nullopt;
+  std::memcpy(&value, translate_guest_to_host(addr), sizeof(value));
+  return value;
+}
+std::optional<uint64_t> memory_t::load_64(address_t addr) const {
+  uint64_t value;
+  if (!is_region_in_memory(translate_guest_to_host(addr), sizeof(value),
+                           memory_protection_t::e_read))
+    return std::nullopt;
+  std::memcpy(&value, translate_guest_to_host(addr), sizeof(value));
+  return value;
+}
+
+bool memory_t::store_8(address_t addr, uint8_t value) const {
+  if (!is_region_in_memory(translate_guest_to_host(addr), sizeof(value),
+                           memory_protection_t::e_write))
+    return false;
+  std::memcpy(translate_guest_to_host(addr), &value, sizeof(value));
+  return true;
+}
+bool memory_t::store_16(address_t addr, uint16_t value) const {
+  if (!is_region_in_memory(translate_guest_to_host(addr), sizeof(value),
+                           memory_protection_t::e_write))
+    return false;
+  std::memcpy(translate_guest_to_host(addr), &value, sizeof(value));
+  return true;
+}
+bool memory_t::store_32(address_t addr, uint32_t value) const {
+  if (!is_region_in_memory(translate_guest_to_host(addr), sizeof(value),
+                           memory_protection_t::e_write))
+    return false;
+  std::memcpy(translate_guest_to_host(addr), &value, sizeof(value));
+  return true;
+}
+bool memory_t::store_64(address_t addr, uint64_t value) const {
+  if (!is_region_in_memory(translate_guest_to_host(addr), sizeof(value),
+                           memory_protection_t::e_write))
+    return false;
+  std::memcpy(translate_guest_to_host(addr), &value, sizeof(value));
+  return true;
 }
 
 }  // namespace dawn
+
+std::ostream& operator<<(std::ostream&             o,
+                         dawn::memory_protection_t protection) {
+  if (dawn::has_all(protection, dawn::memory_protection_t::e_write))
+    o << "w";
+  else
+    o << "-";
+  if (dawn::has_all(protection, dawn::memory_protection_t::e_read))
+    o << "r";
+  else
+    o << "-";
+  if (dawn::has_all(protection, dawn::memory_protection_t::e_exec))
+    o << "x";
+  else
+    o << "-";
+  return o;
+}
+std::ostream& operator<<(std::ostream& o, dawn::memory_range_t range) {
+  o << range._protection << " " << std::hex << range._start << " -> "
+    << range._end << std::dec;
+  return o;
+}
+std::ostream& operator<<(std::ostream& o, dawn::memory_t memory) {
+  for (const auto& range : memory._ranges) {
+    o << range << '\n';
+  }
+  return o;
+}

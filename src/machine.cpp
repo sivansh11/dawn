@@ -1,47 +1,30 @@
-#include "machine.hpp"
+#include "dawn/machine.hpp"
 
-#include <bitset>
 #include <cassert>
-#include <cstdint>
+#include <cinttypes>
+#include <elfio/elf_types.hpp>
 #include <elfio/elfio.hpp>
-#include <exception>
-#include <iomanip>
-#include <iostream>
+#include <elfio/elfio_section.hpp>
+#include <elfio/elfio_symbols.hpp>
 #include <limits>
 #include <optional>
-#include <ostream>
 #include <sstream>
 #include <stdexcept>
 
-#include "elfio/elf_types.hpp"
-#include "elfio/elfio_section.hpp"
-#include "elfio/elfio_symbols.hpp"
-#include "helper.hpp"
-#include "memory.hpp"
-#include "types.hpp"
+#include "dawn/helper.hpp"
+#include "dawn/memory.hpp"
+#include "dawn/types.hpp"
 
 namespace dawn {
 
-machine_t::machine_t(uint64_t memory_size, uint64_t memory_page_size)
-    : _memory(memory_size) {
-  for (uint32_t i = 0; i < 32; i++) _registers[i] = 0;
-  _privilege_mode = privilege_mode_t::e_machine;
-}
-
-machine_t::~machine_t() {}
-
-void machine_t::set_syscall(uint64_t number, syscall_t syscall) {
-  assert(!_syscalls.contains(number));
-  _syscalls[number] = syscall;
-}
-
-bool machine_t::load_elf_and_set_program_counter(
-    const std::filesystem::path& path) {
+std::optional<machine_t> machine_t::load_elf(const std::filesystem::path& path) {
   ELFIO::elfio reader;
-  if (!reader.load(path)) return false;
+  if (!reader.load(path)) return std::nullopt;
 
-  uint64_t guest_base = std::numeric_limits<uint64_t>::max();
-  uint64_t guest_max  = std::numeric_limits<uint64_t>::min();
+  machine_t state{};
+
+  address_t guest_base = std::numeric_limits<address_t>::max();
+  address_t guest_max  = std::numeric_limits<address_t>::min();
   for (uint32_t i = 0; i < reader.segments.size(); i++) {
     const ELFIO::segment* segment = reader.segments[i];
     if (segment->get_type() != ELFIO::PT_LOAD) continue;
@@ -54,7 +37,9 @@ bool machine_t::load_elf_and_set_program_counter(
     guest_max  = std::max(guest_max, virtual_address + memory_size);
   }
 
-  _memory._guest_base = guest_base;
+  uint8_t* base = new uint8_t[1024 * 1024 * 4];
+  state._memory            = memory_t::create(base, 1024 * 1024 * 4);
+  state._memory.guest_base = guest_base;
 
   for (uint32_t i = 0; i < reader.segments.size(); i++) {
     const ELFIO::segment* segment = reader.segments[i];
@@ -72,22 +57,28 @@ bool machine_t::load_elf_and_set_program_counter(
     if (is_write) protection = protection | memory_protection_t::e_write;
     if (is_exec) protection = protection | memory_protection_t::e_exec;
 
-    _memory.memcpy_host_to_guest(
-        virtual_address, reinterpret_cast<const void*>(segment->get_data()),
-        file_size);
-    _memory.insert_memory(
-        _memory.translate_guest_virtual_to_host(virtual_address), file_size,
+    if (!state._memory.memcpy_host_to_guest(
+            virtual_address, reinterpret_cast<const void*>(segment->get_data()),
+            file_size))
+      return std::nullopt;
+    state._memory.insert_memory(
+        state._memory.translate_guest_to_host(virtual_address), file_size,
         protection);
     if (memory_size - file_size) {
-      _memory.memset(virtual_address + file_size, 0, memory_size - file_size);
-      _memory.insert_memory(
-          _memory.translate_guest_virtual_to_host(virtual_address) + file_size,
+      if (!state._memory.memset(virtual_address + file_size, 0,
+                                memory_size - file_size))
+        return std::nullopt;
+      state._memory.insert_memory(
+          reinterpret_cast<void*>(
+              reinterpret_cast<size_t>(
+                  state._memory.translate_guest_to_host(virtual_address)) +
+              file_size),
           memory_size - file_size, memory_protection_t::e_read_write);
     }
   }
-  _memory.insert_memory(_memory.translate_guest_virtual_to_host(guest_max),
-                        _memory._size - guest_max,
-                        memory_protection_t::e_read_write);
+  state._memory.insert_memory(state._memory.translate_guest_to_host(guest_max),
+                              state._memory._size - guest_max,
+                              memory_protection_t::e_read_write);
   // TODO: insert a byte with memory_protection_t::e_none to prevent
   // stack overflow
   for (uint32_t i = 0; i < reader.sections.size(); i++) {
@@ -107,956 +98,715 @@ bool machine_t::load_elf_and_set_program_counter(
       symbols.get_symbol(j, name, value, size, bind, type, section_index,
                          other);
       if (name == "_end") {
-        _heap_address = value;
+        state._heap_address = value;
         break;
       }
     }
-    assert(_heap_address != 0);
+    assert(state._heap_address != 0);
   }
-  _program_counter = reader.get_entry();
-  _registers[2]    = _memory._size - 8;
+  state._pc     = reader.get_entry();
+  state._reg[2] = state._memory._size - 8;
+
+  return state;
+}
+
+bool machine_t::add_syscall(uint64_t number, syscall_t syscall) {
+  auto itr = _syscalls.find(number);
+  if (itr != _syscalls.end()) return false;
+  _syscalls[number] = syscall;
   return true;
 }
 
-void machine_t::handle_trap(exception_code_t cause_code, uint64_t value) {
-  _write_csr(MEPC, _program_counter);
-  _write_csr(MCAUSE, (uint64_t)cause_code);
-  _write_csr(MTVAL, value);
-  uint64_t mstatus         = _read_csr(MSTATUS);
-  uint64_t current_mie_bit = (mstatus & MSTATUS_MIE_MASK) ? 1 : 0;
-  mstatus                  = (mstatus & ~MSTATUS_MPP_MASK) |
-            ((static_cast<uint64_t>(_privilege_mode) << MSTATUS_MPP_SHIFT) &
-             MSTATUS_MPP_MASK);
-  mstatus = (mstatus & ~MSTATUS_MPIE_MASK) |
-            ((current_mie_bit << MSTATUS_MPIE_SHIFT) & MSTATUS_MPIE_MASK);
-  mstatus &= ~MSTATUS_MIE_MASK;
-  _write_csr(MSTATUS, mstatus);  // Write the updated MSTATUS back
-  _privilege_mode       = privilege_mode_t::e_machine;
-  uint64_t mtvec        = _read_csr(MTVEC);
-  uint64_t mtvec_base   = mtvec & MTVEC_BASE_ALIGN_MASK;
-  uint64_t mtvec_mode   = mtvec & MTVEC_MODE_MASK;
-  bool     is_interrupt = ((uint64_t)cause_code & MCAUSE_INTERRUPT_BIT) != 0;
-  if (mtvec_mode == 0b01 && is_interrupt) {
-    uint64_t interrupt_code = (uint64_t)cause_code & ~MCAUSE_INTERRUPT_BIT;
-    _program_counter        = mtvec_base + (interrupt_code * 4);
-  } else {
-    _program_counter = mtvec_base;
-  }
-  if (_program_counter == 0) {
-    switch (cause_code) {
-      case exception_code_t::e_instruction_access_fault:
-      case exception_code_t::e_load_access_fault:
-      case exception_code_t::e_store_access_fault: {
-        std::stringstream ss;
-        ss << "Error: " << to_string(cause_code) << '\n';
-        ss << std::hex << _memory.translate_guest_virtual_to_host(value)
-           << '\n';
-        ss << "ranges:\n";
-        for (auto range : _memory._ranges) {
-          ss << "\t" << range << '\n';
-        }
-        ss << "ranges_no_protection:\n";
-        for (auto range : _memory._ranges_no_protection) {
-          ss << "\t" << range << '\n';
-        }
-        throw std::runtime_error(ss.str());
-      } break;
-      default: {
-        std::stringstream ss;
-        ss << "Error: " << to_string(cause_code) << '\n';
-        throw std::runtime_error(ss.str());
-      }
-    }
-    // TODO: default handle_trap handler, should print exception_code_t and exit
-    decode_and_execute_instruction(0b00110000001000000000000001110011);  // MRET
-  }
+bool machine_t::del_syscall(uint64_t number) {
+  auto itr = _syscalls.find(number);
+  if (itr == _syscalls.end()) return false;
+  _syscalls.erase(number);
+  return true;
 }
 
-uint64_t machine_t::_read_csr(uint16_t address) {
-  address = address & 0b111111111111;
-  switch (address) {
-    case MNSTATUS:  // not implemented returning 0
-    case SATP:      // not implemented returning 0
-    case PMPADDR0:  // not implemented returning 0
-    case PMPCFG0:   // not implemented returning 0
-    case MHARDID:
-      return 0;
-    case MSTATUS:
-    case MIE:
-    case MEDELEG:
-    case MIDELEG:
-    case MTVEC:
-    case MEPC:
-    case MCAUSE:
-    case MTVAL:
-      return _csr[address];
-    default:
-      std::stringstream ss;
-      ss << "Error: csr read not implemented. " << std::hex << address;
-      throw std::runtime_error(ss.str());
+std::optional<uint32_t> machine_t::fetch_instruction() {
+  if (_pc % 4 != 0) {
+    handle_trap(riscv::exception_code_t::e_instruction_address_misaligned, _pc);
+    return std::nullopt;
   }
+  auto instruction = _memory.fetch_32(_pc);
+  if (!instruction) {
+    handle_trap(riscv::exception_code_t::e_instruction_access_fault, _pc);
+    return std::nullopt;
+  }
+  return instruction.value();
 }
+
 void machine_t::_write_csr(uint16_t address, uint64_t value) {
-  address = address & 0b111111111111;
-  switch (address) {
-    case MNSTATUS:  // not implemented, ignoring writes
-    case SATP:      // not implemented, ignoring writes
-    case PMPADDR0:  // not implemented, ignoring writes
-    case PMPCFG0:   // not implemented, ignoring writes
-      break;
-    case MSTATUS: {
-      uint64_t writeable_mask = 0;
-      writeable_mask |= MSTATUS_MIE_MASK;
-      writeable_mask |= MSTATUS_MPIE_MASK;
-      writeable_mask |= MSTATUS_MPP_MASK;
-      _csr[MSTATUS] =
-          (_csr[MSTATUS] & ~writeable_mask) | (value & writeable_mask);
+  // TODO: more involved csr writes
+  _csr[address] = value;
+}
+uint64_t machine_t::_read_csr(uint16_t address) {
+  // TODO: more involved csr reads
+  return _csr[address];
+}
+
+bool machine_t::write_csr(uint32_t instruction, uint64_t value) {
+  riscv::instruction_t riscv_instruction;
+  reinterpret_cast<uint32_t&>(riscv_instruction) = instruction;
+  if ((riscv_instruction.as.i_type.imm() >> 10) == 0b11 &&
+      riscv_instruction.as.i_type.rs1() != 0) {
+    handle_trap(riscv::exception_code_t::e_illegal_instruction, instruction);
+    return false;
+  }
+  _write_csr(riscv_instruction.as.i_type.imm(), value);
+  return true;
+}
+// TODO: maybe this doesnt need to be an optional ?
+std::optional<uint64_t> machine_t::read_csr(uint32_t instruction) {
+  riscv::instruction_t riscv_instruction;
+  reinterpret_cast<uint32_t&>(riscv_instruction) = instruction;
+  return _read_csr(riscv_instruction.as.i_type.imm());
+}
+
+void machine_t::handle_trap(riscv::exception_code_t cause, uint64_t value) {
+  _write_csr(riscv::MEPC, value);
+  _write_csr(riscv::MCAUSE, value);
+  _write_csr(riscv::MTVAL, value);
+
+  uint64_t mstatus         = _read_csr(riscv::MSTATUS);
+  uint64_t current_mie_bit = (mstatus & riscv::MSTATUS_MIE_MASK) ? 1 : 0;
+  mstatus                  = (mstatus & ~riscv::MSTATUS_MPP_MASK) |
+            ((static_cast<uint64_t>(11) << riscv::MSTATUS_MPP_SHIFT) &
+             riscv::MSTATUS_MPP_MASK);
+  mstatus = (mstatus & ~riscv::MSTATUS_MPIE_MASK) |
+            ((current_mie_bit << riscv::MSTATUS_MPIE_SHIFT) &
+             riscv::MSTATUS_MPIE_MASK);
+  mstatus &= ~riscv::MSTATUS_MIE_MASK;
+
+  _write_csr(riscv::MSTATUS, mstatus);
+  uint64_t mtvec      = _read_csr(riscv::MTVEC);
+  uint64_t mtvec_base = mtvec & riscv::MTVEC_BASE_ALIGN_MASK;
+  uint64_t mtvec_mode = mtvec & riscv::MTVEC_MODE_MASK;
+
+  bool is_interrupt =
+      (static_cast<uint64_t>(cause) & riscv::MCAUSE_INTERRUPT_BIT) != 0;
+  if (mtvec_mode == 0b01 && is_interrupt) {
+    uint64_t interrupt_code =
+        static_cast<uint64_t>(cause) & ~riscv::MCAUSE_INTERRUPT_BIT;
+    _pc = mtvec_base + (interrupt_code * 4);
+  } else {
+    _pc = mtvec_base;
+  }
+  if (_pc == 0) {
+    switch (cause) {
+      default:
+        std::stringstream ss;
+        ss << "Error: " << cause << '\n';
+        ss << "at: " << std::hex << _pc << std::dec << '\n';
+        error(ss.str().c_str());
+    }
+  }
+}
+
+bool machine_t::decode_and_exec_instruction(uint32_t instruction) {
+  _reg[0] = 0;
+  riscv::instruction_t inst;
+  reinterpret_cast<uint32_t&>(inst) = instruction;
+  switch (inst.as.base.opcode()) {
+    case riscv::op_t::e_lui: {
+      _reg[inst.as.u_type.rd()] = ::dawn::sext(inst.as.u_type.imm() << 12, 32);
+      _pc += 4;
     } break;
-    case MTVEC: {
-      uint64_t mode_bits = value & MTVEC_MODE_MASK;
-      uint64_t base_addr = value & MTVEC_BASE_ALIGN_MASK;
-      // TODO: trap if mode bits are reserved
-      _csr[MTVEC] = base_addr | mode_bits;
+    case riscv::op_t::e_auipc: {
+      _reg[inst.as.u_type.rd()] =
+          _pc + ::dawn::sext(inst.as.u_type.imm() << 12, 32);
+      _pc += 4;
     } break;
-    case MEPC:
-    case MEDELEG:
-    case MIDELEG:
-    case MCAUSE:
-    case MIE:
-    case MTVAL:
-      _csr[address] = value;
-      break;
-    default:
-      std::stringstream ss;
-      ss << "Error: csr write not implemented. " << std::hex << address;
-      throw std::runtime_error(ss.str());
-  }
-}
-// TODO: proper privilege checks
-uint64_t machine_t::read_csr(uint32_t _instruction) {
-  instruction_t instruction;
-  reinterpret_cast<uint32_t&>(instruction) = _instruction;
-  privilege_mode_t min_privilege_mode =
-      static_cast<privilege_mode_t>((instruction.as.i_type.imm() >> 8) & 0b11);
-  if (_privilege_mode < min_privilege_mode) {
-    handle_trap(exception_code_t::e_illegal_instruction, _instruction);
-  }
-  return _read_csr(instruction.as.i_type.imm());
-}
-void machine_t::write_csr(uint32_t _instruction, uint64_t value) {
-  instruction_t instruction;
-  reinterpret_cast<uint32_t&>(instruction) = _instruction;
-  privilege_mode_t min_privilege_mode =
-      static_cast<privilege_mode_t>((instruction.as.i_type.imm() >> 8) & 0b11);
-  if (_privilege_mode < min_privilege_mode &&
-      instruction.as.i_type.rs1() != 0) {
-    handle_trap(exception_code_t::e_illegal_instruction, _instruction);
-  }
-  if ((instruction.as.i_type.imm() >> 10) == 0b11 &&
-      instruction.as.i_type.rs1() != 0) {
-    handle_trap(exception_code_t::e_illegal_instruction, _instruction);
-    return;
-  }
-  if (instruction.as.i_type.rs1() != 0)
-    _write_csr(instruction.as.i_type.imm(), value);
-}
-
-void machine_t::simulate(uint64_t steps) {
-  for (uint64_t i = 0; i < steps; i++) {
-    if (!_running) return;
-    auto [instruction, program_counter] =
-        fetch_instruction_at_program_counter();
-#ifdef PRINT_PROGRAM_COUNTER
-    std::cout << std::hex << program_counter << std::dec << '\n';
-#endif  // !PRINT_PROGRAM_COUNTER
-    if (instruction) decode_and_execute_instruction(*instruction);
-  }
-}
-
-void machine_t::insert_external_memory(void* ptr, size_t size,
-                                       memory_protection_t protection) {
-  _memory.insert_memory(reinterpret_cast<uintptr_t>(ptr), size);
-  _memory.insert_memory(reinterpret_cast<uintptr_t>(ptr), size, protection);
-}
-
-std::pair<std::optional<uint32_t>, uint64_t>
-machine_t::fetch_instruction_at_program_counter() {
-  // TODO: handle invalid loads
-  if (_program_counter % 4 != 0) {
-    handle_trap(exception_code_t::e_instruction_address_misaligned,
-                _program_counter);
-    return {std::nullopt, _program_counter};
-  }
-  std::optional<uint64_t> value = _memory.fetch<32>(_program_counter);
-  if (!value) {
-    handle_trap(exception_code_t::e_instruction_access_fault, _program_counter);
-    return {std::nullopt, _program_counter};
-  }
-  return {*value, _program_counter};
-}
-void machine_t::decode_and_execute_instruction(uint32_t _instruction) {
-  instruction_t instruction;
-  reinterpret_cast<uint32_t&>(instruction) = _instruction;
-  _registers[0]                            = 0;
-  switch (instruction.opcode()) {
-    // imm[31:12] rd 0110111 LUI
-    case 0b0110111:  // LUI
-      _registers[instruction.as.u_type.rd()] =
-          ::dawn::sext(instruction.as.u_type.imm() << 12, 32);
-      _program_counter += 4;
-      break;
-    // imm[31:12] rd 0010111 AUIPC
-    case 0b0010111:  // AUIPC
-      _registers[instruction.as.u_type.rd()] =
-          _program_counter +
-          ::dawn::sext(instruction.as.u_type.imm() << 12, 32);
-      _program_counter += 4;
-      break;
-    // imm[20|10:1|11|19:12] rd 1101111 JAL
-    case 0b1101111: {  // JAL
-      uint64_t address = _program_counter + instruction.as.j_type.imm_sext();
-      if (address % 4 != 0) {
-        handle_trap(exception_code_t::e_instruction_address_misaligned,
-                    address);
+    case riscv::op_t::e_jal: {
+      address_t addr = _pc + inst.as.j_type.imm_sext();
+      if (addr % 4 != 0) {
+        // TODO: verify if instruction address misaligned is correct trap here
+        handle_trap(riscv::exception_code_t::e_instruction_address_misaligned,
+                    addr);
         break;
       }
-      _registers[instruction.as.j_type.rd()] = _program_counter + 4;
-      _program_counter                       = address;
+      _reg[inst.as.j_type.rd()] = _pc + 4;
+      _pc                       = addr;
     } break;
-    // imm[11:0] rs1 000 rd 1100111 JALR
-    case 0b1100111: {  // JALR
-      uint64_t address = _program_counter + 4;
-      if (address % 4 != 0) {
-        handle_trap(exception_code_t::e_instruction_address_misaligned,
-                    address);
+    case riscv::op_t::e_jalr: {
+      address_t addr = _pc + 4;
+      if (addr % 4 != 0) {
+        // TODO: verify if instruction address misaligned is correct trap here
+        handle_trap(riscv::exception_code_t::e_instruction_address_misaligned,
+                    addr);
         break;
       }
-      _program_counter = (_registers[instruction.as.i_type.rs1()] +
-                          instruction.as.i_type.imm_sext()) &
-                         (~1u);
-      _registers[instruction.as.i_type.rd()] = address;
+      _pc = (_reg[inst.as.i_type.rs1()] + inst.as.i_type.imm_sext()) & ~1u;
+      _reg[inst.as.i_type.rd()] = addr;
     } break;
+    case riscv::op_t::e_branch: {
+      switch (inst.as.b_type.funct3()) {
+        case riscv::branch_t::e_beq: {
+          if (_reg[inst.as.b_type.rs1()] == _reg[inst.as.b_type.rs2()]) {
+            address_t addr = _pc + inst.as.b_type.imm_sext();
+            if (addr % 4 != 0) {
+              // TODO: verify if instruction address misaligned is correct trap
+              // here
+              handle_trap(
+                  riscv::exception_code_t::e_instruction_address_misaligned,
+                  addr);
+              break;
+            }
+            _pc = addr;
+          } else {
+            _pc += 4;
+          }
+        } break;
+        case riscv::branch_t::e_bne: {
+          if (_reg[inst.as.b_type.rs1()] != _reg[inst.as.b_type.rs2()]) {
+            address_t addr = _pc + inst.as.b_type.imm_sext();
+            if (addr % 4 != 0) {
+              // TODO: verify if instruction address misaligned is correct trap
+              // here
+              handle_trap(
+                  riscv::exception_code_t::e_instruction_address_misaligned,
+                  addr);
+              break;
+            }
+            _pc = addr;
+          } else {
+            _pc += 4;
+          }
+        } break;
+        case riscv::branch_t::e_blt: {
+          if (static_cast<int64_t>(_reg[inst.as.b_type.rs1()]) <
+              static_cast<int64_t>(_reg[inst.as.b_type.rs2()])) {
+            address_t addr = _pc + inst.as.b_type.imm_sext();
+            if (addr % 4 != 0) {
+              // TODO: verify if instruction address misaligned is correct trap
+              // here
+              handle_trap(
+                  riscv::exception_code_t::e_instruction_address_misaligned,
+                  addr);
+              break;
+            }
+            _pc = addr;
+          } else {
+            _pc += 4;
+          }
+        } break;
+        case riscv::branch_t::e_bge: {
+          if (static_cast<int64_t>(_reg[inst.as.b_type.rs1()]) >=
+              static_cast<int64_t>(_reg[inst.as.b_type.rs2()])) {
+            address_t addr = _pc + inst.as.b_type.imm_sext();
+            if (addr % 4 != 0) {
+              // TODO: verify if instruction address misaligned is correct trap
+              // here
+              handle_trap(
+                  riscv::exception_code_t::e_instruction_address_misaligned,
+                  addr);
+              break;
+            }
+            _pc = addr;
+          } else {
+            _pc += 4;
+          }
+        } break;
+        case riscv::branch_t::e_bltu: {
+          if (_reg[inst.as.b_type.rs1()] < _reg[inst.as.b_type.rs2()]) {
+            address_t addr = _pc + inst.as.b_type.imm_sext();
+            if (addr % 4 != 0) {
+              // TODO: verify if instruction address misaligned is correct trap
+              // here
+              handle_trap(
+                  riscv::exception_code_t::e_instruction_address_misaligned,
+                  addr);
+              break;
+            }
+            _pc = addr;
+          } else {
+            _pc += 4;
+          }
+        } break;
+        case riscv::branch_t::e_bgeu: {
+          if (_reg[inst.as.b_type.rs1()] >= _reg[inst.as.b_type.rs2()]) {
+            address_t addr = _pc + inst.as.b_type.imm_sext();
+            if (addr % 4 != 0) {
+              // TODO: verify if instruction address misaligned is correct trap
+              // here
+              handle_trap(
+                  riscv::exception_code_t::e_instruction_address_misaligned,
+                  addr);
+              break;
+            }
+            _pc = addr;
+          } else {
+            _pc += 4;
+          }
+        } break;
 
-    case 0b1100011:
-      switch (instruction.as.b_type.funct3()) {
-        // imm[12|10:5] rs2 rs1 000 imm[4:1|11] 1100011 BEQ
-        case 0b000:  // BEQ
-          if (_registers[instruction.as.b_type.rs1()] ==
-              _registers[instruction.as.b_type.rs2()]) {
-            uint64_t address =
-                _program_counter + instruction.as.b_type.imm_sext();
-            if (address % 4 != 0) {
-              handle_trap(exception_code_t::e_instruction_address_misaligned,
-                          address);
-              break;
-            }
-            _program_counter = address;
-          } else
-            _program_counter += 4;
-          break;
-        // imm[12|10:5] rs2 rs1 001 imm[4:1|11] 1100011 BNE
-        case 0b001:  // BNE
-          if (_registers[instruction.as.b_type.rs1()] !=
-              _registers[instruction.as.b_type.rs2()]) {
-            uint64_t address =
-                _program_counter + instruction.as.b_type.imm_sext();
-            if (address % 4 != 0) {
-              handle_trap(exception_code_t::e_instruction_address_misaligned,
-                          address);
-              break;
-            }
-            _program_counter = address;
-          } else
-            _program_counter += 4;
-          break;
-        // imm[12|10:5] rs2 rs1 100 imm[4:1|11] 1100011 BLT
-        case 0b100:  // BLT
-          if (static_cast<int64_t>(_registers[instruction.as.b_type.rs1()]) <
-              static_cast<int64_t>(_registers[instruction.as.b_type.rs2()])) {
-            uint64_t address =
-                _program_counter + instruction.as.b_type.imm_sext();
-            if (address % 4 != 0) {
-              handle_trap(exception_code_t::e_instruction_address_misaligned,
-                          address);
-              break;
-            }
-            _program_counter = address;
-          } else
-            _program_counter += 4;
-          break;
-        // imm[12|10:5] rs2 rs1 101 imm[4:1|11] 1100011 BGE
-        case 0b101:  // BGE
-          if (static_cast<int64_t>(_registers[instruction.as.b_type.rs1()]) >=
-              static_cast<int64_t>(_registers[instruction.as.b_type.rs2()])) {
-            uint64_t address =
-                _program_counter + instruction.as.b_type.imm_sext();
-            if (address % 4 != 0) {
-              handle_trap(exception_code_t::e_instruction_address_misaligned,
-                          address);
-              break;
-            }
-            _program_counter = address;
-          } else
-            _program_counter += 4;
-          break;
-        // imm[12|10:5] rs2 rs1 110 imm[4:1|11] 1100011 BLTU
-        case 0b110:  // BLTU
-          if (_registers[instruction.as.b_type.rs1()] <
-              _registers[instruction.as.b_type.rs2()]) {
-            uint64_t address =
-                _program_counter + instruction.as.b_type.imm_sext();
-            if (address % 4 != 0) {
-              handle_trap(exception_code_t::e_instruction_address_misaligned,
-                          address);
-              break;
-            }
-            _program_counter = address;
-          } else
-            _program_counter += 4;
-          break;
-        // imm[12|10:5] rs2 rs1 111 imm[4:1|11] 1100011 BGEU
-        case 0b111:  // BGEU
-          if (_registers[instruction.as.b_type.rs1()] >=
-              _registers[instruction.as.b_type.rs2()]) {
-            uint64_t address =
-                _program_counter + instruction.as.b_type.imm_sext();
-            if (address % 4 != 0) {
-              handle_trap(exception_code_t::e_instruction_address_misaligned,
-                          address);
-              break;
-            }
-            _program_counter = address;
-          } else
-            _program_counter += 4;
-          break;
         default:
-          handle_trap(exception_code_t::e_illegal_instruction, _instruction);
+          handle_trap(riscv::exception_code_t::e_illegal_instruction,
+                      instruction);
       }
-      break;
-
-    case 0b0000011:
-      // TODO: handle invalid address
-      switch (instruction.as.i_type.funct3()) {
-        // imm[11:0] rs1 000 rd 0000011 LB
-        case 0b000: {  // LB
-          uint64_t address = _registers[instruction.as.i_type.rs1()] +
-                             instruction.as.i_type.imm_sext();
-          // TODO: implement address misaligned trap
-          std::optional<uint64_t> value = _memory.load<8>(address);
+    } break;
+    case riscv::op_t::e_load: {
+      switch (inst.as.i_type.funct3()) {
+        case riscv::i_type_func3_t::e_lb: {
+          address_t addr =
+              _reg[inst.as.i_type.rs1()] + inst.as.i_type.imm_sext();
+          auto value = _memory.load_8(addr);
           if (!value) {
-            handle_trap(exception_code_t::e_load_access_fault, address);
+            handle_trap(riscv::exception_code_t::e_load_access_fault, addr);
             break;
           }
-          _registers[instruction.as.i_type.rd()] = static_cast<int8_t>(*value);
-          _program_counter += 4;
+          _reg[inst.as.i_type.rd()] = static_cast<int8_t>(*value);
+          _pc += 4;
         } break;
-        // imm[11:0] rs1 001 rd 0000011 LH
-        case 0b001: {  // LH
-          uint64_t address = _registers[instruction.as.i_type.rs1()] +
-                             instruction.as.i_type.imm_sext();
-          // TODO: implement address misaligned trap
-          std::optional<uint64_t> value = _memory.load<16>(address);
+        case riscv::i_type_func3_t::e_lh: {
+          address_t addr =
+              _reg[inst.as.i_type.rs1()] + inst.as.i_type.imm_sext();
+          auto value = _memory.load_16(addr);
           if (!value) {
-            handle_trap(exception_code_t::e_load_access_fault, address);
+            handle_trap(riscv::exception_code_t::e_load_access_fault, addr);
             break;
           }
-          _registers[instruction.as.i_type.rd()] = static_cast<int16_t>(*value);
-          _program_counter += 4;
+          _reg[inst.as.i_type.rd()] = static_cast<int16_t>(*value);
+          _pc += 4;
         } break;
-        // imm[11:0] rs1 010 rd 0000011 LW
-        case 0b010: {  // LW
-          uint64_t address = _registers[instruction.as.i_type.rs1()] +
-                             instruction.as.i_type.imm_sext();
-          // TODO: implement address misaligned trap
-          std::optional<uint64_t> value = _memory.load<32>(address);
+        case riscv::i_type_func3_t::e_lw: {
+          address_t addr =
+              _reg[inst.as.i_type.rs1()] + inst.as.i_type.imm_sext();
+          auto value = _memory.load_32(addr);
           if (!value) {
-            handle_trap(exception_code_t::e_load_access_fault, address);
+            handle_trap(riscv::exception_code_t::e_load_access_fault, addr);
             break;
           }
-          _registers[instruction.as.i_type.rd()] = static_cast<int32_t>(*value);
-          _program_counter += 4;
+          _reg[inst.as.i_type.rd()] = static_cast<int32_t>(*value);
+          _pc += 4;
         } break;
-        // imm[11:0] rs1 100 rd 0000011 LBU
-        case 0b100: {  // LBU
-          uint64_t address = _registers[instruction.as.i_type.rs1()] +
-                             instruction.as.i_type.imm_sext();
-          // TODO: implement address misaligned trap
-          std::optional<uint64_t> value = _memory.load<8>(address);
+        case riscv::i_type_func3_t::e_lbu: {
+          address_t addr =
+              _reg[inst.as.i_type.rs1()] + inst.as.i_type.imm_sext();
+          auto value = _memory.load_8(addr);
           if (!value) {
-            handle_trap(exception_code_t::e_load_access_fault, address);
+            handle_trap(riscv::exception_code_t::e_load_access_fault, addr);
             break;
           }
-          _registers[instruction.as.i_type.rd()] = *value;
-          _program_counter += 4;
+          _reg[inst.as.i_type.rd()] = (*value);
+          _pc += 4;
         } break;
-        // imm[11:0] rs1 101 rd 0000011 LHU
-        case 0b101: {  // LHU
-          uint64_t address = _registers[instruction.as.i_type.rs1()] +
-                             instruction.as.i_type.imm_sext();
-          // TODO: implement address misaligned trap
-          std::optional<uint64_t> value = _memory.load<16>(address);
+        case riscv::i_type_func3_t::e_lhu: {
+          address_t addr =
+              _reg[inst.as.i_type.rs1()] + inst.as.i_type.imm_sext();
+          auto value = _memory.load_16(addr);
           if (!value) {
-            handle_trap(exception_code_t::e_load_access_fault, address);
+            handle_trap(riscv::exception_code_t::e_load_access_fault, addr);
             break;
           }
-          _registers[instruction.as.i_type.rd()] = *value;
-          _program_counter += 4;
+          _reg[inst.as.i_type.rd()] = (*value);
+          _pc += 4;
         } break;
-          // imm[11:0] rs1 110 rd 0000011 LWU
-        case 0b110: {  // LWU
-          uint64_t address = _registers[instruction.as.i_type.rs1()] +
-                             instruction.as.i_type.imm_sext();
-          // TODO: implement address misaligned trap
-          std::optional<uint64_t> value = _memory.load<32>(address);
+        case riscv::i_type_func3_t::e_lwu: {
+          address_t addr =
+              _reg[inst.as.i_type.rs1()] + inst.as.i_type.imm_sext();
+          auto value = _memory.load_32(addr);
           if (!value) {
-            handle_trap(exception_code_t::e_load_access_fault, address);
+            handle_trap(riscv::exception_code_t::e_load_access_fault, addr);
             break;
           }
-          _registers[instruction.as.i_type.rd()] = *value;
-          _program_counter += 4;
+          _reg[inst.as.i_type.rd()] = (*value);
+          _pc += 4;
         } break;
-          // imm[11:0] rs1 011 rd 0000011 LD
-        case 0b011: {  // LD
-          uint64_t address = _registers[instruction.as.i_type.rs1()] +
-                             instruction.as.i_type.imm_sext();
-          // TODO: implement address misaligned trap
-          std::optional<uint64_t> value = _memory.load<64>(address);
+        case riscv::i_type_func3_t::e_ld: {
+          address_t addr =
+              _reg[inst.as.i_type.rs1()] + inst.as.i_type.imm_sext();
+          auto value = _memory.load_64(addr);
           if (!value) {
-            handle_trap(exception_code_t::e_load_access_fault, address);
+            handle_trap(riscv::exception_code_t::e_load_access_fault, addr);
             break;
           }
-          _registers[instruction.as.i_type.rd()] = *value;
-          _program_counter += 4;
+          _reg[inst.as.i_type.rd()] = (*value);
+          _pc += 4;
         } break;
         default:
-          handle_trap(exception_code_t::e_illegal_instruction, _instruction);
+          handle_trap(riscv::exception_code_t::e_illegal_instruction,
+                      instruction);
       }
-      break;
+    } break;
+    case riscv::op_t::e_store: {
+      switch (inst.as.s_type.funct3()) {
+        case riscv::store_t::e_sb: {
+          address_t addr =
+              _reg[inst.as.s_type.rs1()] + inst.as.s_type.imm_sext();
+          if (!_memory.store_8(addr, _reg[inst.as.s_type.rs2()])) {
+            handle_trap(riscv::exception_code_t::e_store_access_fault, addr);
+            break;
+          }
+          _pc += 4;
+        } break;
+        case riscv::store_t::e_sh: {
+          address_t addr =
+              _reg[inst.as.s_type.rs1()] + inst.as.s_type.imm_sext();
+          if (!_memory.store_16(addr, _reg[inst.as.s_type.rs2()])) {
+            handle_trap(riscv::exception_code_t::e_store_access_fault, addr);
+            break;
+          }
+          _pc += 4;
+        } break;
+        case riscv::store_t::e_sw: {
+          address_t addr =
+              _reg[inst.as.s_type.rs1()] + inst.as.s_type.imm_sext();
+          if (!_memory.store_32(addr, _reg[inst.as.s_type.rs2()])) {
+            handle_trap(riscv::exception_code_t::e_store_access_fault, addr);
+            break;
+          }
+          _pc += 4;
+        } break;
+        case riscv::store_t::e_sd: {
+          address_t addr =
+              _reg[inst.as.s_type.rs1()] + inst.as.s_type.imm_sext();
+          if (!_memory.store_64(addr, _reg[inst.as.s_type.rs2()])) {
+            handle_trap(riscv::exception_code_t::e_store_access_fault, addr);
+            break;
+          }
+          _pc += 4;
+        } break;
 
-    case 0b0100011:
-      // TODO: handle invalid address
-      switch (instruction.as.s_type.funct3()) {
-        // imm[11:5] rs2 rs1 000 imm[4:0] 0100011 SB
-        case 0b000: {  // SB
-          uint64_t address = _registers[instruction.as.s_type.rs1()] +
-                             instruction.as.s_type.imm_sext();
-          if (!_memory.store<8>(_registers[instruction.as.s_type.rs1()] +
-                                    instruction.as.s_type.imm_sext(),
-                                _registers[instruction.as.s_type.rs2()])) {
-            handle_trap(exception_code_t::e_store_access_fault, address);
-            break;
-          }
-          _program_counter += 4;
-        } break;
-        // imm[11:5] rs2 rs1 001 imm[4:0] 0100011 SH
-        case 0b001: {  // SH
-          uint64_t address = _registers[instruction.as.s_type.rs1()] +
-                             instruction.as.s_type.imm_sext();
-          if (!_memory.store<16>(_registers[instruction.as.s_type.rs1()] +
-                                     instruction.as.s_type.imm_sext(),
-                                 _registers[instruction.as.s_type.rs2()])) {
-            handle_trap(exception_code_t::e_store_access_fault, address);
-            break;
-          }
-          _program_counter += 4;
-        } break;
-        // imm[11:5] rs2 rs1 010 imm[4:0] 0100011 SW
-        case 0b010: {  // SW
-          uint64_t address = _registers[instruction.as.s_type.rs1()] +
-                             instruction.as.s_type.imm_sext();
-          if (!_memory.store<32>(_registers[instruction.as.s_type.rs1()] +
-                                     instruction.as.s_type.imm_sext(),
-                                 _registers[instruction.as.s_type.rs2()])) {
-            handle_trap(exception_code_t::e_store_access_fault, address);
-            break;
-          }
-          _program_counter += 4;
-        } break;
-        // imm[11:5] rs2 rs1 011 imm[4:0] 0100011 SD
-        case 0b011: {  // SD
-          uint64_t address = _registers[instruction.as.s_type.rs1()] +
-                             instruction.as.s_type.imm_sext();
-          if (!_memory.store<64>(_registers[instruction.as.s_type.rs1()] +
-                                     instruction.as.s_type.imm_sext(),
-                                 _registers[instruction.as.s_type.rs2()])) {
-            handle_trap(exception_code_t::e_store_access_fault, address);
-            break;
-          }
-          _program_counter += 4;
-        } break;
         default:
-          handle_trap(exception_code_t::e_illegal_instruction, _instruction);
+          handle_trap(riscv::exception_code_t::e_illegal_instruction,
+                      instruction);
       }
-      break;
+    } break;
+    case riscv::op_t::e_i_type: {
+      switch (inst.as.i_type.funct3()) {
+        case riscv::i_type_func3_t::e_addi: {
+          _reg[inst.as.i_type.rd()] =
+              _reg[inst.as.i_type.rs1()] + inst.as.i_type.imm_sext();
+          _pc += 4;
+        } break;
+        case riscv::i_type_func3_t::e_slti: {
+          _reg[inst.as.i_type.rd()] =
+              static_cast<int64_t>(_reg[inst.as.i_type.rs1()]) <
+              inst.as.i_type.imm_sext();
+          _pc += 4;
+        } break;
+        case riscv::i_type_func3_t::e_sltiu: {
+          _reg[inst.as.i_type.rd()] =
+              _reg[inst.as.i_type.rs1()] < inst.as.i_type.imm_sext();
+          _pc += 4;
+        } break;
+        case riscv::i_type_func3_t::e_xori: {
+          _reg[inst.as.i_type.rd()] =
+              _reg[inst.as.i_type.rs1()] ^ inst.as.i_type.imm_sext();
+          _pc += 4;
+        } break;
+        case riscv::i_type_func3_t::e_ori: {
+          _reg[inst.as.i_type.rd()] =
+              _reg[inst.as.i_type.rs1()] | inst.as.i_type.imm_sext();
+          _pc += 4;
+        } break;
+        case riscv::i_type_func3_t::e_andi: {
+          _reg[inst.as.i_type.rd()] =
+              _reg[inst.as.i_type.rs1()] & inst.as.i_type.imm_sext();
+          _pc += 4;
+        } break;
+        case riscv::i_type_func3_t::e_slli: {
+          _reg[inst.as.i_type.rd()] = _reg[inst.as.i_type.rs1()]
+                                      << inst.as.i_type.imm_sext();
+          _pc += 4;
+        } break;
+        case riscv::i_type_func3_t::e_srli_or_srai: {
+          switch (
+              static_cast<riscv::srli_or_srai_t>(inst.as.i_type.imm() >> 6)) {
+            case riscv::srli_or_srai_t::e_srli: {
+              _reg[inst.as.i_type.rd()] =
+                  _reg[inst.as.i_type.rs1()] >> inst.as.i_type.imm_sext();
+              _pc += 4;
+            } break;
+            case riscv::srli_or_srai_t::e_srai: {
+              _reg[inst.as.i_type.rd()] =
+                  static_cast<int64_t>(_reg[inst.as.i_type.rs1()]) >>
+                  inst.as.i_type.imm_sext();
+              _pc += 4;
+            } break;
 
-    case 0b0010011:
-      switch (instruction.as.i_type.funct3()) {
-        // imm[11:0] rs1 000 rd 0010011 ADDI
-        case 0b000:  // ADDI
-          _registers[instruction.as.i_type.rd()] =
-              _registers[instruction.as.i_type.rs1()] +
-              instruction.as.i_type.imm_sext();
-          _program_counter += 4;
-          break;
-        // imm[11:0] rs1 010 rd 0010011 SLTI
-        case 0b010:  // SLTI
-          _registers[instruction.as.i_type.rd()] =
-              static_cast<int64_t>(_registers[instruction.as.i_type.rs1()]) <
-              instruction.as.i_type.imm_sext();
-          _program_counter += 4;
-          break;
-        // imm[11:0] rs1 011 rd 0010011 SLTIU
-        case 0b011:  // SLTIU
-          _registers[instruction.as.i_type.rd()] =
-              _registers[instruction.as.i_type.rs1()] <
-              instruction.as.i_type.imm_sext();
-          _program_counter += 4;
-          break;
-        // imm[11:0] rs1 100 rd 0010011 XORI
-        case 0b100:  // XORI
-          _registers[instruction.as.i_type.rd()] =
-              _registers[instruction.as.i_type.rs1()] ^
-              instruction.as.i_type.imm_sext();
-          _program_counter += 4;
-          break;
-        // imm[11:0] rs1 110 rd 0010011 ORI
-        case 0b110:  // ORI
-          _registers[instruction.as.i_type.rd()] =
-              _registers[instruction.as.i_type.rs1()] |
-              instruction.as.i_type.imm_sext();
-          _program_counter += 4;
-          break;
-        // imm[11:0] rs1 111 rd 0010011 ANDI
-        case 0b111:  // ANDI
-          _registers[instruction.as.i_type.rd()] =
-              _registers[instruction.as.i_type.rs1()] &
-              instruction.as.i_type.imm_sext();
-          _program_counter += 4;
-          break;
-        // 0000000 shamt rs1 001 rd 0010011 SLLI
-        case 0b001:  // SLLI
-          _registers[instruction.as.i_type.rd()] =
-              _registers[instruction.as.i_type.rs1()]
-              << instruction.as.i_type.shamt();
-          _program_counter += 4;
-          break;
-
-        case 0b101:
-          switch (instruction.as.i_type.imm() >> 6) {
-            // 000000 shamt rs1 101 rd 0010011 SRLI
-            case 0b000000:  // SRLI
-              _registers[instruction.as.i_type.rd()] =
-                  _registers[instruction.as.i_type.rs1()] >>
-                  instruction.as.i_type.shamt();
-              _program_counter += 4;
-              break;
-            // 010000 shamt rs1 101 rd 0010011 SRAI
-            case 0b010000:  // SRAI
-              _registers[instruction.as.i_type.rd()] =
-                  static_cast<int64_t>(
-                      _registers[instruction.as.i_type.rs1()]) >>
-                  instruction.as.i_type.shamt();
-              _program_counter += 4;
-              break;
             default:
-              handle_trap(exception_code_t::e_illegal_instruction,
-                          _instruction);
+              handle_trap(riscv::exception_code_t::e_illegal_instruction,
+                          instruction);
           }
-          break;
+        } break;
+
         default:
-          handle_trap(exception_code_t::e_illegal_instruction, _instruction);
+          handle_trap(riscv::exception_code_t::e_illegal_instruction,
+                      instruction);
       }
-      break;
+    } break;
+    case riscv::op_t::e_i_type_32: {
+      switch (inst.as.i_type.funct3()) {
+        case riscv::i_type_func3_t::e_addiw: {
+          _reg[inst.as.i_type.rd()] =
+              sext(static_cast<uint32_t>(_reg[inst.as.i_type.rs1()] +
+                                         inst.as.i_type.imm_sext()),
+                   32);
+          _pc += 4;
+        } break;
+        case riscv::i_type_func3_t::e_slliw: {
+          _reg[inst.as.i_type.rd()] =
+              sext(static_cast<uint32_t>(
+                       _reg[inst.as.i_type.rs1()]
+                       << static_cast<uint32_t>(inst.as.i_type.shamt_w())),
+                   32);
+          _pc += 4;
+        } break;
+        case riscv::i_type_func3_t::e_srliw_or_sraiw: {
+          switch (
+              static_cast<riscv::srliw_or_sraiw_t>(inst.as.i_type.imm() >> 5)) {
+            case riscv::srliw_or_sraiw_t::e_srliw: {
+              _reg[inst.as.i_type.rd()] =
+                  sext(static_cast<uint32_t>(_reg[inst.as.i_type.rs1()]) >>
+                                             inst.as.i_type.shamt_w(),
+                       32);
+              _pc += 4;
+            } break;
+            case riscv::srliw_or_sraiw_t::e_sraiw: {
+              _reg[inst.as.i_type.rd()] =
+                  sext(static_cast<int32_t>(_reg[inst.as.i_type.rs1()]) >>
+                                            inst.as.i_type.shamt_w(),
+                       32);
+              _pc += 4;
+            } break;
 
-    case 0b0110011:
-      switch (instruction.as.r_type.funct3()) {
-        case 0b000:
-          switch (instruction.as.r_type.funct7()) {
-            // 0000000 rs2 rs1 000 rd 0110011 ADD
-            case 0b0000000:  // ADD
-              _registers[instruction.as.r_type.rd()] =
-                  _registers[instruction.as.r_type.rs1()] +
-                  _registers[instruction.as.r_type.rs2()];
-              _program_counter += 4;
-              break;
-            // 0100000 rs2 rs1 000 rd 0110011 SUB
-            case 0b0100000:  // SUB
-              _registers[instruction.as.r_type.rd()] =
-                  _registers[instruction.as.r_type.rs1()] -
-                  _registers[instruction.as.r_type.rs2()];
-              _program_counter += 4;
-              break;
             default:
-              handle_trap(exception_code_t::e_illegal_instruction,
-                          _instruction);
+              handle_trap(riscv::exception_code_t::e_illegal_instruction,
+                          instruction);
           }
-          break;
+        } break;
 
-        // 0000000 rs2 rs1 001 rd 0110011 SLL
-        case 0b001:  // SLL
-          _registers[instruction.as.r_type.rd()] =
-              _registers[instruction.as.r_type.rs1()]
-              << (_registers[instruction.as.r_type.rs2()] & 0b111111);
-          _program_counter += 4;
-          break;
-        // 0000000 rs2 rs1 010 rd 0110011 SLT
-        case 0b010:  // SLT
-          _registers[instruction.as.r_type.rd()] =
-              static_cast<int64_t>(_registers[instruction.as.r_type.rs1()]) <
-              static_cast<int64_t>(_registers[instruction.as.r_type.rs2()]);
-          _program_counter += 4;
-          break;
-        // 0000000 rs2 rs1 011 rd 0110011 SLTU
-        case 0b011:  // SLTU
-          _registers[instruction.as.r_type.rd()] =
-              _registers[instruction.as.r_type.rs1()] <
-              _registers[instruction.as.r_type.rs2()];
-          _program_counter += 4;
-          break;
-        // 0000000 rs2 rs1 100 rd 0110011 XOR
-        case 0b100:  // XOR
-          _registers[instruction.as.r_type.rd()] =
-              _registers[instruction.as.r_type.rs1()] ^
-              _registers[instruction.as.r_type.rs2()];
-          _program_counter += 4;
-          break;
-
-        case 0b101:
-          switch (instruction.as.r_type.funct7()) {
-            // 0000000 rs2 rs1 101 rd 0110011 SRL
-            case 0b0000000:  // SRL
-              _registers[instruction.as.r_type.rd()] =
-                  _registers[instruction.as.r_type.rs1()] >>
-                  (_registers[instruction.as.r_type.rs2()] & 0b111111);
-              _program_counter += 4;
-              break;
-            // 0100000 rs2 rs1 101 rd 0110011 SRA
-            case 0b0100000:  // SRA
-              _registers[instruction.as.r_type.rd()] =
-                  static_cast<int64_t>(
-                      _registers[instruction.as.r_type.rs1()]) >>
-                  (_registers[instruction.as.r_type.rs2()] & 0b111111);
-              _program_counter += 4;
-              break;
-            default:
-              handle_trap(exception_code_t::e_illegal_instruction,
-                          _instruction);
-          }
-          break;
-
-        // 0000000 rs2 rs1 110 rd 0110011 OR
-        case 0b110:  // OR
-          _registers[instruction.as.r_type.rd()] =
-              _registers[instruction.as.r_type.rs1()] |
-              _registers[instruction.as.r_type.rs2()];
-          _program_counter += 4;
-          break;
-        // 0000000 rs2 rs1 111 rd 0110011 AND
-        case 0b111:  // AND
-          _registers[instruction.as.r_type.rd()] =
-              _registers[instruction.as.r_type.rs1()] &
-              _registers[instruction.as.r_type.rs2()];
-          _program_counter += 4;
-          break;
         default:
-          handle_trap(exception_code_t::e_illegal_instruction, _instruction);
+          handle_trap(riscv::exception_code_t::e_illegal_instruction,
+                      instruction);
       }
-      break;
+    } break;
+    case riscv::op_t::e_r_type: {
+      switch (inst.as.r_type.funct3()) {
+        case riscv::r_type_func3_t::e_add_or_sub: {
+          switch (static_cast<riscv::add_or_sub_t>(inst.as.r_type.funct7())) {
+            case riscv::add_or_sub_t::e_add: {
+              _reg[inst.as.r_type.rd()] =
+                  _reg[inst.as.r_type.rs1()] + _reg[inst.as.r_type.rs2()];
+              _pc += 4;
+            } break;
+            case riscv::add_or_sub_t::e_sub: {
+              _reg[inst.as.r_type.rd()] =
+                  _reg[inst.as.r_type.rs1()] - _reg[inst.as.r_type.rs2()];
+              _pc += 4;
+            } break;
+            default:
+              handle_trap(riscv::exception_code_t::e_illegal_instruction,
+                          instruction);
+          }
+        } break;
+        case riscv::r_type_func3_t::e_sll: {
+          _reg[inst.as.r_type.rd()] =
+              _reg[inst.as.r_type.rs1()]
+              << (_reg[inst.as.r_type.rs2()] & 0b111111);
+          _pc += 4;
+        } break;
+        case riscv::r_type_func3_t::e_slt: {
+          _reg[inst.as.r_type.rd()] =
+              static_cast<int64_t>(_reg[inst.as.r_type.rs1()]) <
+              static_cast<int64_t>(_reg[inst.as.r_type.rs2()]);
+          _pc += 4;
+        } break;
+        case riscv::r_type_func3_t::e_sltu: {
+          _reg[inst.as.r_type.rd()] =
+              _reg[inst.as.r_type.rs1()] < _reg[inst.as.r_type.rs2()];
+          _pc += 4;
+        } break;
+        case riscv::r_type_func3_t::e_xor: {
+          _reg[inst.as.r_type.rd()] =
+              _reg[inst.as.r_type.rs1()] ^ _reg[inst.as.r_type.rs2()];
+          _pc += 4;
+        } break;
+        case riscv::r_type_func3_t::e_srl_or_sra: {
+          switch (static_cast<riscv::srl_or_sra_t>(inst.as.r_type.funct7())) {
+            case riscv::srl_or_sra_t::e_srl: {
+              _reg[inst.as.r_type.rd()] =
+                  _reg[inst.as.r_type.rs1()] >>
+                  (_reg[inst.as.r_type.rs2()] & 0b111111);
+              _pc += 4;
+            } break;
+            case riscv::srl_or_sra_t::e_sra: {
+              _reg[inst.as.r_type.rd()] =
+                  static_cast<int64_t>(_reg[inst.as.r_type.rs1()]) >>
+                  (_reg[inst.as.r_type.rs2()] & 0b111111);
+              _pc += 4;
+            } break;
+            default:
+              handle_trap(riscv::exception_code_t::e_illegal_instruction,
+                          instruction);
+          }
+        } break;
+        case riscv::r_type_func3_t::e_or: {
+          _reg[inst.as.r_type.rd()] =
+              _reg[inst.as.r_type.rs1()] | _reg[inst.as.r_type.rs2()];
+          _pc += 4;
+        } break;
+        case riscv::r_type_func3_t::e_and: {
+          _reg[inst.as.r_type.rd()] =
+              _reg[inst.as.r_type.rs1()] & _reg[inst.as.r_type.rs2()];
+          _pc += 4;
+        } break;
+        default:
+          handle_trap(riscv::exception_code_t::e_illegal_instruction,
+                      instruction);
+      }
+    } break;
+    case riscv::op_t::e_r_type_32: {
+      switch (inst.as.r_type.funct3()) {
+        case riscv::r_type_func3_t::e_addw_or_subw: {
+          switch (static_cast<riscv::addw_or_subw_t>(inst.as.r_type.funct7())) {
+            case riscv::addw_or_subw_t::e_addw: {
+              _reg[inst.as.r_type.rd()] =
+                  sext(static_cast<uint32_t>(_reg[inst.as.r_type.rs1()]) +
+                           static_cast<uint32_t>(_reg[inst.as.r_type.rs2()]),
+                       32);
+              _pc += 4;
+            } break;
+            case riscv::addw_or_subw_t::e_subw: {
+              _reg[inst.as.r_type.rd()] =
+                  sext(static_cast<uint32_t>(_reg[inst.as.r_type.rs1()]) -
+                           static_cast<uint32_t>(_reg[inst.as.r_type.rs2()]),
+                       32);
+              _pc += 4;
+            } break;
+            default:
+              handle_trap(riscv::exception_code_t::e_illegal_instruction,
+                          instruction);
+          }
+          break;
+          case riscv::r_type_func3_t::e_sllw: {
+            _reg[inst.as.r_type.rd()] =
+                sext(static_cast<int32_t>(_reg[inst.as.r_type.rs1()])
+                         << (_reg[inst.as.r_type.rs2()] & 0b11111),
+                     32);
+            _pc += 4;
+          } break;
+          case riscv::r_type_func3_t::e_srlw_or_sraw: {
+            switch (
+                static_cast<riscv::srlw_or_sraw_t>(inst.as.r_type.funct7())) {
+              case riscv::srlw_or_sraw_t::e_srlw: {
+                _reg[inst.as.r_type.rd()] =
+                    sext(static_cast<uint32_t>(_reg[inst.as.r_type.rs1()]) >>
+                             (_reg[inst.as.r_type.rs2()] & 0b11111),
+                         32);
+                _pc += 4;
+              } break;
+              case riscv::srlw_or_sraw_t::e_sraw: {
+                _reg[inst.as.r_type.rd()] =
+                    sext(static_cast<int32_t>(_reg[inst.as.r_type.rs1()]) >>
+                             (_reg[inst.as.r_type.rs2()] & 0b11111),
+                         32);
+                _pc += 4;
+              } break;
+              default:
+                handle_trap(riscv::exception_code_t::e_illegal_instruction,
+                            instruction);
+            }
+          } break;
 
-    // fm pred succ rs1 000 rd 0001111 FENCE
-    case 0b0001111:  // FENCE
-      std::cout << "Note: Fence encountered, fence is not implemented!\n";
-      _program_counter += 4;
-      break;
-      // // 1000 0011 0011 00000 000 00000 0001111 FENCE.TSO
-      // case 0b0001111:  // FENCE.TSO
-      //   break;
-      // // 0000 0001 0000 00000 000 00000 0001111 PAUSE
-      // case 0b0001111:  // PAUSE
-      //   break;
-
-    case 0b1110011:
-      switch (instruction.as.i_type.funct3()) {
-        case 0b000:
-          switch (instruction.as.i_type.imm()) {
-            // 000000000000 00000 000 00000 1110011 ECALL
-            case 0b000000000000: {  // ECALL
-              auto itr = _syscalls.find(_registers[17]);
+          default:
+            handle_trap(riscv::exception_code_t::e_illegal_instruction,
+                        instruction);
+        }
+      }
+    } break;
+    case riscv::op_t::e_fence: {
+      std::cerr << "Note: Fence encountered, fence is not implemented or "
+                   "required\n";
+      _pc += 4;
+    } break;
+    case riscv::op_t::e_system: {
+      switch (inst.as.i_type.funct3()) {
+        case riscv::i_type_func3_t::e_sub_system: {
+          switch (static_cast<riscv::sub_system_t>(inst.as.i_type.imm())) {
+            case riscv::sub_system_t::e_ecall: {
+              auto itr = _syscalls.find(_reg[17]);
               if (itr != _syscalls.end()) {
                 itr->second(*this);
-                _program_counter += 4;
+                _pc += 4;
               } else {
-                std::stringstream ss;
-                ss << "Error: unhandled ecall: " << _registers[17];
-                throw std::runtime_error(ss.str());
+                std::cout << "Error: unhandled ecall - " << _reg[17] << '\n';
               }
             } break;
-            // 000000000001 00000 000 00000 1110011 EBREAK
-            case 0b000000000001:  // EBREAK
-              break;
-            // 001100000010 00000 000 00000 1110011 MRET
-            case 0b001100000010: {  // MRET
-              uint64_t mstatus = _read_csr(MSTATUS);
-              uint64_t mpp = (mstatus & MSTATUS_MPP_MASK) >> MSTATUS_MPP_SHIFT;
-              uint64_t mpie =
-                  (mstatus & MSTATUS_MPIE_MASK) >> MSTATUS_MPIE_SHIFT;
-              _program_counter = _read_csr(MEPC);
-              _privilege_mode  = static_cast<privilege_mode_t>(mpp);
-              mstatus =
-                  (mstatus & ~MSTATUS_MIE_MASK) | (mpie << MSTATUS_MIE_SHIFT);
-              mstatus =
-                  (mstatus & ~MSTATUS_MPIE_MASK) | (1U << MSTATUS_MPIE_SHIFT);
-              mstatus =
-                  (mstatus & ~MSTATUS_MPP_MASK) | (0b11U << MSTATUS_MPP_SHIFT);
-              _write_csr(MSTATUS, mstatus);
+            case riscv::sub_system_t::e_ebreak: {
+              std::cout << "TODO: implement EBREAK\n";
             } break;
+            case riscv::sub_system_t::e_mret: {
+              uint64_t mstatus = _read_csr(riscv::MSTATUS);
+              uint64_t mpp     = (mstatus & riscv::MSTATUS_MPP_MASK) >>
+                             riscv::MSTATUS_MPP_SHIFT;
+              uint64_t mpie = (mstatus & riscv::MSTATUS_MPIE_MASK) >>
+                              riscv::MSTATUS_MPIE_SHIFT;
+              _pc     = _read_csr(riscv::MEPC);
+              mstatus = (mstatus & ~riscv::MSTATUS_MIE_MASK) |
+                        (mpie << riscv::MSTATUS_MIE_SHIFT);
+              mstatus = (mstatus & ~riscv::MSTATUS_MPIE_MASK) |
+                        (1u << riscv::MSTATUS_MPIE_SHIFT);
+              mstatus = (mstatus & ~riscv::MSTATUS_MPP_MASK) |
+                        (0b11U << riscv::MSTATUS_MPP_SHIFT);
+              _write_csr(riscv::MSTATUS, mstatus);
+            } break;
+
             default:
-              handle_trap(exception_code_t::e_illegal_instruction,
-                          _instruction);
+              handle_trap(riscv::exception_code_t::e_illegal_instruction,
+                          instruction);
           }
-          break;
-          // TODO: CSR instructions should use read and write
-          // csr rs1 001 rd 1110011 CSRRW
-        case 0b001: {  // CSRRW
-          uint64_t t = read_csr(_instruction);
-          write_csr(_instruction, _registers[instruction.as.i_type.rs1()]);
-          _registers[instruction.as.i_type.rd()] = t;
-          _program_counter += 4;
         } break;
-          // csr rs1 010 rd 1110011 CSRRS
-        case 0b010: {  // CSRRS
-          uint64_t t = read_csr(_instruction);
-          write_csr(_instruction, t | _registers[instruction.as.i_type.rs1()]);
-          _registers[instruction.as.i_type.rd()] = t;
-          _program_counter += 4;
+        case riscv::i_type_func3_t::e_csrrw: {
+          auto t = read_csr(instruction);
+          if (!t) break;
+          if (!write_csr(instruction, _reg[inst.as.i_type.rs1()])) break;
+          _reg[inst.as.i_type.rd()] = *t;
+          _pc += 4;
         } break;
-          // csr rs1 011 rd 1110011 CSRRC
-        case 0b011:  // CSRRC
-          break;
-          // csr uimm 101 rd 1110011 CSRRWI
-        case 0b101: {  // CSRRWI
-          uint64_t t = read_csr(_instruction);
-          write_csr(_instruction, instruction.as.i_type.rs1());
-          _registers[instruction.as.i_type.rd()] = t;
-          _program_counter += 4;
+        case riscv::i_type_func3_t::e_csrrs: {
+          auto t = read_csr(instruction);
+          if (!t) break;
+          if (!write_csr(instruction, *t | _reg[inst.as.i_type.rs1()])) break;
+          _reg[inst.as.i_type.rd()] = *t;
+          _pc += 4;
         } break;
-          // csr uimm 110 rd 1110011 CSRRSI
-        case 0b110:  // CSRRSI
-          break;
-          // csr uimm 111 rd 1110011 CSRRCI
-        case 0b111:  // CSRRCI
-          break;
+        case riscv::i_type_func3_t::e_csrrc: {
+        } break;
+        case riscv::i_type_func3_t::e_csrrwi: {
+          auto t = read_csr(instruction);
+          if (!t) break;
+          if (!write_csr(instruction, inst.as.i_type.rs1())) break;
+          _reg[inst.as.i_type.rd()] = *t;
+          _pc += 4;
+        } break;
+        case riscv::i_type_func3_t::e_csrrsi: {
+        } break;
+        case riscv::i_type_func3_t::e_csrrci: {
+        } break;
+
         default:
-          handle_trap(exception_code_t::e_illegal_instruction, _instruction);
+          handle_trap(riscv::exception_code_t::e_illegal_instruction,
+                      instruction);
       }
-      break;
-
-    case 0b0011011:
-      switch (instruction.as.i_type.funct3()) {
-          // imm[11:0] rs1 000 rd 0011011 ADDIW
-        case 0b000:  // ADDIW
-          _registers[instruction.as.i_type.rd()] = ::dawn::sext(
-              static_cast<uint32_t>(_registers[instruction.as.i_type.rs1()]) +
-                  static_cast<int32_t>(instruction.as.i_type.imm_sext()),
-              32);
-          _program_counter += 4;
-          break;
-          // 0000000 shamt rs1 001 rd 0011011 SLLIW
-        case 0b001:  // SLLIW
-          _registers[instruction.as.i_type.rd()] = ::dawn::sext(
-              static_cast<uint32_t>(_registers[instruction.as.i_type.rs1()])
-                  << static_cast<uint32_t>(instruction.as.i_type.shamt_w()),
-              32);
-          _program_counter += 4;
-          break;
-        case 0b101:
-          switch (instruction.as.i_type.imm() >> 5) {
-              // 0000000 shamt rs1 101 rd 0011011 SRLIW
-            case 0b0000000:  // SRLIW
-              _registers[instruction.as.i_type.rd()] =
-                  ::dawn::sext(static_cast<uint32_t>(
-                                   _registers[instruction.as.i_type.rs1()]) >>
-                                   instruction.as.i_type.shamt_w(),
-                               32);
-              _program_counter += 4;
-              break;
-              // 0100000 shamt rs1 101 rd 0011011 SRAIW
-            case 0b0100000:  // SRAIW
-              _registers[instruction.as.i_type.rd()] =
-                  ::dawn::sext(static_cast<int32_t>(
-                                   _registers[instruction.as.i_type.rs1()]) >>
-                                   instruction.as.i_type.shamt_w(),
-                               32);
-              _program_counter += 4;
-              break;
-            default:
-              handle_trap(exception_code_t::e_illegal_instruction,
-                          _instruction);
-          }
-          break;
-        default:
-          handle_trap(exception_code_t::e_illegal_instruction, _instruction);
-      }
-      break;
-
-    case 0b0111011:
-      switch (instruction.as.r_type.funct3()) {
-        case 0b000:
-          switch (instruction.as.r_type.funct7()) {
-              // 0000000 rs2 rs1 000 rd 0111011 ADDW
-            case 0b0000000:  // ADDW
-              _registers[instruction.as.r_type.rd()] =
-                  ::dawn::sext(static_cast<uint32_t>(
-                                   _registers[instruction.as.r_type.rs1()]) +
-                                   static_cast<uint32_t>(
-                                       _registers[instruction.as.r_type.rs2()]),
-                               32);
-              _program_counter += 4;
-              break;
-              // 0100000 rs2 rs1 000 rd 0111011 SUBW
-            case 0b0100000:  // SUBW
-              _registers[instruction.as.r_type.rd()] =
-                  ::dawn::sext(static_cast<uint32_t>(
-                                   _registers[instruction.as.r_type.rs1()]) -
-                                   static_cast<uint32_t>(
-                                       _registers[instruction.as.r_type.rs2()]),
-                               32);
-              _program_counter += 4;
-              break;
-            default:
-              handle_trap(exception_code_t::e_illegal_instruction,
-                          _instruction);
-          }
-          break;
-
-          // 0000000 rs2 rs1 001 rd 0111011 SLLW
-        case 0b001:  // SLLW
-          _registers[instruction.as.r_type.rd()] =
-              static_cast<int32_t>(_registers[instruction.as.r_type.rs1()])
-              << (_registers[instruction.as.r_type.rs2()] & 0b11111);
-          _program_counter += 4;
-          break;
-
-        case 0b101:
-          switch (instruction.as.r_type.funct7()) {
-              // 0000000 rs2 rs1 101 rd 0111011 SRLW
-            case 0b0000000:  // SRLW
-              _registers[instruction.as.r_type.rd()] = ::dawn::sext(
-                  static_cast<uint32_t>(
-                      _registers[instruction.as.r_type.rs1()]) >>
-                      (_registers[instruction.as.r_type.rs2()] & 0b11111),
-                  32);
-              _program_counter += 4;
-              break;
-              // 0100000 rs2 rs1 101 rd 0111011 SRAW
-            case 0b0100000:  // SRAW
-              _registers[instruction.as.r_type.rd()] =
-                  static_cast<int64_t>(static_cast<int32_t>(
-                      _registers[instruction.as.r_type.rs1()])) >>
-                  (_registers[instruction.as.r_type.rs2()] & 0b11111);
-              _program_counter += 4;
-              break;
-            default:
-              handle_trap(exception_code_t::e_illegal_instruction,
-                          _instruction);
-          }
-          break;
-        default:
-          handle_trap(exception_code_t::e_illegal_instruction, _instruction);
-      }
-      break;
-
-      // RV32/RV64 Zifencei Standard Extension
-      // imm[11:0] rs1 001 rd 0001111 FENCE.I
-
-      // RV32M Standard Extension
-      // 0000001 rs2 rs1 000 rd 0110011 MUL
-      // 0000001 rs2 rs1 001 rd 0110011 MULH
-      // 0000001 rs2 rs1 010 rd 0110011 MULHSU
-      // 0000001 rs2 rs1 011 rd 0110011 MULHU
-      // 0000001 rs2 rs1 100 rd 0110011 DIV
-      // 0000001 rs2 rs1 101 rd 0110011 DIVU
-      // 0000001 rs2 rs1 110 rd 0110011 REM
-      // 0000001 rs2 rs1 111 rd 0110011 REMU
-
-      // RV64M Standard Extension (in addition to RV32M)
-      // 0000001 rs2 rs1 000 rd 0111011 MULW
-      // 0000001 rs2 rs1 100 rd 0111011 DIVW
-      // 0000001 rs2 rs1 101 rd 0111011 DIVUW
-      // 0000001 rs2 rs1 110 rd 0111011 REMW
-      // 0000001 rs2 rs1 111 rd 0111011 REMUW
-
-      // RV32F Standard Extension
-      // imm[11:0] rs1 010 rd 0000111 FLW
-      // imm[11:5] rs2 rs1 010 imm[4:0] 0100111 FSW
-      // rs3 00 rs2 rs1 rm rd 1000011 FMADD.S
-      // rs3 00 rs2 rs1 rm rd 1000111 FMSUB.S
-      // rs3 00 rs2 rs1 rm rd 1001011 FNMSUB.S
-      // rs3 00 rs2 rs1 rm rd 1001111 FNMADD.S
-      // 0000000 rs2 rs1 rm rd 1010011 FADD.S
-      // 0000100 rs2 rs1 rm rd 1010011 FSUB.S
-      // 0001000 rs2 rs1 rm rd 1010011 FMUL.S
-      // 0001100 rs2 rs1 rm rd 1010011 FDIV.S
-      // 0101100 00000 rs1 rm rd 1010011 FSQRT.S
-      // 0010000 rs2 rs1 000 rd 1010011 FSGNJ.S
-      // 0010000 rs2 rs1 001 rd 1010011 FSGNJN.S
-      // 0010000 rs2 rs1 010 rd 1010011 FSGNJX.S
-      // 0010100 rs2 rs1 000 rd 1010011 FMIN.S
-      // 0010100 rs2 rs1 001 rd 1010011 FMAX.S
-      // 1100000 00000 rs1 rm rd 1010011 FCVT.W.S
-      // 1100000 00001 rs1 rm rd 1010011 FCVT.WU.S
-      // 1110000 00000 rs1 000 rd 1010011 FMV.X.W
-      // 1010000 rs2 rs1 010 rd 1010011 FEQ.S
-      // 1010000 rs2 rs1 001 rd 1010011 FLT.S
-      // 1010000 rs2 rs1 000 rd 1010011 FLE.S
-      // 1110000 00000 rs1 001 rd 1010011 FCLASS.S
-      // 1101000 00000 rs1 rm rd 1010011 FCVT.S.W
-      // 1101000 00001 rs1 rm rd 1010011 FCVT.S.WU
-      // 1111000 00000 rs1 000 rd 1010011 FMV.W.X
-      //
-      // RV64F Standard Extension (in addition to RV32F)
-      // 1100000 00010 rs1 rm rd 1010011 FCVT.L.S
-      // 1100000 00011 rs1 rm rd 1010011 FCVT.LU.S
-      // 1101000 00010 rs1 rm rd 1010011 FCVT.S.L
-      // 1101000 00011 rs1 rm rd 1010011 FCVT.S.LU
-
-      // RV32D Standard Extension
-      // imm[11:0] rs1 011 rd 0000111 FLD
-      // imm[11:5] rs2 rs1 011 imm[4:0] 0100111 FSD
-      // rs3 01 rs2 rs1 rm rd 1000011 FMADD.D
-      // rs3 01 rs2 rs1 rm rd 1000111 FMSUB.D
-      // rs3 01 rs2 rs1 rm rd 1001011 FNMSUB.D
-      // rs3 01 rs2 rs1 rm rd 1001111 FNMADD.D
-      // 0000001 rs2 rs1 rm rd 1010011 FADD.D
-      // 0000101 rs2 rs1 rm rd 1010011 FSUB.D
-      // 0001001 rs2 rs1 rm rd 1010011 FMUL.D
-      // 0001101 rs2 rs1 rm rd 1010011 FDIV.D
-      // 0101101 00000 rs1 rm rd 1010011 FSQRT.D
-      // 0010001 rs2 rs1 000 rd 1010011 FSGNJ.D
-      // 0010001 rs2 rs1 001 rd 1010011 FSGNJN.D
-      // 0010001 rs2 rs1 010 rd 1010011 FSGNJX.D
-      // 0010101 rs2 rs1 000 rd 1010011 FMIN.D
-      // 0010101 rs2 rs1 001 rd 1010011 FMAX.D
-      // 0100000 00001 rs1 rm rd 1010011 FCVT.S.D
-      // 0100001 00000 rs1 rm rd 1010011 FCVT.D.S
-      // 1010001 rs2 rs1 010 rd 1010011 FEQ.D
-      // 1010001 rs2 rs1 001 rd 1010011 FLT.D
-      // 1010001 rs2 rs1 000 rd 1010011 FLE.D
-      // 1110001 00000 rs1 001 rd 1010011 FCLASS.D
-      // 1100001 00000 rs1 rm rd 1010011 FCVT.W.D
-      // 1100001 00001 rs1 rm rd 1010011 FCVT.WU.D
-      // 1101001 00000 rs1 rm rd 1010011 FCVT.D.W
-      // 1101001 00001 rs1 rm rd 1010011 FCVT.D.WU
-
-      // RV64D Standard Extension (in addition to RV32D)
-      // 1100001 00010 rs1 rm rd 1010011 FCVT.L.D
-      // 1100001 00011 rs1 rm rd 1010011 FCVT.LU.D
-      // 1110001 00000 rs1 000 rd 1010011 FMV.X.D
-      // 1101001 00010 rs1 rm rd 1010011 FCVT.D.L
-      // 1101001 00011 rs1 rm rd 1010011 FCVT.D.LU
-      // 1111001 00000 rs1 000 rd 1010011 FMV.D.X
+    } break;
     default:
-      handle_trap(exception_code_t::e_illegal_instruction, _instruction);
+      handle_trap(riscv::exception_code_t::e_illegal_instruction, instruction);
+  }
+  return true;
+}
+
+bool machine_t::decode_and_jit_basic_block(uint32_t instruction) {}
+
+void machine_t::simulate(uint64_t num_instructions) {
+  for (uint64_t instructions = 0; instructions < num_instructions;
+       instructions++) {
+    if (!_running) return;
+    auto instruction = fetch_instruction();
+    if (instruction) decode_and_exec_instruction(*instruction);
   }
 }
 

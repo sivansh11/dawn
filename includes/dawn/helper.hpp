@@ -21,7 +21,14 @@ constexpr inline int64_t sext(uint64_t value, uint32_t imm_bit_width) {
   return (int64_t)(value << (64 - imm_bit_width)) >> (64 - imm_bit_width);
 }
 
-void debug_disassemble_instruction(uint32_t _instruction, std::ostream& o);
+inline void error(const char* msg) {
+#ifndef NDEBUG
+  throw std::runtime_error(msg);
+#else
+  std::cerr << msg;
+  abort();
+#endif
+}
 
 }  // namespace dawn
 
