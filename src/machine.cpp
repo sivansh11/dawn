@@ -1,4 +1,4 @@
-#include "dawn/state.hpp"
+#include "dawn/machine.hpp"
 
 #include <cassert>
 #include <cinttypes>
@@ -17,11 +17,11 @@
 
 namespace dawn {
 
-std::optional<state_t> state_t::load_elf(const std::filesystem::path& path) {
+std::optional<machine_t> machine_t::load_elf(const std::filesystem::path& path) {
   ELFIO::elfio reader;
   if (!reader.load(path)) return std::nullopt;
 
-  state_t state{};
+  machine_t state{};
 
   address_t guest_base = std::numeric_limits<address_t>::max();
   address_t guest_max  = std::numeric_limits<address_t>::min();
@@ -110,21 +110,21 @@ std::optional<state_t> state_t::load_elf(const std::filesystem::path& path) {
   return state;
 }
 
-bool state_t::add_syscall(uint64_t number, syscall_t syscall) {
+bool machine_t::add_syscall(uint64_t number, syscall_t syscall) {
   auto itr = _syscalls.find(number);
   if (itr != _syscalls.end()) return false;
   _syscalls[number] = syscall;
   return true;
 }
 
-bool state_t::del_syscall(uint64_t number) {
+bool machine_t::del_syscall(uint64_t number) {
   auto itr = _syscalls.find(number);
   if (itr == _syscalls.end()) return false;
   _syscalls.erase(number);
   return true;
 }
 
-std::optional<uint32_t> state_t::fetch_instruction() {
+std::optional<uint32_t> machine_t::fetch_instruction() {
   if (_pc % 4 != 0) {
     handle_trap(riscv::exception_code_t::e_instruction_address_misaligned, _pc);
     return std::nullopt;
@@ -137,16 +137,16 @@ std::optional<uint32_t> state_t::fetch_instruction() {
   return instruction.value();
 }
 
-void state_t::_write_csr(uint16_t address, uint64_t value) {
+void machine_t::_write_csr(uint16_t address, uint64_t value) {
   // TODO: more involved csr writes
   _csr[address] = value;
 }
-uint64_t state_t::_read_csr(uint16_t address) {
+uint64_t machine_t::_read_csr(uint16_t address) {
   // TODO: more involved csr reads
   return _csr[address];
 }
 
-bool state_t::write_csr(uint32_t instruction, uint64_t value) {
+bool machine_t::write_csr(uint32_t instruction, uint64_t value) {
   riscv::instruction_t riscv_instruction;
   reinterpret_cast<uint32_t&>(riscv_instruction) = instruction;
   if ((riscv_instruction.as.i_type.imm() >> 10) == 0b11 &&
@@ -158,13 +158,13 @@ bool state_t::write_csr(uint32_t instruction, uint64_t value) {
   return true;
 }
 // TODO: maybe this doesnt need to be an optional ?
-std::optional<uint64_t> state_t::read_csr(uint32_t instruction) {
+std::optional<uint64_t> machine_t::read_csr(uint32_t instruction) {
   riscv::instruction_t riscv_instruction;
   reinterpret_cast<uint32_t&>(riscv_instruction) = instruction;
   return _read_csr(riscv_instruction.as.i_type.imm());
 }
 
-void state_t::handle_trap(riscv::exception_code_t cause, uint64_t value) {
+void machine_t::handle_trap(riscv::exception_code_t cause, uint64_t value) {
   _write_csr(riscv::MEPC, value);
   _write_csr(riscv::MCAUSE, value);
   _write_csr(riscv::MTVAL, value);
@@ -204,7 +204,7 @@ void state_t::handle_trap(riscv::exception_code_t cause, uint64_t value) {
   }
 }
 
-bool state_t::decode_and_exec_instruction(uint32_t instruction) {
+bool machine_t::decode_and_exec_instruction(uint32_t instruction) {
   _reg[0] = 0;
   riscv::instruction_t inst;
   reinterpret_cast<uint32_t&>(inst) = instruction;
@@ -799,9 +799,9 @@ bool state_t::decode_and_exec_instruction(uint32_t instruction) {
   return true;
 }
 
-bool state_t::decode_and_jit_basic_block(uint32_t instruction) {}
+bool machine_t::decode_and_jit_basic_block(uint32_t instruction) {}
 
-void state_t::simulate(uint64_t num_instructions) {
+void machine_t::simulate(uint64_t num_instructions) {
   for (uint64_t instructions = 0; instructions < num_instructions;
        instructions++) {
     if (!_running) return;

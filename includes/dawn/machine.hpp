@@ -13,12 +13,12 @@
 
 namespace dawn {
 
-struct state_t;
+struct machine_t;
 
-using syscall_t = std::function<void(state_t&)>;
+using syscall_t = std::function<void(machine_t&)>;
 
-struct state_t {
-  static std::optional<state_t> load_elf(const std::filesystem::path& path);
+struct machine_t {
+  static std::optional<machine_t> load_elf(const std::filesystem::path& path);
   bool                          add_syscall(uint64_t number, syscall_t syscall);
   bool                          del_syscall(uint64_t number);
   std::optional<uint32_t>       fetch_instruction();
