@@ -92,23 +92,23 @@ bool memory_t::is_region_in_memory(void* ptr, size_t size,
 }
 bool memory_t::memcpy_host_to_guest(address_t dst, const void* src,
                                     size_t size) const {
-  if (!is_region_in_memory(translate_guest_to_host(dst), size,
-                           memory_protection_t::e_write))
+  // NOTE: no protection checking!
+  if (!is_region_in_memory(translate_guest_to_host(dst), size, {}))
     return false;
   std::memcpy(translate_guest_to_host(dst), src, size);
   return true;
 }
 bool memory_t::memcpy_guest_to_host(void* dst, address_t src,
                                     size_t size) const {
-  if (!is_region_in_memory(translate_guest_to_host(src), size,
-                           memory_protection_t::e_read))
+  // NOTE: no protection checking!
+  if (!is_region_in_memory(translate_guest_to_host(src), size, {}))
     return false;
   std::memcpy(dst, translate_guest_to_host(src), size);
   return true;
 }
 bool memory_t::memset(address_t addr, int value, size_t size) const {
-  if (!is_region_in_memory(translate_guest_to_host(addr), size,
-                           memory_protection_t::e_write))
+  // NOTE: no protection checking!
+  if (!is_region_in_memory(translate_guest_to_host(addr), size, {}))
     return false;
   std::memset(translate_guest_to_host(addr), value, size);
   return true;
