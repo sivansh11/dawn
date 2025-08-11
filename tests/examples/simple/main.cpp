@@ -29,7 +29,7 @@
 // custom syscall to get shared memory
 // NOTE: no need to define newlib syscalls as they are called internally by the
 // compiler
-define_syscall(1002, get_mapped_memory, void *());
+define_syscall(1000, get_mapped_memory, void *());
 
 int main() {
   // get shared memory
