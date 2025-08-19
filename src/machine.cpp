@@ -28,6 +28,9 @@
 
 namespace dawn {
 
+typedef bool (*store_handler_t)(machine_t*, address_t, uint64_t);
+typedef void (*handle_trap_handler_t)(machine_t*, address_t);
+
 std::optional<machine_t> machine_t::load_elf(
     const std::filesystem::path& path) {
   ELFIO::elfio reader;
@@ -868,7 +871,6 @@ bool machine_t::decode_and_jit_basic_block(address_t pc) {
     for (uint8_t idx : dirty_regs) {
       cc.mov(machine_reg(machine_ptr, idx), reg_map[idx]);
     }
-    dirty_regs.clear();
     // annoying limitation, cannot write a imm64 to memory
     asmjit::x86::Gp pc_reg = cc.newGpq();
     cc.mov(pc_reg, pc);
@@ -900,18 +902,95 @@ bool machine_t::decode_and_jit_basic_block(address_t pc) {
         pc += 4;
         count++;
       } break;
-      // case riscv::op_t::e_auipc: {
-      // } break;
-      // case riscv::op_t::e_jal: {
-      // } break;
-      // case riscv::op_t::e_jalr: {
-      // } break;
-      // case riscv::op_t::e_branch: {
-      // } break;
-      // case riscv::op_t::e_load: {
-      // } break;
-      // case riscv::op_t::e_store: {
-      // } break;
+        // case riscv::op_t::e_auipc: {
+        // } break;
+        // case riscv::op_t::e_jal: {
+        // } break;
+        // case riscv::op_t::e_jalr: {
+        // } break;
+        // case riscv::op_t::e_branch: {
+        // } break;
+        // case riscv::op_t::e_load: {
+        // } break;
+      case riscv::op_t::e_store: {
+        switch (inst.as.s_type.funct3()) {
+          // case riscv::store_t::e_sb: {
+          // } break;
+          // case riscv::store_t::e_sh: {
+          // } break;
+          // case riscv::store_t::e_sw: {
+          // } break;
+          case riscv::store_t::e_sd: {
+            asmjit::x86::Gp rs1  = read_reg(inst.as.s_type.rs1());
+            asmjit::x86::Gp rs2  = read_reg(inst.as.s_type.rs2());
+            asmjit::x86::Gp addr = cc.newGpq();
+            asmjit::x86::Gp res  = cc.newGpq();
+            cc.mov(addr, rs1);
+            cc.add(addr, inst.as.s_type.imm_sext());
+
+            // bool func(machine_t *, address_t, uint64_t)
+            asmjit::InvokeNode* invoke;
+            cc.invoke(&invoke,
+                      static_cast<store_handler_t>([](machine_t* machine,
+                                                      address_t  addr,
+                                                      uint64_t value) -> bool {
+                        return machine->_memory.store_64(addr, value);
+                      }),
+                      asmjit::FuncSignature::build<bool, machine_t*, address_t,
+                                                   uint64_t>());
+            invoke->setArg(0, machine_ptr);
+            invoke->setArg(1, addr);
+            invoke->setArg(2, rs2);
+            invoke->setRet(0, res);
+
+            cc.test(res, res);
+            asmjit::Label not_zero = cc.newLabel();
+            cc.jne(not_zero);
+            // zero/false
+            // handle_trap
+            // TODO: test handle_trap
+            {
+              asmjit::InvokeNode* invoke;
+              cc.invoke(
+                  &invoke,
+                  static_cast<handle_trap_handler_t>([](machine_t* machine,
+                                                        address_t  addr) {
+                    machine->handle_trap(
+                        riscv::exception_code_t::e_store_access_fault, addr);
+                  }),
+                  asmjit::FuncSignature::build<void, machine_t*, address_t>());
+              invoke->setArg(0, machine_ptr);
+              invoke->setArg(1, addr);
+
+              flush_dirt(pc);
+              // not clearning dirty_regs
+              cc.ret();  // early return
+            }
+
+            cc.bind(not_zero);
+            // not zero/true
+
+            pc += 4;
+            count++;
+          } break;
+
+          default:
+            if (!flush_dirt(pc)) return false;
+            dirty_regs.clear();
+            cc.ret();
+            cc.endFunc();
+            cc.finalize();
+            void* fn{};
+            if (asmjit::Error err = _jitruntime->add(&fn, &code)) {
+              std::cerr << "Error: failed to jit basic block\n";
+              return false;
+            }
+            assert(fn);
+            _jitted_func[start_pc] = {reinterpret_cast<jitted_func_t>(fn),
+                                      count};
+            return true;
+        }
+      } break;
       case riscv::op_t::e_i_type: {
         switch (inst.as.i_type.funct3()) {
           case riscv::i_type_func3_t::e_addi: {
@@ -968,6 +1047,7 @@ bool machine_t::decode_and_jit_basic_block(address_t pc) {
 
           default:
             if (!flush_dirt(pc)) return false;
+            dirty_regs.clear();
             cc.ret();
             cc.endFunc();
             cc.finalize();
@@ -995,6 +1075,7 @@ bool machine_t::decode_and_jit_basic_block(address_t pc) {
 
       default:
         if (!flush_dirt(pc)) return false;
+        dirty_regs.clear();
         cc.ret();
         cc.endFunc();
         cc.finalize();
