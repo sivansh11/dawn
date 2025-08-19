@@ -9,7 +9,7 @@ int main(int argc, char** argv) {
   if (argc != 2) dawn::error("Error: [simple] [elf]");
   dawn::machine_t machine;
   // TODO: load_elf should take in initial memory along with size
-  if (auto opt = dawn::machine_t::load_elf(argv[1])) machine = *opt;
+  if (auto opt = dawn::machine_t::load_elf(argv[1])) machine = std::move(*opt);
 
   // newlib close handler
   machine.add_syscall(57,

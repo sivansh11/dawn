@@ -9,7 +9,7 @@ int main(int argc, char** argv) {
   if (!m) {
     throw std::runtime_error("failed to load elf");
   }
-  auto machine = *m;
+  auto machine = std::move(*m);
 
   machine.add_syscall(93, [](dawn::machine_t& machine) {
     machine._running = false;

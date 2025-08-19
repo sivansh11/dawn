@@ -2,26 +2,39 @@
 
 #include <cassert>
 #include <cinttypes>
+#include <cstddef>
+#include <cstdint>
 #include <elfio/elf_types.hpp>
 #include <elfio/elfio.hpp>
 #include <elfio/elfio_section.hpp>
 #include <elfio/elfio_symbols.hpp>
+#include <fstream>
 #include <limits>
+#include <map>
+#include <memory>
 #include <optional>
+#include <set>
 #include <sstream>
 #include <stdexcept>
 
+#include "ankerl/unordered_dense.h"
+#include "asmjit/core/compiler.h"
+#include "asmjit/core/func.h"
+#include "asmjit/x86/x86compiler.h"
+#include "asmjit/x86/x86operand.h"
 #include "dawn/helper.hpp"
 #include "dawn/memory.hpp"
 #include "dawn/types.hpp"
 
 namespace dawn {
 
-std::optional<machine_t> machine_t::load_elf(const std::filesystem::path& path) {
+std::optional<machine_t> machine_t::load_elf(
+    const std::filesystem::path& path) {
   ELFIO::elfio reader;
   if (!reader.load(path)) return std::nullopt;
 
-  machine_t state{};
+  machine_t machine{};
+  machine._jitruntime = std::make_unique<asmjit::JitRuntime>();
 
   address_t guest_base = std::numeric_limits<address_t>::max();
   address_t guest_max  = std::numeric_limits<address_t>::min();
@@ -37,9 +50,9 @@ std::optional<machine_t> machine_t::load_elf(const std::filesystem::path& path) 
     guest_max  = std::max(guest_max, virtual_address + memory_size);
   }
 
-  uint8_t* base = new uint8_t[1024 * 1024 * 4];
-  state._memory            = memory_t::create(base, 1024 * 1024 * 4);
-  state._memory.guest_base = guest_base;
+  uint8_t* base              = new uint8_t[1024 * 1024 * 4];
+  machine._memory            = memory_t::create(base, 1024 * 1024 * 4);
+  machine._memory.guest_base = guest_base;
 
   for (uint32_t i = 0; i < reader.segments.size(); i++) {
     const ELFIO::segment* segment = reader.segments[i];
@@ -57,28 +70,28 @@ std::optional<machine_t> machine_t::load_elf(const std::filesystem::path& path) 
     if (is_write) protection = protection | memory_protection_t::e_write;
     if (is_exec) protection = protection | memory_protection_t::e_exec;
 
-    if (!state._memory.memcpy_host_to_guest(
+    if (!machine._memory.memcpy_host_to_guest(
             virtual_address, reinterpret_cast<const void*>(segment->get_data()),
             file_size))
       return std::nullopt;
-    state._memory.insert_memory(
-        state._memory.translate_guest_to_host(virtual_address), file_size,
+    machine._memory.insert_memory(
+        machine._memory.translate_guest_to_host(virtual_address), file_size,
         protection);
     if (memory_size - file_size) {
-      if (!state._memory.memset(virtual_address + file_size, 0,
-                                memory_size - file_size))
+      if (!machine._memory.memset(virtual_address + file_size, 0,
+                                  memory_size - file_size))
         return std::nullopt;
-      state._memory.insert_memory(
+      machine._memory.insert_memory(
           reinterpret_cast<void*>(
               reinterpret_cast<size_t>(
-                  state._memory.translate_guest_to_host(virtual_address)) +
+                  machine._memory.translate_guest_to_host(virtual_address)) +
               file_size),
           memory_size - file_size, memory_protection_t::e_read_write);
     }
   }
-  state._memory.insert_memory(state._memory.translate_guest_to_host(guest_max),
-                              state._memory._size - guest_max,
-                              memory_protection_t::e_read_write);
+  machine._memory.insert_memory(
+      machine._memory.translate_guest_to_host(guest_max),
+      machine._memory._size - guest_max, memory_protection_t::e_read_write);
   // TODO: insert a byte with memory_protection_t::e_none to prevent
   // stack overflow
   for (uint32_t i = 0; i < reader.sections.size(); i++) {
@@ -98,16 +111,16 @@ std::optional<machine_t> machine_t::load_elf(const std::filesystem::path& path) 
       symbols.get_symbol(j, name, value, size, bind, type, section_index,
                          other);
       if (name == "_end") {
-        state._heap_address = value;
+        machine._heap_address = value;
         break;
       }
     }
-    assert(state._heap_address != 0);
+    assert(machine._heap_address != 0);
   }
-  state._pc     = reader.get_entry();
-  state._reg[2] = state._memory._size - 8;
+  machine._pc     = reader.get_entry();
+  machine._reg[2] = machine._memory._size - 8;
 
-  return state;
+  return machine;
 }
 
 bool machine_t::add_syscall(uint64_t number, syscall_t syscall) {
@@ -205,7 +218,6 @@ void machine_t::handle_trap(riscv::exception_code_t cause, uint64_t value) {
 }
 
 bool machine_t::decode_and_exec_instruction(uint32_t instruction) {
-  _reg[0] = 0;
   riscv::instruction_t inst;
   reinterpret_cast<uint32_t&>(inst) = instruction;
   switch (inst.as.base.opcode()) {
@@ -561,14 +573,14 @@ bool machine_t::decode_and_exec_instruction(uint32_t instruction) {
             case riscv::srliw_or_sraiw_t::e_srliw: {
               _reg[inst.as.i_type.rd()] =
                   sext(static_cast<uint32_t>(_reg[inst.as.i_type.rs1()]) >>
-                                             inst.as.i_type.shamt_w(),
+                           inst.as.i_type.shamt_w(),
                        32);
               _pc += 4;
             } break;
             case riscv::srliw_or_sraiw_t::e_sraiw: {
               _reg[inst.as.i_type.rd()] =
                   sext(static_cast<int32_t>(_reg[inst.as.i_type.rs1()]) >>
-                                            inst.as.i_type.shamt_w(),
+                           inst.as.i_type.shamt_w(),
                        32);
               _pc += 4;
             } break;
@@ -796,17 +808,227 @@ bool machine_t::decode_and_exec_instruction(uint32_t instruction) {
     default:
       handle_trap(riscv::exception_code_t::e_illegal_instruction, instruction);
   }
+  _reg[0] = 0;
   return true;
 }
 
-bool machine_t::decode_and_jit_basic_block(uint32_t instruction) {}
+bool machine_t::decode_and_jit_basic_block(address_t pc) {
+  asmjit::CodeHolder code;
+  code.init(_jitruntime->environment());
+  asmjit::x86::Compiler cc(&code);
+
+  // void func(machine_t*);
+  asmjit::FuncNode* func =
+      cc.addFunc(asmjit::FuncSignature::build<void, machine_t*>());
+
+  asmjit::x86::Gp machine_ptr = cc.newUIntPtr();
+  func->setArg(0, machine_ptr);
+
+  // TODO: use an array rather than a map
+  std::map<uint8_t, asmjit::x86::Gp> reg_map;
+  // TODO: use an array rather than a set
+  std::set<uint8_t> dirty_regs;
+
+  auto machine_reg = [&](asmjit::x86::Gp machine_ptr,
+                         uint8_t         i) -> asmjit::x86::Mem {
+    assert(i < 32);
+    return asmjit::x86::ptr_64(machine_ptr, offsetof(machine_t, _reg) + i * 8);
+  };
+
+  auto machine_pc = [&](asmjit::x86::Gp machine_ptr) {
+    return asmjit::x86::ptr_64(machine_ptr, offsetof(machine_t, _pc));
+  };
+
+  auto machine_running = [&](asmjit::x86::Gp machine_ptr) {
+    return asmjit::x86::ptr_8(machine_ptr, offsetof(machine_t, _running));
+  };
+
+  auto read_reg = [&](uint8_t idx) -> asmjit::x86::Gp {
+    auto itr = reg_map.find(idx);
+    if (itr == reg_map.end()) {
+      reg_map[idx] = cc.newGpq();
+      cc.mov(reg_map[idx], machine_reg(machine_ptr, idx));
+    }
+    return reg_map[idx];
+  };
+
+  auto write_reg = [&](uint8_t idx) -> asmjit::x86::Gp {
+    auto itr = reg_map.find(idx);
+    if (itr == reg_map.end()) {
+      reg_map[idx] = cc.newGpq();
+    }
+    dirty_regs.insert(idx);
+    return reg_map[idx];
+  };
+
+  address_t start_pc = pc;
+
+  auto flush_dirt = [&](address_t pc) -> bool {
+    if (!dirty_regs.size() && pc == start_pc) return false;
+    for (uint8_t idx : dirty_regs) {
+      cc.mov(machine_reg(machine_ptr, idx), reg_map[idx]);
+    }
+    dirty_regs.clear();
+    // annoying limitation, cannot write a imm64 to memory
+    asmjit::x86::Gp pc_reg = cc.newGpq();
+    cc.mov(pc_reg, pc);
+    cc.mov(machine_pc(machine_ptr), pc_reg);
+    return true;
+  };
+
+  uint64_t count = 0;
+
+  while (true) {
+    if (pc % 4 != 0) {
+      return false;
+    }
+    auto instruction = _memory.fetch_32(pc);
+    if (!instruction) {
+      return false;
+    }
+    riscv::instruction_t inst;
+    reinterpret_cast<uint32_t&>(inst) = *instruction;
+    switch (inst.as.base.opcode()) {
+      case riscv::op_t::e_lui: {
+        if (inst.as.u_type.rd() == 0) {
+          pc += 4;
+          count++;
+          break;
+        }
+        asmjit::x86::Gp dst = write_reg(inst.as.u_type.rd());
+        cc.mov(dst, sext(inst.as.u_type.imm() << 12, 32));
+        pc += 4;
+        count++;
+      } break;
+      // case riscv::op_t::e_auipc: {
+      // } break;
+      // case riscv::op_t::e_jal: {
+      // } break;
+      // case riscv::op_t::e_jalr: {
+      // } break;
+      // case riscv::op_t::e_branch: {
+      // } break;
+      // case riscv::op_t::e_load: {
+      // } break;
+      // case riscv::op_t::e_store: {
+      // } break;
+      case riscv::op_t::e_i_type: {
+        switch (inst.as.i_type.funct3()) {
+          case riscv::i_type_func3_t::e_addi: {
+            if (inst.as.i_type.rd() == 0) {
+              pc += 4;
+              count++;
+              break;
+            }
+            asmjit::x86::Gp rs1 = read_reg(inst.as.i_type.rs1());
+            asmjit::x86::Gp dst = write_reg(inst.as.i_type.rd());
+            cc.mov(dst, rs1);
+            cc.add(dst, inst.as.i_type.imm_sext());
+            pc += 4;
+            count++;
+          } break;
+            // case riscv::i_type_func3_t::e_slti: {
+            // } break;
+            // case riscv::i_type_func3_t::e_sltiu: {
+            // } break;
+            // case riscv::i_type_func3_t::e_xori: {
+            // } break;
+            // case riscv::i_type_func3_t::e_ori: {
+            // } break;
+            // case riscv::i_type_func3_t::e_andi: {
+            // } break;
+            // case riscv::i_type_func3_t::e_slli: {
+            // } break;
+            // case riscv::i_type_func3_t::e_srli_or_srai: {
+            //   switch (
+            //       static_cast<riscv::srli_or_srai_t>(inst.as.i_type.imm() >>
+            //       6)) {
+            //     case riscv::srli_or_srai_t::e_srli: {
+            //     } break;
+            //     case riscv::srli_or_srai_t::e_srai: {
+            //     } break;
+
+            //     default:
+            //       if (!flush_dirt(pc)) return false;
+            //       cc.ret();
+            //       cc.endFunc();
+            //       cc.finalize();
+            //       void* fn{};
+            //       if (asmjit::Error err = _jitruntime->add(&fn, &code)) {
+            //         std::cerr << "Error: failed to jit basic block\n";
+            //         return false;
+            //       }
+            //       assert(fn);
+            //       _jitted_func[start_pc] =
+            //       {reinterpret_cast<jitted_func_t>(fn),
+            //                                 instructions};
+            //       return true;
+            //   }
+            // } break;
+
+          default:
+            if (!flush_dirt(pc)) return false;
+            cc.ret();
+            cc.endFunc();
+            cc.finalize();
+            void* fn{};
+            if (asmjit::Error err = _jitruntime->add(&fn, &code)) {
+              std::cerr << "Error: failed to jit basic block\n";
+              return false;
+            }
+            assert(fn);
+            _jitted_func[start_pc] = {reinterpret_cast<jitted_func_t>(fn),
+                                      count};
+            return true;
+        }
+      } break;
+        // case riscv::op_t::e_i_type_32: {
+        // } break;
+        // case riscv::op_t::e_r_type: {
+        // } break;
+        // case riscv::op_t::e_r_type_32: {
+        // } break;
+        // case riscv::op_t::e_fence: {
+        // } break;
+        // case riscv::op_t::e_system: {
+        // } break;
+
+      default:
+        if (!flush_dirt(pc)) return false;
+        cc.ret();
+        cc.endFunc();
+        cc.finalize();
+        void* fn{};
+        if (asmjit::Error err = _jitruntime->add(&fn, &code)) {
+          std::cerr << "Error: failed to jit basic block\n";
+          return false;
+        }
+        assert(fn);
+        _jitted_func[start_pc] = {reinterpret_cast<jitted_func_t>(fn), count};
+        return true;
+    }
+  }
+
+  return true;
+}
 
 void machine_t::simulate(uint64_t num_instructions) {
   for (uint64_t instructions = 0; instructions < num_instructions;
        instructions++) {
     if (!_running) return;
-    auto instruction = fetch_instruction();
-    if (instruction) decode_and_exec_instruction(*instruction);
+
+    if (_jitted_func.contains(_pc)) {
+      instructions += _jitted_func[_pc].second;
+      _jitted_func[_pc].first(this);
+    } else {
+      if (decode_and_jit_basic_block(_pc)) {
+        instructions += _jitted_func[_pc].second;
+        _jitted_func[_pc].first(this);
+      } else {
+        auto instruction = fetch_instruction();
+        if (instruction) decode_and_exec_instruction(*instruction);
+      }
+    }
   }
 }
 
