@@ -49,6 +49,9 @@ int main() {
   // copy string to mapped memory
   std::memcpy(mapped_memory, msg, std::strlen(msg) + 1);
 
+  // output to console also works
+  std::cout << "hello wolrd, in riscv\n";
+
   // 0 to indicate success
   return 0;
 }
