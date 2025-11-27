@@ -16,13 +16,6 @@ FetchContent_Declare(
 FetchContent_MakeAvailable(elfio)
 
 FetchContent_Declare(
-  asmjit
-  GIT_REPOSITORY https://github.com/asmjit/asmjit.git
-  GIT_TAG master
-)
-FetchContent_MakeAvailable(asmjit)
-
-FetchContent_Declare(
   unordered_dense
   GIT_REPOSITORY https://github.com/martinus/unordered_dense.git
   GIT_TAG main
@@ -39,7 +32,7 @@ target_include_directories(dawn
 
 target_link_libraries(dawn
   PUBLIC elfio
-  PUBLIC asmjit
+  # PUBLIC asmjit
   PUBLIC unordered_dense
 )
 

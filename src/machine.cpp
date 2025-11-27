@@ -799,8 +799,6 @@ bool machine_t::decode_and_exec_instruction(uint32_t instruction) {
   return true;
 }
 
-bool machine_t::decode_and_jit_basic_block(uint32_t instruction) {}
-
 void machine_t::simulate(uint64_t num_instructions) {
   for (uint64_t instructions = 0; instructions < num_instructions;
        instructions++) {

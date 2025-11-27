@@ -23,7 +23,6 @@ struct machine_t {
   bool                          del_syscall(uint64_t number);
   std::optional<uint32_t>       fetch_instruction();
   bool decode_and_exec_instruction(uint32_t instruction);
-  bool decode_and_jit_basic_block(uint32_t instruction);
 
   void simulate(
       uint64_t num_instructions = std::numeric_limits<uint64_t>::max());
