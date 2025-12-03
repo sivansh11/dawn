@@ -3,24 +3,27 @@
 #include <stdexcept>
 
 #include "dawn/machine.hpp"
+#include "dawn/memory.hpp"
 
 int main(int argc, char** argv) {
-  if (argc < 2) throw std::runtime_error("[machine] [elf]!");
+  if (argc < 2) throw std::runtime_error("[linux] [elf]!");
   auto m = dawn::machine_t::load_elf(argv[1]);
   if (!m) {
     throw std::runtime_error("failed to load elf");
   }
   auto machine = *m;
 
-  machine.add_syscall(93, [](dawn::machine_t& machine) {
-    machine._running = false;
-    if (machine._reg[10] == 0)
-      std::cout << "passed\n";
-    else
-      std::cout << "failed\n";
-  });
+  machine._memory.insert_memory(
+      machine._memory.translate_guest_to_host(0x10000000), 256,
+      dawn::memory_protection_t::e_read_write,
+      [](dawn::address_t addr, uint64_t value) {
+        printf("%c", (int)value);
+        fflush(stdout);
+      },
+      [](dawn::address_t addr) -> uint64_t { return 'a'; });
 
-  machine.simulate(1000000);
+  machine.simulate();
+
   // while (true) {
   //   auto instruction = machine._memory.fetch_32(machine._pc);
   //   std::cout << "pc: " << std::hex << machine._pc << "\n" << std::dec;

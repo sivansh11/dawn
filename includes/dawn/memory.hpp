@@ -3,12 +3,16 @@
 
 #include <cstdint>
 // #include <flat_set>
+#include <functional>
 #include <optional>
 #include <ostream>
 
 #include <dawn/flat_set.hpp>
 
 namespace dawn {
+
+// vm address, not host address
+using address_t = uint64_t;
 
 // TODO: maybe change this to uint8_t
 enum class memory_protection_t : uint32_t {
@@ -40,12 +44,19 @@ inline bool has_any(memory_protection_t container, memory_protection_t check) {
 }
 
 struct memory_range_t {
-  void*                 _start;
-  void*                 _end;
-  memory_protection_t   _protection = memory_protection_t::e_none;
-  static memory_range_t create_from_start_and_size(
-      void* ptr, size_t size, memory_protection_t protection) {
-    memory_range_t range{._start = ptr, ._protection = protection};
+  void*               _start;
+  void*               _end;
+  memory_protection_t _protection = memory_protection_t::e_none;
+  std::function<void(address_t, uint64_t)> write_callback;
+  std::function<uint64_t(address_t)>       read_callback;
+  static memory_range_t                    create_from_start_and_size(
+                         void* ptr, size_t size, memory_protection_t protection,
+                         std::function<void(address_t, uint32_t)> write_callback,
+                         std::function<uint32_t(address_t)>       read_callback) {
+    memory_range_t range{._start         = ptr,
+                         ._protection    = protection,
+                         .write_callback = write_callback,
+                         .read_callback  = read_callback};
     range._end = reinterpret_cast<void*>(reinterpret_cast<size_t>(ptr) + size);
     return range;
   }
@@ -67,9 +78,6 @@ struct memory_range_t {
   }
 };
 
-// vm address, not host address
-using address_t = uint64_t;
-
 // memory_t is more of a memory management unit, it doesnt contain the memory
 // it just defines accessible memory ranges
 struct memory_t {
@@ -80,9 +88,13 @@ struct memory_t {
 
   // if there is overlap with different memory protection, it cuts the affected
   // ranges into sub ranges and inserts new range with appropriate protection
-  void insert_memory(void* ptr, size_t size, memory_protection_t protection);
+  void insert_memory(void* ptr, size_t size, memory_protection_t protection,
+                     std::function<void(address_t, uint32_t)> write_callback,
+                     std::function<uint32_t(address_t)>       read_callback);
   bool is_region_in_memory(void* ptr, size_t size,
                            memory_protection_t protection) const;
+  std::optional<memory_range_t> find_memory_range(
+      void* ptr, size_t size, memory_protection_t protection) const;
   bool memcpy_host_to_guest(address_t dst, const void* src, size_t size) const;
   bool memcpy_guest_to_host(void* dst, address_t src, size_t size) const;
   bool memset(address_t addr, int value, size_t size) const;
@@ -102,11 +114,11 @@ struct memory_t {
   bool store_32(address_t addr, uint32_t value) const;
   bool store_64(address_t addr, uint64_t value) const;
 
-  size_t                        _size;
+  size_t                         _size;
   dawn::flat_set<memory_range_t> _ranges{};  // ranges with memory protection
-  void*                         _host_base{};
-  address_t
-      guest_base{};  // guest_base is set by the function loading the elf script
+  void*                          _host_base{};
+  address_t guest_base{};  // guest_base is set by the function loading the
+                           // elf script
 };
 
 }  // namespace dawn

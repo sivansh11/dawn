@@ -51,7 +51,8 @@ int main(int argc, char** argv) {
   // shared memory
   uint8_t* shared_memory = new uint8_t[64];
   machine._memory.insert_memory(shared_memory, 64,
-                                dawn::memory_protection_t::e_read_write);
+                                dawn::memory_protection_t::e_read_write,
+                                nullptr, nullptr);
 
   // could also have directly called memset(shared_memory, 0xff, 64);
   // this is equivalent

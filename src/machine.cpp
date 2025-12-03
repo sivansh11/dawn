@@ -65,7 +65,7 @@ std::optional<machine_t> machine_t::load_elf(
       return std::nullopt;
     state._memory.insert_memory(
         state._memory.translate_guest_to_host(virtual_address), file_size,
-        protection);
+        protection, nullptr, nullptr);
     if (memory_size - file_size) {
       if (!state._memory.memset(virtual_address + file_size, 0,
                                 memory_size - file_size))
@@ -75,12 +75,14 @@ std::optional<machine_t> machine_t::load_elf(
               reinterpret_cast<size_t>(
                   state._memory.translate_guest_to_host(virtual_address)) +
               file_size),
-          memory_size - file_size, memory_protection_t::e_read_write);
+          memory_size - file_size, memory_protection_t::e_read_write, nullptr,
+          nullptr);
     }
   }
   state._memory.insert_memory(state._memory.translate_guest_to_host(guest_max),
                               state._memory._size - guest_max,
-                              memory_protection_t::e_read_write);
+                              memory_protection_t::e_read_write, nullptr,
+                              nullptr);
   // TODO: insert a byte with memory_protection_t::e_none to prevent
   // stack overflow
   for (uint32_t i = 0; i < reader.sections.size(); i++) {
@@ -170,7 +172,8 @@ void machine_t::handle_trap(riscv::exception_code_t cause, uint64_t value) {
 #ifndef NDEBUG
   if (cause == riscv::exception_code_t::e_illegal_instruction ||
       cause == riscv::exception_code_t::e_instruction_access_fault) {
-    std::cerr << std::hex << value << '\n';
+    std::cerr << "got instruction: " << std::hex << value
+              << " at pc: " << std::hex << _pc << '\n';
   }
 #endif
 
@@ -896,11 +899,14 @@ bool machine_t::decode_and_exec_instruction(uint32_t instruction) {
                 itr->second(*this);
                 _pc += 4;
               } else {
-                std::cout << "Error: unhandled ecall - " << _reg[17] << '\n';
+#ifndef NDEBUG
+                std::cerr << "Error: unhandled ecall - " << _reg[17] << '\n';
+#endif
               }
             } break;
             case riscv::sub_system_t::e_ebreak: {
               std::cout << "TODO: implement EBREAK\n";
+              _pc += 4;
             } break;
             case riscv::sub_system_t::e_mret: {
               uint64_t mstatus = _read_csr(riscv::MSTATUS);
@@ -937,9 +943,13 @@ bool machine_t::decode_and_exec_instruction(uint32_t instruction) {
           _reg[inst.as.i_type.rd()] = *t;
           _pc += 4;
         } break;
-        // case riscv::i_type_func3_t::e_csrrc: {
-        //   _pc += 4;
-        // } break;
+        case riscv::i_type_func3_t::e_csrrc: {
+          auto t = read_csr(instruction);
+          if (!t) break;
+          if (!write_csr(instruction, *t & ~_reg[inst.as.i_type.rs1()])) break;
+          _reg[inst.as.i_type.rd()] = *t;
+          _pc += 4;
+        } break;
         case riscv::i_type_func3_t::e_csrrwi: {
           auto t = read_csr(instruction);
           if (!t) break;

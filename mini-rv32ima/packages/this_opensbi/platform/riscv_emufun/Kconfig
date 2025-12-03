@@ -1,0 +1,7 @@
+# SPDX-License-Identifier: BSD-2-Clause
+
+config PLATFORM_RISCV_EMUFUN
+	bool
+	select FDT
+	select SERIAL_UART8250
+	default y

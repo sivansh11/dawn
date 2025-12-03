@@ -19,10 +19,10 @@ using syscall_t = std::function<void(machine_t&)>;
 
 struct machine_t {
   static std::optional<machine_t> load_elf(const std::filesystem::path& path);
-  bool                          add_syscall(uint64_t number, syscall_t syscall);
-  bool                          del_syscall(uint64_t number);
-  std::optional<uint32_t>       fetch_instruction();
-  bool decode_and_exec_instruction(uint32_t instruction);
+  bool                    add_syscall(uint64_t number, syscall_t syscall);
+  bool                    del_syscall(uint64_t number);
+  std::optional<uint32_t> fetch_instruction();
+  bool                    decode_and_exec_instruction(uint32_t instruction);
 
   void simulate(
       uint64_t num_instructions = std::numeric_limits<uint64_t>::max());

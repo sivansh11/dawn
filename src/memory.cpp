@@ -2,6 +2,7 @@
 
 #include <cassert>
 #include <cstring>
+#include <flat_set>
 #include <optional>
 
 namespace dawn {
@@ -9,7 +10,8 @@ namespace dawn {
 memory_t memory_t::create(void* ptr, size_t size) {
   memory_t memory{};
   memory._host_base = ptr;
-  memory.insert_memory(ptr, size, memory_protection_t::e_none);
+  memory.insert_memory(ptr, size, memory_protection_t::e_none, nullptr,
+                       nullptr);
   memory._size = size;
   return memory;
 }
@@ -23,11 +25,13 @@ void* memory_t::translate_guest_to_host(address_t addr) const {
                                  guest_base + addr);
 }
 
-void memory_t::insert_memory(void* ptr, size_t size,
-                             memory_protection_t protection) {
+void memory_t::insert_memory(
+    void* ptr, size_t size, memory_protection_t protection,
+    std::function<void(address_t, uint32_t)> write_callback,
+    std::function<uint32_t(address_t)>       read_callback) {
   // TODO: merge adjacent ranges with smae protection
-  memory_range_t range =
-      memory_range_t::create_from_start_and_size(ptr, size, protection);
+  memory_range_t range = memory_range_t::create_from_start_and_size(
+      ptr, size, protection, write_callback, read_callback);
   dawn::flat_set<memory_range_t> new_ranges;
   new_ranges.insert(range);
   for (const auto& _range : _ranges) {
@@ -74,8 +78,8 @@ void memory_t::insert_memory(void* ptr, size_t size,
 bool memory_t::is_region_in_memory(void* ptr, size_t size,
                                    memory_protection_t protection) const {
   assert(size);
-  memory_range_t range =
-      memory_range_t::create_from_start_and_size(ptr, size, protection);
+  memory_range_t range = memory_range_t::create_from_start_and_size(
+      ptr, size, protection, nullptr, nullptr);
   auto itr = _ranges.lower_bound(range);
   if (itr != _ranges.begin()) itr--;
 
@@ -89,6 +93,23 @@ bool memory_t::is_region_in_memory(void* ptr, size_t size,
   }
   return true;
 }
+
+std::optional<memory_range_t> memory_t::find_memory_range(
+    void* ptr, size_t size, memory_protection_t protection) const {
+  memory_range_t range = memory_range_t::create_from_start_and_size(
+      ptr, size, protection, nullptr, nullptr);
+  auto itr = _ranges.lower_bound(range);
+  if (itr != _ranges.begin() && itr->_start > ptr) {
+    itr--;
+  }
+  if (itr != _ranges.end() && itr->_start <= ptr &&
+      itr->_end >= reinterpret_cast<char*>(ptr) + size &&
+      has_all(itr->_protection, protection)) {
+    return *itr;
+  }
+  return std::nullopt;
+}
+
 bool memory_t::memcpy_host_to_guest(address_t dst, const void* src,
                                     size_t size) const {
   // NOTE: no protection checking!
@@ -114,74 +135,125 @@ bool memory_t::memset(address_t addr, int value, size_t size) const {
 }
 
 std::optional<uint32_t> memory_t::fetch_32(address_t addr) const {
-  uint32_t value;
-  if (!is_region_in_memory(translate_guest_to_host(addr), sizeof(value),
-                           memory_protection_t::e_exec))
-    return std::nullopt;
-  std::memcpy(&value, translate_guest_to_host(addr), sizeof(value));
-  return value;
+  uint32_t    value;
+  const auto& memory_range =
+      find_memory_range(translate_guest_to_host(addr), sizeof(value),
+                        memory_protection_t::e_exec);
+  if (!memory_range) return std::nullopt;
+  if (memory_range->read_callback)
+    return memory_range->read_callback(addr);
+  else {
+    std::memcpy(&value, translate_guest_to_host(addr), sizeof(value));
+    return value;
+  }
 }
 
 std::optional<uint8_t> memory_t::load_8(address_t addr) const {
-  uint8_t value;
-  if (!is_region_in_memory(translate_guest_to_host(addr), sizeof(value),
-                           memory_protection_t::e_read))
-    return std::nullopt;
-  std::memcpy(&value, translate_guest_to_host(addr), sizeof(value));
-  return value;
+  uint8_t     value;
+  const auto& memory_range =
+      find_memory_range(translate_guest_to_host(addr), sizeof(value),
+                        memory_protection_t::e_read);
+  if (!memory_range) return std::nullopt;
+  if (memory_range->read_callback)
+    return memory_range->read_callback(addr);
+  else {
+    std::memcpy(&value, translate_guest_to_host(addr), sizeof(value));
+    return value;
+  }
 }
 std::optional<uint16_t> memory_t::load_16(address_t addr) const {
-  uint16_t value;
-  if (!is_region_in_memory(translate_guest_to_host(addr), sizeof(value),
-                           memory_protection_t::e_read))
-    return std::nullopt;
-  std::memcpy(&value, translate_guest_to_host(addr), sizeof(value));
-  return value;
+  uint16_t    value;
+  const auto& memory_range =
+      find_memory_range(translate_guest_to_host(addr), sizeof(value),
+                        memory_protection_t::e_read);
+  if (!memory_range) return std::nullopt;
+  if (memory_range->read_callback)
+    return memory_range->read_callback(addr);
+  else {
+    std::memcpy(&value, translate_guest_to_host(addr), sizeof(value));
+    return value;
+  }
 }
 std::optional<uint32_t> memory_t::load_32(address_t addr) const {
-  uint32_t value;
-  if (!is_region_in_memory(translate_guest_to_host(addr), sizeof(value),
-                           memory_protection_t::e_read))
-    return std::nullopt;
-  std::memcpy(&value, translate_guest_to_host(addr), sizeof(value));
-  return value;
+  uint32_t    value;
+  const auto& memory_range =
+      find_memory_range(translate_guest_to_host(addr), sizeof(value),
+                        memory_protection_t::e_read);
+  if (!memory_range) return std::nullopt;
+  if (memory_range->read_callback)
+    return memory_range->read_callback(addr);
+  else {
+    std::memcpy(&value, translate_guest_to_host(addr), sizeof(value));
+    return value;
+  }
 }
 std::optional<uint64_t> memory_t::load_64(address_t addr) const {
-  uint64_t value;
-  if (!is_region_in_memory(translate_guest_to_host(addr), sizeof(value),
-                           memory_protection_t::e_read))
-    return std::nullopt;
-  std::memcpy(&value, translate_guest_to_host(addr), sizeof(value));
-  return value;
+  uint64_t    value;
+  const auto& memory_range =
+      find_memory_range(translate_guest_to_host(addr), sizeof(value),
+                        memory_protection_t::e_read);
+  if (!memory_range) return std::nullopt;
+  if (memory_range->read_callback)
+    return memory_range->read_callback(addr);
+  else {
+    std::memcpy(&value, translate_guest_to_host(addr), sizeof(value));
+    return value;
+  }
 }
 
 bool memory_t::store_8(address_t addr, uint8_t value) const {
-  if (!is_region_in_memory(translate_guest_to_host(addr), sizeof(value),
-                           memory_protection_t::e_write))
-    return false;
-  std::memcpy(translate_guest_to_host(addr), &value, sizeof(value));
-  return true;
+  assert(is_region_in_memory(translate_guest_to_host(addr), 1,
+                             memory_protection_t::e_read));
+  const auto& memory_range =
+      find_memory_range(translate_guest_to_host(addr), sizeof(value),
+                        memory_protection_t::e_read);
+  if (!memory_range) return false;
+  if (memory_range->write_callback) {
+    memory_range->write_callback(addr, value);
+    return true;
+  } else {
+    std::memcpy(translate_guest_to_host(addr), &value, sizeof(value));
+    return true;
+  }
 }
 bool memory_t::store_16(address_t addr, uint16_t value) const {
-  if (!is_region_in_memory(translate_guest_to_host(addr), sizeof(value),
-                           memory_protection_t::e_write))
-    return false;
-  std::memcpy(translate_guest_to_host(addr), &value, sizeof(value));
-  return true;
+  const auto& memory_range =
+      find_memory_range(translate_guest_to_host(addr), sizeof(value),
+                        memory_protection_t::e_read);
+  if (!memory_range) return false;
+  if (memory_range->write_callback) {
+    memory_range->write_callback(addr, value);
+    return true;
+  } else {
+    std::memcpy(translate_guest_to_host(addr), &value, sizeof(value));
+    return true;
+  }
 }
 bool memory_t::store_32(address_t addr, uint32_t value) const {
-  if (!is_region_in_memory(translate_guest_to_host(addr), sizeof(value),
-                           memory_protection_t::e_write))
-    return false;
-  std::memcpy(translate_guest_to_host(addr), &value, sizeof(value));
-  return true;
+  const auto& memory_range =
+      find_memory_range(translate_guest_to_host(addr), sizeof(value),
+                        memory_protection_t::e_read);
+  if (!memory_range) return false;
+  if (memory_range->write_callback) {
+    memory_range->write_callback(addr, value);
+    return true;
+  } else {
+    std::memcpy(translate_guest_to_host(addr), &value, sizeof(value));
+    return true;
+  }
 }
 bool memory_t::store_64(address_t addr, uint64_t value) const {
-  if (!is_region_in_memory(translate_guest_to_host(addr), sizeof(value),
-                           memory_protection_t::e_write))
-    return false;
-  std::memcpy(translate_guest_to_host(addr), &value, sizeof(value));
-  return true;
+  const auto& memory_range =
+      find_memory_range(translate_guest_to_host(addr), sizeof(value),
+                        memory_protection_t::e_read);
+  if (!memory_range) return false;
+  if (memory_range->write_callback) {
+    memory_range->write_callback(addr, value);
+    return true;
+  } else {
+    std::memcpy(translate_guest_to_host(addr), &value, sizeof(value));
+    return true;
+  }
 }
 
 }  // namespace dawn
