@@ -24,6 +24,26 @@ enum class op_t : uint32_t {
   e_r_type_32 = 0b0111011,
   e_fence     = 0b0001111,
   e_system    = 0b1110011,
+  e_a_type    = 0b0101111,  // a type doesnt exists, its just A ext using r type
+};
+
+enum class a_type_func3_t : uint32_t {
+  e_w = 0b010,
+  e_d = 0b011,
+};
+
+enum class a_type_func5_t : uint32_t {
+  e_lr      = 0b00010,
+  e_sc      = 0b00011,
+  e_amoswap = 0b00001,
+  e_amoadd  = 0b00000,
+  e_amoxor  = 0b00100,
+  e_amoand  = 0b01100,
+  e_amoor   = 0b01000,
+  e_amomin  = 0b10000,
+  e_amomax  = 0b10100,
+  e_amominu = 0b11000,
+  e_amomaxu = 0b11100,
 };
 
 enum class branch_t : uint32_t {
@@ -205,6 +225,26 @@ struct r_type_t {
   constexpr r_type_func7_t funct7() const { return _funct7; }
 };
 
+struct a_type_t {
+  op_t           _opcode : 7;
+  uint32_t       _rd     : 5;
+  a_type_func3_t _funct3 : 3;
+  uint32_t       _rs1    : 5;
+  uint32_t       _rs2    : 5;
+  uint32_t       _rl     : 1;
+  uint32_t       _aq     : 1;
+  a_type_func5_t _funct5 : 5;
+
+  constexpr op_t           opcode() const { return _opcode; }
+  constexpr uint32_t       rd() const { return _rd; }
+  constexpr a_type_func3_t funct3() const { return _funct3; }
+  constexpr uint32_t       rs1() const { return _rs1; }
+  constexpr uint32_t       rs2() const { return _rs2; }
+  constexpr uint32_t       rl() const { return _rl; }
+  constexpr uint32_t       aq() const { return _aq; }
+  constexpr a_type_func5_t funct5() const { return _funct5; }
+};
+
 struct b_type_t {
   op_t     _opcode : 7;  // 0-6
   uint32_t _imm1   : 1;  // 7
@@ -249,26 +289,6 @@ struct j_type_t {
   constexpr int64_t imm_sext() const { return ::dawn::sext(imm(), 21); }
 };
 
-struct a_type_t {
-  op_t     _opcode : 7;
-  uint32_t _rd     : 5;
-  uint32_t _funct3 : 3;
-  uint32_t _rs1    : 5;
-  uint32_t _rs2    : 5;
-  uint32_t _rl     : 1;
-  uint32_t _aq     : 1;
-  uint32_t _funct5 : 5;
-
-  constexpr op_t     opcode() const { return _opcode; }
-  constexpr uint32_t rd() const { return _rd; }
-  constexpr uint32_t funct3() const { return _funct3; }
-  constexpr uint32_t rs1() const { return _rs1; }
-  constexpr uint32_t rs2() const { return _rs2; }
-  constexpr uint32_t rl() const { return _rl; }
-  constexpr uint32_t aq() const { return _aq; }
-  constexpr uint32_t funct5() const { return _funct5; }
-};
-
 struct instruction_t {
   union as_t {
     base_t   base;
@@ -278,7 +298,7 @@ struct instruction_t {
     r_type_t r_type;
     b_type_t b_type;
     j_type_t j_type;
-    // a_type_t a_type;
+    a_type_t a_type;
   } as;
   constexpr op_t opcode() const { return as.base.opcode(); }
 };

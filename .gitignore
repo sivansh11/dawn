@@ -3,3 +3,4 @@
 .vscode/
 log*
 riscv-tests/
+mini-rv32ima/

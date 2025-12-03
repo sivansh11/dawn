@@ -45,6 +45,8 @@ struct machine_t {
   // manually manage _brk syscall
   address_t _heap_address;
   bool      _running = true;
+  address_t _reservation_address;
+  bool      _is_reserved = false;
 };
 
 }  // namespace dawn

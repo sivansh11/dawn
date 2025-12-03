@@ -167,6 +167,13 @@ std::optional<uint64_t> machine_t::read_csr(uint32_t instruction) {
 }
 
 void machine_t::handle_trap(riscv::exception_code_t cause, uint64_t value) {
+#ifndef NDEBUG
+  if (cause == riscv::exception_code_t::e_illegal_instruction ||
+      cause == riscv::exception_code_t::e_instruction_access_fault) {
+    std::cerr << std::hex << value << '\n';
+  }
+#endif
+
   _write_csr(riscv::MEPC, value);
   _write_csr(riscv::MCAUSE, value);
   _write_csr(riscv::MTVAL, value);
@@ -873,8 +880,10 @@ bool machine_t::decode_and_exec_instruction(uint32_t instruction) {
       }
     } break;
     case riscv::op_t::e_fence: {
+#ifndef NDEBUG
       std::cerr << "Note: Fence encountered, fence is not implemented or "
                    "required\n";
+#endif
       _pc += 4;
     } break;
     case riscv::op_t::e_system: {
@@ -928,8 +937,9 @@ bool machine_t::decode_and_exec_instruction(uint32_t instruction) {
           _reg[inst.as.i_type.rd()] = *t;
           _pc += 4;
         } break;
-        case riscv::i_type_func3_t::e_csrrc: {
-        } break;
+        // case riscv::i_type_func3_t::e_csrrc: {
+        //   _pc += 4;
+        // } break;
         case riscv::i_type_func3_t::e_csrrwi: {
           auto t = read_csr(instruction);
           if (!t) break;
@@ -937,9 +947,531 @@ bool machine_t::decode_and_exec_instruction(uint32_t instruction) {
           _reg[inst.as.i_type.rd()] = *t;
           _pc += 4;
         } break;
-        case riscv::i_type_func3_t::e_csrrsi: {
+          // case riscv::i_type_func3_t::e_csrrsi: {
+          //   _pc += 4;
+          // } break;
+          // case riscv::i_type_func3_t::e_csrrci: {
+          //   _pc += 4;
+          // } break;
+
+        default:
+          handle_trap(riscv::exception_code_t::e_illegal_instruction,
+                      instruction);
+      }
+    } break;
+    case riscv::op_t::e_a_type: {  // 0101111
+      switch (inst.as.a_type.funct3()) {
+        case riscv::a_type_func3_t::e_w: {  // 010
+          switch (inst.as.a_type.funct5()) {
+            case riscv::a_type_func5_t::e_lr: {
+              const address_t addr      = _reg[inst.as.a_type.rs1()];
+              const uint32_t  alignment = 4;  // 4 for w
+              if (addr % alignment != 0) {
+                handle_trap(riscv::exception_code_t::e_load_address_misaligned,
+                            addr);
+                break;
+              }
+              auto value = _memory.load_32(addr);
+              if (!value) {
+                handle_trap(riscv::exception_code_t::e_load_access_fault, addr);
+                break;
+              }
+              _reg[inst.as.a_type.rd()] = sext(*value, 32);
+              _reservation_address      = addr;
+              _is_reserved              = true;
+              _pc += 4;
+            } break;
+            case riscv::a_type_func5_t::e_sc: {
+              const address_t addr      = _reg[inst.as.a_type.rs1()];
+              const uint32_t  alignment = 4;  // 4 for w
+              if (addr % alignment != 0) {
+                handle_trap(riscv::exception_code_t::e_store_address_misaligned,
+                            addr);
+                break;
+              }
+              if (_is_reserved && _reservation_address == addr) {
+                if (!_memory.store_32(addr, static_cast<uint32_t>(
+                                                _reg[inst.as.a_type.rs2()]))) {
+                  handle_trap(riscv::exception_code_t::e_store_access_fault,
+                              addr);
+                  break;
+                }
+                _reg[inst.as.a_type.rd()] = 0;
+              } else {
+                _reg[inst.as.a_type.rd()] = 1;
+              }
+              _is_reserved         = false;
+              _reservation_address = 0;
+              _pc += 4;
+            } break;
+            case riscv::a_type_func5_t::e_amoswap: {
+              const address_t addr      = _reg[inst.as.a_type.rs1()];
+              const uint32_t  alignment = 4;  // 4 for w
+              if (addr % alignment != 0) {
+                handle_trap(riscv::exception_code_t::e_load_address_misaligned,
+                            addr);
+                break;
+              }
+              auto value = _memory.load_32(addr);
+              if (!value) {
+                handle_trap(riscv::exception_code_t::e_load_access_fault, addr);
+                break;
+              }
+              _reg[inst.as.a_type.rd()] = sext(*value, 32);
+              if (!_memory.store_32(addr, static_cast<uint32_t>(
+                                              _reg[inst.as.a_type.rs2()]))) {
+                handle_trap(riscv::exception_code_t::e_store_access_fault,
+                            addr);
+                break;
+              }
+              _pc += 4;
+            } break;
+            case riscv::a_type_func5_t::e_amoadd: {
+              const address_t addr      = _reg[inst.as.a_type.rs1()];
+              const uint32_t  alignment = 4;  // 4 for w
+              if (addr % alignment != 0) {
+                handle_trap(riscv::exception_code_t::e_load_address_misaligned,
+                            addr);
+                break;
+              }
+              auto value = _memory.load_32(addr);
+              if (!value) {
+                handle_trap(riscv::exception_code_t::e_load_access_fault, addr);
+                break;
+              }
+              _reg[inst.as.a_type.rd()] = sext(*value, 32);
+              if (!_memory.store_32(addr,
+                                    static_cast<uint32_t>(
+                                        *value + _reg[inst.as.a_type.rs2()]))) {
+                handle_trap(riscv::exception_code_t::e_store_access_fault,
+                            addr);
+                break;
+              }
+              _pc += 4;
+            } break;
+            case riscv::a_type_func5_t::e_amoxor: {
+              const address_t addr      = _reg[inst.as.a_type.rs1()];
+              const uint32_t  alignment = 4;  // 4 for w
+              if (addr % alignment != 0) {
+                handle_trap(riscv::exception_code_t::e_load_address_misaligned,
+                            addr);
+                break;
+              }
+              auto value = _memory.load_32(addr);
+              if (!value) {
+                handle_trap(riscv::exception_code_t::e_load_access_fault, addr);
+                break;
+              }
+              _reg[inst.as.a_type.rd()] = sext(*value, 32);
+              if (!_memory.store_32(addr,
+                                    static_cast<uint32_t>(
+                                        *value ^ _reg[inst.as.a_type.rs2()]))) {
+                handle_trap(riscv::exception_code_t::e_store_access_fault,
+                            addr);
+                break;
+              }
+              _pc += 4;
+            } break;
+            case riscv::a_type_func5_t::e_amoand: {
+              const address_t addr      = _reg[inst.as.a_type.rs1()];
+              const uint32_t  alignment = 4;  // 4 for w
+              if (addr % alignment != 0) {
+                handle_trap(riscv::exception_code_t::e_load_address_misaligned,
+                            addr);
+                break;
+              }
+              auto value = _memory.load_32(addr);
+              if (!value) {
+                handle_trap(riscv::exception_code_t::e_load_access_fault, addr);
+                break;
+              }
+              _reg[inst.as.a_type.rd()] = sext(*value, 32);
+              if (!_memory.store_32(addr,
+                                    static_cast<uint32_t>(
+                                        *value & _reg[inst.as.a_type.rs2()]))) {
+                handle_trap(riscv::exception_code_t::e_store_access_fault,
+                            addr);
+                break;
+              }
+              _pc += 4;
+            } break;
+            case riscv::a_type_func5_t::e_amoor: {
+              const address_t addr      = _reg[inst.as.a_type.rs1()];
+              const uint32_t  alignment = 4;  // 4 for w
+              if (addr % alignment != 0) {
+                handle_trap(riscv::exception_code_t::e_load_address_misaligned,
+                            addr);
+                break;
+              }
+              auto value = _memory.load_32(addr);
+              if (!value) {
+                handle_trap(riscv::exception_code_t::e_load_access_fault, addr);
+                break;
+              }
+              _reg[inst.as.a_type.rd()] = sext(*value, 32);
+              if (!_memory.store_32(addr,
+                                    static_cast<uint32_t>(
+                                        *value | _reg[inst.as.a_type.rs2()]))) {
+                handle_trap(riscv::exception_code_t::e_store_access_fault,
+                            addr);
+                break;
+              }
+              _pc += 4;
+            } break;
+            case riscv::a_type_func5_t::e_amomin: {
+              const address_t addr      = _reg[inst.as.a_type.rs1()];
+              const uint32_t  alignment = 4;  // 4 for w
+              if (addr % alignment != 0) {
+                handle_trap(riscv::exception_code_t::e_load_address_misaligned,
+                            addr);
+                break;
+              }
+              auto value = _memory.load_32(addr);
+              if (!value) {
+                handle_trap(riscv::exception_code_t::e_load_access_fault, addr);
+                break;
+              }
+              _reg[inst.as.a_type.rd()] = sext(*value, 32);
+              if (!_memory.store_32(
+                      addr,
+                      static_cast<uint32_t>(std::min(
+                          static_cast<int32_t>(*value),
+                          static_cast<int32_t>(_reg[inst.as.a_type.rs2()]))))) {
+                handle_trap(riscv::exception_code_t::e_store_access_fault,
+                            addr);
+                break;
+              }
+              _pc += 4;
+            } break;
+            case riscv::a_type_func5_t::e_amomax: {
+              const address_t addr      = _reg[inst.as.a_type.rs1()];
+              const uint32_t  alignment = 4;  // 4 for w
+              if (addr % alignment != 0) {
+                handle_trap(riscv::exception_code_t::e_load_address_misaligned,
+                            addr);
+                break;
+              }
+              auto value = _memory.load_32(addr);
+              if (!value) {
+                handle_trap(riscv::exception_code_t::e_load_access_fault, addr);
+                break;
+              }
+              _reg[inst.as.a_type.rd()] = sext(*value, 32);
+              if (!_memory.store_32(
+                      addr,
+                      static_cast<uint32_t>(std::max(
+                          static_cast<int32_t>(*value),
+                          static_cast<int32_t>(_reg[inst.as.a_type.rs2()]))))) {
+                handle_trap(riscv::exception_code_t::e_store_access_fault,
+                            addr);
+                break;
+              }
+              _pc += 4;
+            } break;
+            case riscv::a_type_func5_t::e_amominu: {
+              const address_t addr      = _reg[inst.as.a_type.rs1()];
+              const uint32_t  alignment = 4;  // 4 for w
+              if (addr % alignment != 0) {
+                handle_trap(riscv::exception_code_t::e_load_address_misaligned,
+                            addr);
+                break;
+              }
+              auto value = _memory.load_32(addr);
+              if (!value) {
+                handle_trap(riscv::exception_code_t::e_load_access_fault, addr);
+                break;
+              }
+              _reg[inst.as.a_type.rd()] = sext(*value, 32);
+              if (!_memory.store_32(
+                      addr, std::min(static_cast<uint32_t>(*value),
+                                     static_cast<uint32_t>(
+                                         _reg[inst.as.a_type.rs2()])))) {
+                handle_trap(riscv::exception_code_t::e_store_access_fault,
+                            addr);
+                break;
+              }
+              _pc += 4;
+            } break;
+            case riscv::a_type_func5_t::e_amomaxu: {
+              const address_t addr      = _reg[inst.as.a_type.rs1()];
+              const uint32_t  alignment = 4;  // 4 for w
+              if (addr % alignment != 0) {
+                handle_trap(riscv::exception_code_t::e_load_address_misaligned,
+                            addr);
+                break;
+              }
+              auto value = _memory.load_32(addr);
+              if (!value) {
+                handle_trap(riscv::exception_code_t::e_load_access_fault, addr);
+                break;
+              }
+              _reg[inst.as.a_type.rd()] = sext(*value, 32);
+              if (!_memory.store_32(
+                      addr, std::max(static_cast<uint32_t>(*value),
+                                     static_cast<uint32_t>(
+                                         _reg[inst.as.a_type.rs2()])))) {
+                handle_trap(riscv::exception_code_t::e_store_access_fault,
+                            addr);
+                break;
+              }
+              _pc += 4;
+            } break;
+
+            default:
+              handle_trap(riscv::exception_code_t::e_illegal_instruction,
+                          instruction);
+          }
         } break;
-        case riscv::i_type_func3_t::e_csrrci: {
+        case riscv::a_type_func3_t::e_d: {  // 011
+          switch (inst.as.a_type.funct5()) {
+            case riscv::a_type_func5_t::e_lr: {
+              const address_t addr      = _reg[inst.as.a_type.rs1()];
+              const uint32_t  alignment = 8;  // 8 for d
+              if (addr % alignment != 0) {
+                handle_trap(riscv::exception_code_t::e_load_address_misaligned,
+                            addr);
+                break;
+              }
+              auto value = _memory.load_64(addr);
+              if (!value) {
+                handle_trap(riscv::exception_code_t::e_load_access_fault, addr);
+                break;
+              }
+              _reg[inst.as.a_type.rd()] = *value;
+              _reservation_address      = addr;
+              _is_reserved              = true;
+              _pc += 4;
+            } break;
+            case riscv::a_type_func5_t::e_sc: {
+              const address_t addr      = _reg[inst.as.a_type.rs1()];
+              const uint32_t  alignment = 8;  // 8 for d
+              if (addr % alignment != 0) {
+                handle_trap(riscv::exception_code_t::e_store_address_misaligned,
+                            addr);
+                break;
+              }
+              if (_is_reserved && _reservation_address == addr) {
+                if (!_memory.store_64(addr, _reg[inst.as.a_type.rs2()])) {
+                  handle_trap(riscv::exception_code_t::e_store_access_fault,
+                              addr);
+                  break;
+                }
+                _reg[inst.as.a_type.rd()] = 0;
+              } else {
+                _reg[inst.as.a_type.rd()] = 1;
+              }
+              _is_reserved         = false;
+              _reservation_address = 0;
+              _pc += 4;
+            } break;
+            case riscv::a_type_func5_t::e_amoswap: {
+              const address_t addr      = _reg[inst.as.a_type.rs1()];
+              const uint32_t  alignment = 8;  // 8 for d
+              if (addr % alignment != 0) {
+                handle_trap(riscv::exception_code_t::e_load_address_misaligned,
+                            addr);
+                break;
+              }
+              auto value = _memory.load_64(addr);
+              if (!value) {
+                handle_trap(riscv::exception_code_t::e_load_access_fault, addr);
+                break;
+              }
+              _reg[inst.as.a_type.rd()] = *value;
+              if (!_memory.store_64(addr, _reg[inst.as.a_type.rs2()])) {
+                handle_trap(riscv::exception_code_t::e_store_access_fault,
+                            addr);
+                break;
+              }
+              _pc += 4;
+            } break;
+            case riscv::a_type_func5_t::e_amoadd: {
+              const address_t addr      = _reg[inst.as.a_type.rs1()];
+              const uint32_t  alignment = 8;  // 8 for d
+              if (addr % alignment != 0) {
+                handle_trap(riscv::exception_code_t::e_load_address_misaligned,
+                            addr);
+                break;
+              }
+              auto value = _memory.load_64(addr);
+              if (!value) {
+                handle_trap(riscv::exception_code_t::e_load_access_fault, addr);
+                break;
+              }
+              _reg[inst.as.a_type.rd()] = *value;
+              if (!_memory.store_64(addr,
+                                    *value + _reg[inst.as.a_type.rs2()])) {
+                handle_trap(riscv::exception_code_t::e_store_access_fault,
+                            addr);
+                break;
+              }
+              _pc += 4;
+            } break;
+            case riscv::a_type_func5_t::e_amoxor: {
+              const address_t addr      = _reg[inst.as.a_type.rs1()];
+              const uint32_t  alignment = 8;  // 8 for d
+              if (addr % alignment != 0) {
+                handle_trap(riscv::exception_code_t::e_load_address_misaligned,
+                            addr);
+                break;
+              }
+              auto value = _memory.load_64(addr);
+              if (!value) {
+                handle_trap(riscv::exception_code_t::e_load_access_fault, addr);
+                break;
+              }
+              _reg[inst.as.a_type.rd()] = *value;
+              if (!_memory.store_64(addr,
+                                    *value ^ _reg[inst.as.a_type.rs2()])) {
+                handle_trap(riscv::exception_code_t::e_store_access_fault,
+                            addr);
+                break;
+              }
+              _pc += 4;
+            } break;
+            case riscv::a_type_func5_t::e_amoand: {
+              const address_t addr      = _reg[inst.as.a_type.rs1()];
+              const uint32_t  alignment = 8;  // 8 for d
+              if (addr % alignment != 0) {
+                handle_trap(riscv::exception_code_t::e_load_address_misaligned,
+                            addr);
+                break;
+              }
+              auto value = _memory.load_64(addr);
+              if (!value) {
+                handle_trap(riscv::exception_code_t::e_load_access_fault, addr);
+                break;
+              }
+              _reg[inst.as.a_type.rd()] = *value;
+              if (!_memory.store_64(addr,
+                                    *value & _reg[inst.as.a_type.rs2()])) {
+                handle_trap(riscv::exception_code_t::e_store_access_fault,
+                            addr);
+                break;
+              }
+              _pc += 4;
+            } break;
+            case riscv::a_type_func5_t::e_amoor: {
+              const address_t addr      = _reg[inst.as.a_type.rs1()];
+              const uint32_t  alignment = 8;  // 8 for d
+              if (addr % alignment != 0) {
+                handle_trap(riscv::exception_code_t::e_load_address_misaligned,
+                            addr);
+                break;
+              }
+              auto value = _memory.load_64(addr);
+              if (!value) {
+                handle_trap(riscv::exception_code_t::e_load_access_fault, addr);
+                break;
+              }
+              _reg[inst.as.a_type.rd()] = *value;
+              if (!_memory.store_64(addr,
+                                    *value | _reg[inst.as.a_type.rs2()])) {
+                handle_trap(riscv::exception_code_t::e_store_access_fault,
+                            addr);
+                break;
+              }
+              _pc += 4;
+            } break;
+            case riscv::a_type_func5_t::e_amomin: {
+              const address_t addr      = _reg[inst.as.a_type.rs1()];
+              const uint32_t  alignment = 8;  // 8 for d
+              if (addr % alignment != 0) {
+                handle_trap(riscv::exception_code_t::e_load_address_misaligned,
+                            addr);
+                break;
+              }
+              auto value = _memory.load_64(addr);
+              if (!value) {
+                handle_trap(riscv::exception_code_t::e_load_access_fault, addr);
+                break;
+              }
+              _reg[inst.as.a_type.rd()] = *value;
+              if (!_memory.store_64(
+                      addr,
+                      static_cast<uint64_t>(std::min(
+                          static_cast<int64_t>(*value),
+                          static_cast<int64_t>(_reg[inst.as.a_type.rs2()]))))) {
+                handle_trap(riscv::exception_code_t::e_store_access_fault,
+                            addr);
+                break;
+              }
+              _pc += 4;
+            } break;
+            case riscv::a_type_func5_t::e_amomax: {
+              const address_t addr      = _reg[inst.as.a_type.rs1()];
+              const uint32_t  alignment = 8;  // 8 for d
+              if (addr % alignment != 0) {
+                handle_trap(riscv::exception_code_t::e_load_address_misaligned,
+                            addr);
+                break;
+              }
+              auto value = _memory.load_64(addr);
+              if (!value) {
+                handle_trap(riscv::exception_code_t::e_load_access_fault, addr);
+                break;
+              }
+              _reg[inst.as.a_type.rd()] = *value;
+              if (!_memory.store_64(
+                      addr,
+                      static_cast<uint64_t>(std::max(
+                          static_cast<int64_t>(*value),
+                          static_cast<int64_t>(_reg[inst.as.a_type.rs2()]))))) {
+                handle_trap(riscv::exception_code_t::e_store_access_fault,
+                            addr);
+                break;
+              }
+              _pc += 4;
+            } break;
+            case riscv::a_type_func5_t::e_amominu: {
+              const address_t addr      = _reg[inst.as.a_type.rs1()];
+              const uint32_t  alignment = 8;  // 8 for d
+              if (addr % alignment != 0) {
+                handle_trap(riscv::exception_code_t::e_load_address_misaligned,
+                            addr);
+                break;
+              }
+              auto value = _memory.load_64(addr);
+              if (!value) {
+                handle_trap(riscv::exception_code_t::e_load_access_fault, addr);
+                break;
+              }
+              _reg[inst.as.a_type.rd()] = *value;
+              if (!_memory.store_64(
+                      addr, std::min(*value, _reg[inst.as.a_type.rs2()]))) {
+                handle_trap(riscv::exception_code_t::e_store_access_fault,
+                            addr);
+                break;
+              }
+              _pc += 4;
+            } break;
+            case riscv::a_type_func5_t::e_amomaxu: {
+              const address_t addr      = _reg[inst.as.a_type.rs1()];
+              const uint32_t  alignment = 8;  // 8 for d
+              if (addr % alignment != 0) {
+                handle_trap(riscv::exception_code_t::e_load_address_misaligned,
+                            addr);
+                break;
+              }
+              auto value = _memory.load_64(addr);
+              if (!value) {
+                handle_trap(riscv::exception_code_t::e_load_access_fault, addr);
+                break;
+              }
+              _reg[inst.as.a_type.rd()] = *value;
+              if (!_memory.store_64(
+                      addr, std::max(*value, _reg[inst.as.a_type.rs2()]))) {
+                handle_trap(riscv::exception_code_t::e_store_access_fault,
+                            addr);
+                break;
+              }
+              _pc += 4;
+            } break;
+
+            default:
+              handle_trap(riscv::exception_code_t::e_illegal_instruction,
+                          instruction);
+          }
         } break;
 
         default:
@@ -947,6 +1479,7 @@ bool machine_t::decode_and_exec_instruction(uint32_t instruction) {
                       instruction);
       }
     } break;
+
     default:
       handle_trap(riscv::exception_code_t::e_illegal_instruction, instruction);
   }
