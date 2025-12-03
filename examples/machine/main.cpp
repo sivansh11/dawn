@@ -4,7 +4,7 @@
 #include "dawn/machine.hpp"
 
 int main(int argc, char** argv) {
-  if (argc < 2) throw std::runtime_error("[state] [elf]!");
+  if (argc < 2) throw std::runtime_error("[machine] [elf]!");
   auto m = dawn::machine_t::load_elf(argv[1]);
   if (!m) {
     throw std::runtime_error("failed to load elf");
