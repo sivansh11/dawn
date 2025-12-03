@@ -2,6 +2,7 @@
 
 #include <cassert>
 #include <cinttypes>
+#include <cstdint>
 #include <elfio/elf_types.hpp>
 #include <elfio/elfio.hpp>
 #include <elfio/elfio_section.hpp>
@@ -17,7 +18,8 @@
 
 namespace dawn {
 
-std::optional<machine_t> machine_t::load_elf(const std::filesystem::path& path) {
+std::optional<machine_t> machine_t::load_elf(
+    const std::filesystem::path& path) {
   ELFIO::elfio reader;
   if (!reader.load(path)) return std::nullopt;
 
@@ -37,7 +39,7 @@ std::optional<machine_t> machine_t::load_elf(const std::filesystem::path& path) 
     guest_max  = std::max(guest_max, virtual_address + memory_size);
   }
 
-  uint8_t* base = new uint8_t[1024 * 1024 * 4];
+  uint8_t* base            = new uint8_t[1024 * 1024 * 4];
   state._memory            = memory_t::create(base, 1024 * 1024 * 4);
   state._memory.guest_base = guest_base;
 
@@ -561,14 +563,14 @@ bool machine_t::decode_and_exec_instruction(uint32_t instruction) {
             case riscv::srliw_or_sraiw_t::e_srliw: {
               _reg[inst.as.i_type.rd()] =
                   sext(static_cast<uint32_t>(_reg[inst.as.i_type.rs1()]) >>
-                                             inst.as.i_type.shamt_w(),
+                           inst.as.i_type.shamt_w(),
                        32);
               _pc += 4;
             } break;
             case riscv::srliw_or_sraiw_t::e_sraiw: {
               _reg[inst.as.i_type.rd()] =
                   sext(static_cast<int32_t>(_reg[inst.as.i_type.rs1()]) >>
-                                            inst.as.i_type.shamt_w(),
+                           inst.as.i_type.shamt_w(),
                        32);
               _pc += 4;
             } break;
@@ -585,74 +587,165 @@ bool machine_t::decode_and_exec_instruction(uint32_t instruction) {
       }
     } break;
     case riscv::op_t::e_r_type: {
-      switch (inst.as.r_type.funct3()) {
-        case riscv::r_type_func3_t::e_add_or_sub: {
-          switch (static_cast<riscv::add_or_sub_t>(inst.as.r_type.funct7())) {
-            case riscv::add_or_sub_t::e_add: {
+      switch (inst.as.r_type.funct7()) {
+        case riscv::r_type_func7_t::e_0000000: {
+          switch (inst.as.r_type.funct3()) {
+            case riscv::r_type_func3_t::e_add: {
               _reg[inst.as.r_type.rd()] =
                   _reg[inst.as.r_type.rs1()] + _reg[inst.as.r_type.rs2()];
               _pc += 4;
             } break;
-            case riscv::add_or_sub_t::e_sub: {
+            case riscv::r_type_func3_t::e_sll: {
               _reg[inst.as.r_type.rd()] =
-                  _reg[inst.as.r_type.rs1()] - _reg[inst.as.r_type.rs2()];
+                  _reg[inst.as.r_type.rs1()]
+                  << (_reg[inst.as.r_type.rs2()] & 0b111111);
               _pc += 4;
             } break;
-            default:
-              handle_trap(riscv::exception_code_t::e_illegal_instruction,
-                          instruction);
-          }
-        } break;
-        case riscv::r_type_func3_t::e_sll: {
-          _reg[inst.as.r_type.rd()] =
-              _reg[inst.as.r_type.rs1()]
-              << (_reg[inst.as.r_type.rs2()] & 0b111111);
-          _pc += 4;
-        } break;
-        case riscv::r_type_func3_t::e_slt: {
-          _reg[inst.as.r_type.rd()] =
-              static_cast<int64_t>(_reg[inst.as.r_type.rs1()]) <
-              static_cast<int64_t>(_reg[inst.as.r_type.rs2()]);
-          _pc += 4;
-        } break;
-        case riscv::r_type_func3_t::e_sltu: {
-          _reg[inst.as.r_type.rd()] =
-              _reg[inst.as.r_type.rs1()] < _reg[inst.as.r_type.rs2()];
-          _pc += 4;
-        } break;
-        case riscv::r_type_func3_t::e_xor: {
-          _reg[inst.as.r_type.rd()] =
-              _reg[inst.as.r_type.rs1()] ^ _reg[inst.as.r_type.rs2()];
-          _pc += 4;
-        } break;
-        case riscv::r_type_func3_t::e_srl_or_sra: {
-          switch (static_cast<riscv::srl_or_sra_t>(inst.as.r_type.funct7())) {
-            case riscv::srl_or_sra_t::e_srl: {
+            case riscv::r_type_func3_t::e_slt: {
+              _reg[inst.as.r_type.rd()] =
+                  static_cast<int64_t>(_reg[inst.as.r_type.rs1()]) <
+                  static_cast<int64_t>(_reg[inst.as.r_type.rs2()]);
+              _pc += 4;
+            } break;
+            case riscv::r_type_func3_t::e_sltu: {
+              _reg[inst.as.r_type.rd()] =
+                  _reg[inst.as.r_type.rs1()] < _reg[inst.as.r_type.rs2()];
+              _pc += 4;
+            } break;
+            case riscv::r_type_func3_t::e_xor: {
+              _reg[inst.as.r_type.rd()] =
+                  _reg[inst.as.r_type.rs1()] ^ _reg[inst.as.r_type.rs2()];
+              _pc += 4;
+            } break;
+            case riscv::r_type_func3_t::e_srl: {
               _reg[inst.as.r_type.rd()] =
                   _reg[inst.as.r_type.rs1()] >>
                   (_reg[inst.as.r_type.rs2()] & 0b111111);
               _pc += 4;
             } break;
-            case riscv::srl_or_sra_t::e_sra: {
+            case riscv::r_type_func3_t::e_or: {
               _reg[inst.as.r_type.rd()] =
-                  static_cast<int64_t>(_reg[inst.as.r_type.rs1()]) >>
-                  (_reg[inst.as.r_type.rs2()] & 0b111111);
+                  _reg[inst.as.r_type.rs1()] | _reg[inst.as.r_type.rs2()];
               _pc += 4;
             } break;
+            case riscv::r_type_func3_t::e_and: {
+              _reg[inst.as.r_type.rd()] =
+                  _reg[inst.as.r_type.rs1()] & _reg[inst.as.r_type.rs2()];
+              _pc += 4;
+            } break;
+
             default:
               handle_trap(riscv::exception_code_t::e_illegal_instruction,
                           instruction);
           }
         } break;
-        case riscv::r_type_func3_t::e_or: {
-          _reg[inst.as.r_type.rd()] =
-              _reg[inst.as.r_type.rs1()] | _reg[inst.as.r_type.rs2()];
-          _pc += 4;
+        case riscv::r_type_func7_t::e_0100000: {
+          switch (inst.as.r_type.funct3()) {
+            case riscv::r_type_func3_t::e_sub: {
+              _reg[inst.as.r_type.rd()] =
+                  _reg[inst.as.r_type.rs1()] - _reg[inst.as.r_type.rs2()];
+              _pc += 4;
+            } break;
+            case riscv::r_type_func3_t::e_sra: {
+              _reg[inst.as.r_type.rd()] =
+                  static_cast<int64_t>(_reg[inst.as.r_type.rs1()]) >>
+                  (_reg[inst.as.r_type.rs2()] & 0b111111);
+              _pc += 4;
+            } break;
+
+            default:
+              handle_trap(riscv::exception_code_t::e_illegal_instruction,
+                          instruction);
+          }
         } break;
-        case riscv::r_type_func3_t::e_and: {
-          _reg[inst.as.r_type.rd()] =
-              _reg[inst.as.r_type.rs1()] & _reg[inst.as.r_type.rs2()];
-          _pc += 4;
+        case riscv::r_type_func7_t::e_0000001: {
+          switch (inst.as.r_type.funct3()) {
+            case riscv::r_type_func3_t::e_mul: {
+              uint64_t rs1              = _reg[inst.as.r_type.rs1()];
+              uint64_t rs2              = _reg[inst.as.r_type.rs2()];
+              _reg[inst.as.r_type.rd()] = rs1 * rs2;
+              _pc += 4;
+            } break;
+            case riscv::r_type_func3_t::e_mulh: {
+              int64_t  rs1 = static_cast<int64_t>(_reg[inst.as.r_type.rs1()]);
+              int64_t  rs2 = static_cast<int64_t>(_reg[inst.as.r_type.rs2()]);
+              uint64_t result[2];
+              mul_64x64_u(rs1, rs2, result);
+              uint64_t result_hi = result[1];
+              if (rs1 < 0) result_hi -= rs2;
+              if (rs2 < 0) result_hi -= rs1;
+              _reg[inst.as.r_type.rd()] = result_hi;
+              _pc += 4;
+            } break;
+            case riscv::r_type_func3_t::e_mulhsu: {
+              int64_t  rs1 = static_cast<int64_t>(_reg[inst.as.r_type.rs1()]);
+              uint64_t rs2 = _reg[inst.as.r_type.rs2()];
+              uint64_t result[2];
+              mul_64x64_u(rs1, rs2, result);
+              uint64_t result_hi = result[1];
+              if (rs1 < 0) result_hi -= rs2;
+              _reg[inst.as.r_type.rd()] = result_hi;
+              _pc += 4;
+            } break;
+            case riscv::r_type_func3_t::e_mulhu: {
+              uint64_t rs1 = _reg[inst.as.r_type.rs1()];
+              uint64_t rs2 = _reg[inst.as.r_type.rs2()];
+              uint64_t result[2];
+              mul_64x64_u(rs1, rs2, result);
+              _reg[inst.as.r_type.rd()] = result[1];
+              _pc += 4;
+            } break;
+            case riscv::r_type_func3_t::e_div: {
+              int64_t rs1 = static_cast<int64_t>(_reg[inst.as.r_type.rs1()]);
+              int64_t rs2 = static_cast<int64_t>(_reg[inst.as.r_type.rs2()]);
+
+              if (rs1 == INT64_MIN && rs2 == -1) {
+                _reg[inst.as.r_type.rd()] = INT64_MIN;
+              } else if (rs2 == 0) {
+                _reg[inst.as.r_type.rd()] = ~0ull;
+              } else {
+                _reg[inst.as.r_type.rd()] = static_cast<uint64_t>(rs1 / rs2);
+              }
+              _pc += 4;
+            } break;
+            case riscv::r_type_func3_t::e_divu: {
+              uint64_t rs1 = _reg[inst.as.r_type.rs1()];
+              uint64_t rs2 = _reg[inst.as.r_type.rs2()];
+              if (rs2 == 0) {
+                _reg[inst.as.r_type.rd()] = ~0ull;
+              } else {
+                _reg[inst.as.r_type.rd()] = rs1 / rs2;
+              }
+              _pc += 4;
+            } break;
+            case riscv::r_type_func3_t::e_rem: {
+              int64_t rs1 = static_cast<int64_t>(_reg[inst.as.r_type.rs1()]);
+              int64_t rs2 = static_cast<int64_t>(_reg[inst.as.r_type.rs2()]);
+
+              if (rs1 == INT64_MIN && rs2 == -1) {
+                _reg[inst.as.r_type.rd()] = 0;
+              } else if (rs2 == 0) {
+                _reg[inst.as.r_type.rd()] = rs1;
+              } else {
+                _reg[inst.as.r_type.rd()] = static_cast<uint64_t>(rs1 % rs2);
+              }
+              _pc += 4;
+            } break;
+            case riscv::r_type_func3_t::e_remu: {
+              uint64_t rs1 = _reg[inst.as.r_type.rs1()];
+              uint64_t rs2 = _reg[inst.as.r_type.rs2()];
+              if (rs2 == 0) {
+                _reg[inst.as.r_type.rd()] = rs1;
+              } else {
+                _reg[inst.as.r_type.rd()] = rs1 % rs2;
+              }
+              _pc += 4;
+            } break;
+
+            default:
+              handle_trap(riscv::exception_code_t::e_illegal_instruction,
+                          instruction);
+          }
         } break;
         default:
           handle_trap(riscv::exception_code_t::e_illegal_instruction,
@@ -660,20 +753,27 @@ bool machine_t::decode_and_exec_instruction(uint32_t instruction) {
       }
     } break;
     case riscv::op_t::e_r_type_32: {
-      switch (inst.as.r_type.funct3()) {
-        case riscv::r_type_func3_t::e_addw_or_subw: {
-          switch (static_cast<riscv::addw_or_subw_t>(inst.as.r_type.funct7())) {
-            case riscv::addw_or_subw_t::e_addw: {
+      switch (inst.as.r_type.funct7()) {
+        case riscv::r_type_func7_t::e_0000000: {
+          switch (inst.as.r_type.funct3()) {
+            case riscv::r_type_func3_t::e_addw: {
               _reg[inst.as.r_type.rd()] =
                   sext(static_cast<uint32_t>(_reg[inst.as.r_type.rs1()]) +
                            static_cast<uint32_t>(_reg[inst.as.r_type.rs2()]),
                        32);
               _pc += 4;
             } break;
-            case riscv::addw_or_subw_t::e_subw: {
+            case riscv::r_type_func3_t::e_sllw: {
               _reg[inst.as.r_type.rd()] =
-                  sext(static_cast<uint32_t>(_reg[inst.as.r_type.rs1()]) -
-                           static_cast<uint32_t>(_reg[inst.as.r_type.rs2()]),
+                  sext(static_cast<int32_t>(_reg[inst.as.r_type.rs1()])
+                           << (_reg[inst.as.r_type.rs2()] & 0b11111),
+                       32);
+              _pc += 4;
+            } break;
+            case riscv::r_type_func3_t::e_srlw: {
+              _reg[inst.as.r_type.rd()] =
+                  sext(static_cast<uint32_t>(_reg[inst.as.r_type.rs1()]) >>
+                           (_reg[inst.as.r_type.rs2()] & 0b11111),
                        32);
               _pc += 4;
             } break;
@@ -681,41 +781,95 @@ bool machine_t::decode_and_exec_instruction(uint32_t instruction) {
               handle_trap(riscv::exception_code_t::e_illegal_instruction,
                           instruction);
           }
-          break;
-          case riscv::r_type_func3_t::e_sllw: {
-            _reg[inst.as.r_type.rd()] =
-                sext(static_cast<int32_t>(_reg[inst.as.r_type.rs1()])
-                         << (_reg[inst.as.r_type.rs2()] & 0b11111),
-                     32);
-            _pc += 4;
-          } break;
-          case riscv::r_type_func3_t::e_srlw_or_sraw: {
-            switch (
-                static_cast<riscv::srlw_or_sraw_t>(inst.as.r_type.funct7())) {
-              case riscv::srlw_or_sraw_t::e_srlw: {
-                _reg[inst.as.r_type.rd()] =
-                    sext(static_cast<uint32_t>(_reg[inst.as.r_type.rs1()]) >>
-                             (_reg[inst.as.r_type.rs2()] & 0b11111),
-                         32);
-                _pc += 4;
-              } break;
-              case riscv::srlw_or_sraw_t::e_sraw: {
-                _reg[inst.as.r_type.rd()] =
-                    sext(static_cast<int32_t>(_reg[inst.as.r_type.rs1()]) >>
-                             (_reg[inst.as.r_type.rs2()] & 0b11111),
-                         32);
-                _pc += 4;
-              } break;
-              default:
-                handle_trap(riscv::exception_code_t::e_illegal_instruction,
-                            instruction);
-            }
-          } break;
+        } break;
+        case riscv::r_type_func7_t::e_0100000: {
+          switch (inst.as.r_type.funct3()) {
+            case riscv::r_type_func3_t::e_subw: {
+              _reg[inst.as.r_type.rd()] =
+                  sext(static_cast<uint32_t>(_reg[inst.as.r_type.rs1()]) -
+                           static_cast<uint32_t>(_reg[inst.as.r_type.rs2()]),
+                       32);
+              _pc += 4;
+            } break;
+            case riscv::r_type_func3_t::e_sraw: {
+              _reg[inst.as.r_type.rd()] =
+                  sext(static_cast<int32_t>(_reg[inst.as.r_type.rs1()]) >>
+                           (_reg[inst.as.r_type.rs2()] & 0b11111),
+                       32);
+              _pc += 4;
+            } break;
 
-          default:
-            handle_trap(riscv::exception_code_t::e_illegal_instruction,
-                        instruction);
-        }
+            default:
+              handle_trap(riscv::exception_code_t::e_illegal_instruction,
+                          instruction);
+          }
+        } break;
+        case riscv::r_type_func7_t::e_0000001: {
+          switch (inst.as.r_type.funct3()) {
+            case riscv::r_type_func3_t::e_mulw: {
+              _reg[inst.as.r_type.rd()] = static_cast<uint64_t>(
+                  static_cast<int32_t>(_reg[inst.as.r_type.rs1()]) *
+                  static_cast<int32_t>(_reg[inst.as.r_type.rs2()]));
+              _pc += 4;
+            } break;
+            case riscv::r_type_func3_t::e_divw: {
+              int32_t rs1 = static_cast<int32_t>(_reg[inst.as.r_type.rs1()]);
+              int32_t rs2 = static_cast<int32_t>(_reg[inst.as.r_type.rs2()]);
+              if (rs1 == INT32_MIN && rs2 == -1) {
+                _reg[inst.as.r_type.rd()] = INT32_MIN;
+              } else if (rs2 == 0) {
+                _reg[inst.as.r_type.rd()] = ~0ull;
+              } else {
+                _reg[inst.as.r_type.rd()] = static_cast<uint64_t>(rs1 / rs2);
+              }
+              _pc += 4;
+            } break;
+            case riscv::r_type_func3_t::e_divuw: {
+              uint32_t rs1 = static_cast<uint32_t>(_reg[inst.as.r_type.rs1()]);
+              uint32_t rs2 = static_cast<uint32_t>(_reg[inst.as.r_type.rs2()]);
+              if (rs2 == 0) {
+                _reg[inst.as.r_type.rd()] = ~0u;
+              } else {
+                _reg[inst.as.r_type.rd()] = rs1 / rs2;
+              }
+              _reg[inst.as.r_type.rd()] =
+                  sext(static_cast<uint32_t>(_reg[inst.as.r_type.rd()]), 32);
+              _pc += 4;
+            } break;
+            case riscv::r_type_func3_t::e_remw: {
+              int32_t rs1 = static_cast<int32_t>(_reg[inst.as.r_type.rs1()]);
+              int32_t rs2 = static_cast<int32_t>(_reg[inst.as.r_type.rs2()]);
+
+              if (rs1 == INT32_MIN && rs2 == -1) {
+                _reg[inst.as.r_type.rd()] = 0;
+              } else if (rs2 == 0) {
+                _reg[inst.as.r_type.rd()] = rs1;
+              } else {
+                _reg[inst.as.r_type.rd()] = static_cast<uint64_t>(rs1 % rs2);
+              }
+              _pc += 4;
+            } break;
+            case riscv::r_type_func3_t::e_remuw: {
+              uint32_t rs1 = static_cast<uint32_t>(_reg[inst.as.r_type.rs1()]);
+              uint32_t rs2 = static_cast<uint32_t>(_reg[inst.as.r_type.rs2()]);
+              if (rs2 == 0) {
+                _reg[inst.as.r_type.rd()] = rs1;
+              } else {
+                _reg[inst.as.r_type.rd()] = rs1 % rs2;
+              }
+              _reg[inst.as.r_type.rd()] =
+                  sext(static_cast<uint32_t>(_reg[inst.as.r_type.rd()]), 32);
+              _pc += 4;
+            } break;
+
+            default:
+              handle_trap(riscv::exception_code_t::e_illegal_instruction,
+                          instruction);
+          }
+        } break;
+        default:
+          handle_trap(riscv::exception_code_t::e_illegal_instruction,
+                      instruction);
       }
     } break;
     case riscv::op_t::e_fence: {

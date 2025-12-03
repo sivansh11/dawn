@@ -51,6 +51,7 @@ enum class sub_system_t : uint32_t {
   e_mret   = 0b001100000010,
 };
 
+// TODO: cleanup and add func7 enum
 enum class i_type_func3_t : uint32_t {
   e_lb  = 0b000,
   e_lh  = 0b001,
@@ -89,39 +90,48 @@ enum class store_t : uint32_t {
   e_sd = 0b011,
 };
 
-enum class add_or_sub_t : uint32_t {
-  e_add = 0b0000000,
-  e_sub = 0b0100000,
-};
-
-enum class srl_or_sra_t : uint32_t {
-  e_srl = 0b0000000,
-  e_sra = 0b0100000,
-};
-
-enum class addw_or_subw_t : uint32_t {
-  e_addw = 0b0000000,
-  e_subw = 0b0100000,
-};
-
-enum class srlw_or_sraw_t : uint32_t {
-  e_srlw = 0b0000000,
-  e_sraw = 0b0100000,
+enum class r_type_func7_t : uint32_t {
+  e_0000000 = 0b0000000,
+  e_0100000 = 0b0100000,
+  e_0000001 = 0b0000001,
 };
 
 enum class r_type_func3_t : uint32_t {
-  e_add_or_sub = 0b000,
-  e_sll        = 0b001,
-  e_slt        = 0b010,
-  e_sltu       = 0b011,
-  e_xor        = 0b100,
-  e_srl_or_sra = 0b101,
-  e_or         = 0b110,
-  e_and        = 0b111,
+  // e_add_or_sub = 0b000,
+  e_add  = 0b000,
+  e_sub  = 0b000,  // *
+  e_sll  = 0b001,
+  e_slt  = 0b010,
+  e_sltu = 0b011,
+  e_xor  = 0b100,
+  // e_srl_or_sra = 0b101,
+  e_srl = 0b101,
+  e_sra = 0b101,  // *
+  e_or  = 0b110,
+  e_and = 0b111,
 
-  e_addw_or_subw = 0b000,
-  e_sllw         = 0b001,
-  e_srlw_or_sraw = 0b101,
+  // e_addw_or_subw = 0b000,
+  e_addw = 0b000,
+  e_subw = 0b000,  // *
+  e_sllw = 0b001,
+  // e_srlw_or_sraw = 0b101,
+  e_srlw = 0b101,
+  e_sraw = 0b101,  // *
+
+  e_mul    = 0b000,
+  e_mulh   = 0b001,
+  e_mulhsu = 0b010,
+  e_mulhu  = 0b011,
+  e_div    = 0b100,
+  e_divu   = 0b101,
+  e_rem    = 0b110,
+  e_remu   = 0b111,
+
+  e_mulw  = 0b000,
+  e_divw  = 0b100,
+  e_divuw = 0b101,
+  e_remw  = 0b110,
+  e_remuw = 0b111,
 };
 
 struct base_t {
@@ -185,14 +195,14 @@ struct r_type_t {
   r_type_func3_t _funct3 : 3;  // 12-14
   uint32_t       _rs1    : 5;  // 15-19
   uint32_t       _rs2    : 5;  // 20-24
-  uint32_t       _funct7 : 7;  // 25-31
+  r_type_func7_t _funct7 : 7;  // 25-31
 
   constexpr op_t           opcode() const { return _opcode; }
   constexpr uint32_t       rd() const { return _rd; }
   constexpr r_type_func3_t funct3() const { return _funct3; }
   constexpr uint32_t       rs1() const { return _rs1; }
   constexpr uint32_t       rs2() const { return _rs2; }
-  constexpr uint32_t       funct7() const { return _funct7; }
+  constexpr r_type_func7_t funct7() const { return _funct7; }
 };
 
 struct b_type_t {
