@@ -2,7 +2,6 @@
 
 #include <cassert>
 #include <cstring>
-#include <flat_set>
 #include <optional>
 
 namespace dawn {
@@ -29,7 +28,7 @@ void memory_t::insert_memory(void* ptr, size_t size,
   // TODO: merge adjacent ranges with smae protection
   memory_range_t range =
       memory_range_t::create_from_start_and_size(ptr, size, protection);
-  std::flat_set<memory_range_t> new_ranges;
+  dawn::flat_set<memory_range_t> new_ranges;
   new_ranges.insert(range);
   for (const auto& _range : _ranges) {
     if (range.overlaps_with(_range)) {

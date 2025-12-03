@@ -2,9 +2,11 @@
 #define DAWN_MEMORY_HPP
 
 #include <cstdint>
-#include <flat_set>
+// #include <flat_set>
 #include <optional>
 #include <ostream>
+
+#include <dawn/flat_set.hpp>
 
 namespace dawn {
 
@@ -101,7 +103,7 @@ struct memory_t {
   bool store_64(address_t addr, uint64_t value) const;
 
   size_t                        _size;
-  std::flat_set<memory_range_t> _ranges;  // ranges with memory protection
+  dawn::flat_set<memory_range_t> _ranges{};  // ranges with memory protection
   void*                         _host_base{};
   address_t
       guest_base{};  // guest_base is set by the function loading the elf script
