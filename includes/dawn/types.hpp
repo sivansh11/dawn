@@ -2,7 +2,7 @@
 #define DAWN_TYPES_HPP
 
 #include <cstdint>
-#include <ostream>
+#include <iostream>
 
 #include "helper.hpp"
 

@@ -1,5 +1,6 @@
 #include "dawn/memory.hpp"
 
+#include <iostream>
 #include <cassert>
 #include <cstring>
 #include <flat_set>
