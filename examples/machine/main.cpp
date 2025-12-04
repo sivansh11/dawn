@@ -18,9 +18,10 @@ int main(int argc, char** argv) {
       std::cout << "passed\n";
     else
       std::cout << "failed\n";
+    exit(machine._reg[10]);
   });
 
-  machine.simulate(1000000);
+  machine.simulate(10000);
   // while (true) {
   //   auto instruction = machine._memory.fetch_32(machine._pc);
   //   std::cout << "pc: " << std::hex << machine._pc << "\n" << std::dec;
@@ -37,8 +38,9 @@ int main(int argc, char** argv) {
   //   }
   //   std::cout << '\n';
   //   std::cout.flush();
-  //   // getchar();
+  //   getchar();
   // }
 
   return machine._running ? 1 : machine._reg[10];
+  return -1;
 }

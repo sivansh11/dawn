@@ -1,5 +1,7 @@
 #!/bin/bash
 
+cmake --build build
+
 if [ ! -d "tests/riscv-tests/" ]; then
   git clone --recursive https://github.com/riscv-software-src/riscv-tests.git ./tests/riscv-tests
   if [ -z "$RISCV" ]; then
