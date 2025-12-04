@@ -533,9 +533,11 @@ bool machine_t::decode_and_exec_instruction(uint32_t instruction) {
               _pc += 4;
             } break;
             case riscv::srli_or_srai_t::e_srai: {
-              _reg[inst.as.i_type.rd()] =
-                  static_cast<int64_t>(_reg[inst.as.i_type.rs1()]) >>
-                  inst.as.i_type.imm_sext();
+              int64_t rs1_val =
+                  static_cast<int64_t>(_reg[inst.as.i_type.rs1()]);
+              uint32_t shamt =
+                  inst.as.i_type.imm() & 0x3F;
+              _reg[inst.as.i_type.rd()] = rs1_val >> shamt;
               _pc += 4;
             } break;
 
