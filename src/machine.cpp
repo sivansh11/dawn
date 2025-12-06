@@ -1005,12 +1005,20 @@ bool machine_t::decode_and_exec_instruction(uint32_t instruction) {
           _reg[inst.as.i_type.rd()] = *t;
           _pc += 4;
         } break;
-          // case riscv::i_type_func3_t::e_csrrsi: {
-          //   _pc += 4;
-          // } break;
-          // case riscv::i_type_func3_t::e_csrrci: {
-          //   _pc += 4;
-          // } break;
+        case riscv::i_type_func3_t::e_csrrsi: {
+          auto t = read_csr(instruction);
+          if (!t) break;
+          if (!write_csr(instruction, *t | inst.as.i_type.rs1())) break;
+          _reg[inst.as.i_type.rd()] = *t;
+          _pc += 4;
+        } break;
+        case riscv::i_type_func3_t::e_csrrci: {
+          auto t = read_csr(instruction);
+          if (!t) break;
+          if (!write_csr(instruction, *t & ~inst.as.i_type.rs1())) break;
+          _reg[inst.as.i_type.rd()] = *t;
+          _pc += 4;
+        } break;
 
         default:
           handle_trap(riscv::exception_code_t::e_illegal_instruction,
