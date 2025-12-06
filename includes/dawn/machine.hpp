@@ -45,6 +45,7 @@ struct machine_t {
   // manually manage _brk syscall
   address_t             _heap_address;
   bool                  _running = true;
+  bool                  _paused  = false;
   address_t             _reservation_address;
   bool                  _is_reserved = false;
   uint32_t              _mode        = 0b11;
