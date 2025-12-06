@@ -266,7 +266,7 @@ struct b_type_t {
   constexpr uint32_t imm() const {
     return _imm4 << 12 | _imm1 << 11 | _imm3 << 5 | _imm2 << 1;
   }
-  constexpr int32_t imm_sext() const { return ::dawn::sext(imm(), 12); }
+  constexpr int32_t imm_sext() const { return ::dawn::sext(imm(), 13); }
 };
 
 struct j_type_t {
