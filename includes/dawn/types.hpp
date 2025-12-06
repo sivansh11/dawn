@@ -305,7 +305,7 @@ struct instruction_t {
 };
 static_assert(sizeof(instruction_t) == 4, "instruction size should be 4 bytes");
 
-enum class exception_code_t : uint32_t {
+enum class exception_code_t : uint64_t {
   e_instruction_address_misaligned = 0,
   e_instruction_access_fault       = 1,
   e_illegal_instruction            = 2,
