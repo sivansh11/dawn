@@ -28,14 +28,15 @@ struct machine_t {
       uint64_t num_instructions = std::numeric_limits<uint64_t>::max());
 
  private:
-  bool                    write_csr(uint32_t instruction, uint64_t value);
-  std::optional<uint64_t> read_csr(uint32_t instruction);
-  void handle_trap(riscv::exception_code_t cause, uint64_t value);
-
   void     _write_csr(uint16_t address, uint64_t value);
   uint64_t _read_csr(uint16_t address);
 
  public:
+  bool                    write_csr(uint32_t instruction, uint64_t value);
+  std::optional<uint64_t> read_csr(uint32_t instruction);
+
+  bool handle_trap(riscv::exception_code_t cause, uint64_t value);
+
   uint64_t                                          _reg[32];
   address_t                                         _pc;
   ankerl::unordered_dense::map<uint64_t, uint64_t>  _csr;

@@ -168,37 +168,63 @@ std::optional<uint64_t> machine_t::read_csr(uint32_t instruction) {
   return _read_csr(riscv_instruction.as.i_type.imm());
 }
 
-void machine_t::handle_trap(riscv::exception_code_t cause, uint64_t value) {
+bool machine_t::handle_trap(riscv::exception_code_t cause, uint64_t value) {
+#if 1
   // hack for host system calls
-  if (cause == riscv::exception_code_t::e_ecall_m_mode) {
+  if (cause == riscv::exception_code_t::e_ecall_m_mode ||
+      cause == riscv::exception_code_t::e_ecall_u_mode) {
     auto itr = _syscalls.find(_reg[17]);
     if (itr != _syscalls.end()) {
       itr->second(*this);
 
       _pc += 4;
-      return;
+      return true;
     }
   }
-#ifndef NDEBUG
+#endif
   if (cause == riscv::exception_code_t::e_illegal_instruction ||
       cause == riscv::exception_code_t::e_instruction_access_fault) {
     std::cerr << "got instruction: " << std::hex << value
               << " at pc: " << std::hex << _pc << '\n';
+    std::cerr.flush();
+    throw std::runtime_error("illegal instruction or instruction access fault");
   }
-#endif
+
+  bool is_interrupt =
+      (static_cast<uint64_t>(cause) & riscv::MCAUSE_INTERRUPT_BIT) != 0;
+
+  uint64_t mstatus    = _read_csr(riscv::MSTATUS);
+  bool     global_mie = (mstatus & riscv::MSTATUS_MIE_MASK) != 0;
+
+  if (is_interrupt) {
+    uint64_t mie_reg = _read_csr(riscv::MIE);
+    uint64_t interrupt_bit =
+        1ull << (static_cast<uint64_t>(cause) & ~riscv::MCAUSE_INTERRUPT_BIT);
+    bool enabled_individually = (mie_reg & interrupt_bit) != 0;
+
+    // Spec rule: Interrupts are globally enabled if:
+    // (current_mode < M_MODE) OR (current_mode == M_MODE AND mstatus.MIE == 1)
+    bool interrupts_globally_enabled =
+        (_mode < 0b11) || (_mode == 0b11 && global_mie);
+
+    if (!interrupts_globally_enabled || !enabled_individually) {
+      return false;
+    }
+  }
+
+  _is_reserved         = false;
+  _reservation_address = 0;
 
   _write_csr(riscv::MEPC, _pc);
   _write_csr(riscv::MCAUSE, static_cast<uint64_t>(cause));
   _write_csr(riscv::MTVAL, value);
 
-  uint64_t mstatus         = _read_csr(riscv::MSTATUS);
-  uint64_t current_mie_bit = (mstatus & riscv::MSTATUS_MIE_MASK) ? 1 : 0;
-  mstatus                  = (mstatus & ~riscv::MSTATUS_MPP_MASK) |
-            ((static_cast<uint64_t>(11) << riscv::MSTATUS_MPP_SHIFT) &
+  mstatus = (mstatus & ~riscv::MSTATUS_MPP_MASK) |
+            ((static_cast<uint64_t>(_mode) << riscv::MSTATUS_MPP_SHIFT) &
              riscv::MSTATUS_MPP_MASK);
-  mstatus = (mstatus & ~riscv::MSTATUS_MPIE_MASK) |
-            ((current_mie_bit << riscv::MSTATUS_MPIE_SHIFT) &
-             riscv::MSTATUS_MPIE_MASK);
+  mstatus =
+      (mstatus & ~riscv::MSTATUS_MPIE_MASK) |
+      ((global_mie << riscv::MSTATUS_MPIE_SHIFT) & riscv::MSTATUS_MPIE_MASK);
   mstatus &= ~riscv::MSTATUS_MIE_MASK;
 
   _write_csr(riscv::MSTATUS, mstatus);
@@ -206,8 +232,6 @@ void machine_t::handle_trap(riscv::exception_code_t cause, uint64_t value) {
   uint64_t mtvec_base = mtvec & riscv::MTVEC_BASE_ALIGN_MASK;
   uint64_t mtvec_mode = mtvec & riscv::MTVEC_MODE_MASK;
 
-  bool is_interrupt =
-      (static_cast<uint64_t>(cause) & riscv::MCAUSE_INTERRUPT_BIT) != 0;
   if (mtvec_mode == 0b01 && is_interrupt) {
     uint64_t interrupt_code =
         static_cast<uint64_t>(cause) & ~riscv::MCAUSE_INTERRUPT_BIT;
@@ -215,6 +239,7 @@ void machine_t::handle_trap(riscv::exception_code_t cause, uint64_t value) {
   } else {
     _pc = mtvec_base;
   }
+  _mode = 0b11;
   if (_pc == 0) {
     switch (cause) {
       default:
@@ -224,6 +249,7 @@ void machine_t::handle_trap(riscv::exception_code_t cause, uint64_t value) {
         error(ss.str().c_str());
     }
   }
+  return true;
 }
 
 bool machine_t::decode_and_exec_instruction(uint32_t instruction) {
