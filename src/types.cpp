@@ -2,6 +2,8 @@
 
 std::ostream& operator<<(std::ostream&                     o,
                          const dawn::riscv::instruction_t& inst) {
+  o << std::hex << reinterpret_cast<const uint32_t&>(inst) << "   ";
+  o.flush();
   switch (inst.as.base.opcode()) {
     case dawn::riscv::op_t::e_lui:
       o << "lui x" << inst.as.u_type.rd() << ", " << std::hex
@@ -13,37 +15,43 @@ std::ostream& operator<<(std::ostream&                     o,
       break;
     case dawn::riscv::op_t::e_jal:
       o << "jal x" << inst.as.j_type.rd() << ", " << std::hex
-        << inst.as.j_type.imm();
+        << inst.as.j_type.imm_sext();
       break;
     case dawn::riscv::op_t::e_jalr:
       o << "jalr x" << inst.as.i_type.rd() << ", x" << inst.as.i_type.rs1()
-        << ", " << std::hex << inst.as.i_type.imm();
+        << ", " << std::hex << inst.as.i_type.imm_sext();
       break;
     case dawn::riscv::op_t::e_branch: {
       switch (inst.as.b_type.funct3()) {
         case dawn::riscv::branch_t::e_beq:
           o << "beq x" << std::dec << inst.as.b_type.rs1() << ", x"
-            << inst.as.b_type.rs2() << ", " << std::hex << inst.as.b_type.imm();
+            << inst.as.b_type.rs2() << ", " << std::hex
+            << inst.as.b_type.imm_sext();
           break;
         case dawn::riscv::branch_t::e_bne:
           o << "bne x" << std::dec << inst.as.b_type.rs1() << ", x"
-            << inst.as.b_type.rs2() << ", " << std::hex << inst.as.b_type.imm();
+            << inst.as.b_type.rs2() << ", " << std::hex
+            << inst.as.b_type.imm_sext();
           break;
         case dawn::riscv::branch_t::e_blt:
           o << "blt x" << std::dec << inst.as.b_type.rs1() << ", x"
-            << inst.as.b_type.rs2() << ", " << std::hex << inst.as.b_type.imm();
+            << inst.as.b_type.rs2() << ", " << std::hex
+            << inst.as.b_type.imm_sext();
           break;
         case dawn::riscv::branch_t::e_bge:
           o << "bge x" << std::dec << inst.as.b_type.rs1() << ", x"
-            << inst.as.b_type.rs2() << ", " << std::hex << inst.as.b_type.imm();
+            << inst.as.b_type.rs2() << ", " << std::hex
+            << inst.as.b_type.imm_sext();
           break;
         case dawn::riscv::branch_t::e_bltu:
           o << "bltu x" << std::dec << inst.as.b_type.rs1() << ", x"
-            << inst.as.b_type.rs2() << ", " << std::hex << inst.as.b_type.imm();
+            << inst.as.b_type.rs2() << ", " << std::hex
+            << inst.as.b_type.imm_sext();
           break;
         case dawn::riscv::branch_t::e_bgeu:
           o << "bgeu x" << std::dec << inst.as.b_type.rs1() << ", x"
-            << inst.as.b_type.rs2() << ", " << std::hex << inst.as.b_type.imm();
+            << inst.as.b_type.rs2() << ", " << std::hex
+            << inst.as.b_type.imm_sext();
           break;
 
         default:
@@ -54,38 +62,38 @@ std::ostream& operator<<(std::ostream&                     o,
       switch (inst.as.i_type.funct3()) {
         case dawn::riscv::i_type_func3_t::e_lb:
           o << "lb x" << std::dec << inst.as.i_type.rd() << ", " << std::hex
-            << inst.as.i_type.imm() << "(x" << std::dec << inst.as.i_type.rs1()
-            << ")";
+            << inst.as.i_type.imm_sext() << "(x" << std::dec
+            << inst.as.i_type.rs1() << ")";
           break;
         case dawn::riscv::i_type_func3_t::e_lh:
           o << "lh x" << std::dec << inst.as.i_type.rd() << ", " << std::hex
-            << inst.as.i_type.imm() << "(x" << std::dec << inst.as.i_type.rs1()
-            << ")";
+            << inst.as.i_type.imm_sext() << "(x" << std::dec
+            << inst.as.i_type.rs1() << ")";
           break;
         case dawn::riscv::i_type_func3_t::e_lw:
           o << "lw x" << std::dec << inst.as.i_type.rd() << ", " << std::hex
-            << inst.as.i_type.imm() << "(x" << std::dec << inst.as.i_type.rs1()
-            << ")";
+            << inst.as.i_type.imm_sext() << "(x" << std::dec
+            << inst.as.i_type.rs1() << ")";
           break;
         case dawn::riscv::i_type_func3_t::e_lbu:
           o << "lbu x" << std::dec << inst.as.i_type.rd() << ", " << std::hex
-            << inst.as.i_type.imm() << "(x" << std::dec << inst.as.i_type.rs1()
-            << ")";
+            << inst.as.i_type.imm_sext() << "(x" << std::dec
+            << inst.as.i_type.rs1() << ")";
           break;
         case dawn::riscv::i_type_func3_t::e_lhu:
           o << "lhu x" << std::dec << inst.as.i_type.rd() << ", " << std::hex
-            << inst.as.i_type.imm() << "(x" << std::dec << inst.as.i_type.rs1()
-            << ")";
+            << inst.as.i_type.imm_sext() << "(x" << std::dec
+            << inst.as.i_type.rs1() << ")";
           break;
         case dawn::riscv::i_type_func3_t::e_lwu:
           o << "lwu x" << std::dec << inst.as.i_type.rd() << ", " << std::hex
-            << inst.as.i_type.imm() << "(x" << std::dec << inst.as.i_type.rs1()
-            << ")";
+            << inst.as.i_type.imm_sext() << "(x" << std::dec
+            << inst.as.i_type.rs1() << ")";
           break;
         case dawn::riscv::i_type_func3_t::e_ld:
           o << "ld x" << std::dec << inst.as.i_type.rd() << ", " << std::hex
-            << inst.as.i_type.imm() << "(x" << std::dec << inst.as.i_type.rs1()
-            << ")";
+            << inst.as.i_type.imm_sext() << "(x" << std::dec
+            << inst.as.i_type.rs1() << ")";
           break;
         default:
           throw std::runtime_error("unknown instruction\n");
@@ -95,23 +103,23 @@ std::ostream& operator<<(std::ostream&                     o,
       switch (inst.as.s_type.funct3()) {
         case dawn::riscv::store_t::e_sb:
           o << "sb x" << std::dec << inst.as.s_type.rs2() << ", " << std::hex
-            << inst.as.s_type.imm() << "(x" << std::dec << inst.as.s_type.rs1()
-            << ")";
+            << inst.as.s_type.imm_sext() << "(x" << std::dec
+            << inst.as.s_type.rs1() << ")";
           break;
         case dawn::riscv::store_t::e_sh:
           o << "sh x" << std::dec << inst.as.s_type.rs2() << ", " << std::hex
-            << inst.as.s_type.imm() << "(x" << std::dec << inst.as.s_type.rs1()
-            << ")";
+            << inst.as.s_type.imm_sext() << "(x" << std::dec
+            << inst.as.s_type.rs1() << ")";
           break;
         case dawn::riscv::store_t::e_sw:
           o << "sw x" << std::dec << inst.as.s_type.rs2() << ", " << std::hex
-            << inst.as.s_type.imm() << "(x" << std::dec << inst.as.s_type.rs1()
-            << ")";
+            << inst.as.s_type.imm_sext() << "(x" << std::dec
+            << inst.as.s_type.rs1() << ")";
           break;
         case dawn::riscv::store_t::e_sd:
           o << "sd x" << std::dec << inst.as.s_type.rs2() << ", " << std::hex
-            << inst.as.s_type.imm() << "(x" << std::dec << inst.as.s_type.rs1()
-            << ")";
+            << inst.as.s_type.imm_sext() << "(x" << std::dec
+            << inst.as.s_type.rs1() << ")";
           break;
 
         default:
@@ -122,27 +130,33 @@ std::ostream& operator<<(std::ostream&                     o,
       switch (inst.as.i_type.funct3()) {
         case dawn::riscv::i_type_func3_t::e_addi:
           o << "addi x" << std::dec << inst.as.i_type.rd() << ", x"
-            << inst.as.i_type.rs1() << ", " << std::hex << inst.as.i_type.imm();
+            << inst.as.i_type.rs1() << ", " << std::hex
+            << inst.as.i_type.imm_sext();
           break;
         case dawn::riscv::i_type_func3_t::e_slti:
           o << "slti x" << std::dec << inst.as.i_type.rd() << ", x"
-            << inst.as.i_type.rs1() << ", " << std::hex << inst.as.i_type.imm();
+            << inst.as.i_type.rs1() << ", " << std::hex
+            << inst.as.i_type.imm_sext();
           break;
         case dawn::riscv::i_type_func3_t::e_sltiu:
           o << "sltiu x" << std::dec << inst.as.i_type.rd() << ", x"
-            << inst.as.i_type.rs1() << ", " << std::hex << inst.as.i_type.imm();
+            << inst.as.i_type.rs1() << ", " << std::hex
+            << inst.as.i_type.imm_sext();
           break;
         case dawn::riscv::i_type_func3_t::e_xori:
           o << "xori x" << std::dec << inst.as.i_type.rd() << ", x"
-            << inst.as.i_type.rs1() << ", " << std::hex << inst.as.i_type.imm();
+            << inst.as.i_type.rs1() << ", " << std::hex
+            << inst.as.i_type.imm_sext();
           break;
         case dawn::riscv::i_type_func3_t::e_ori:
           o << "ori x" << std::dec << inst.as.i_type.rd() << ", x"
-            << inst.as.i_type.rs1() << ", " << std::hex << inst.as.i_type.imm();
+            << inst.as.i_type.rs1() << ", " << std::hex
+            << inst.as.i_type.imm_sext();
           break;
         case dawn::riscv::i_type_func3_t::e_andi:
           o << "andi x" << std::dec << inst.as.i_type.rd() << ", x"
-            << inst.as.i_type.rs1() << ", " << std::hex << inst.as.i_type.imm();
+            << inst.as.i_type.rs1() << ", " << std::hex
+            << inst.as.i_type.imm_sext();
           break;
         case dawn::riscv::i_type_func3_t::e_slli:
           o << "slli x" << std::dec << inst.as.i_type.rd() << ", x"
@@ -175,7 +189,8 @@ std::ostream& operator<<(std::ostream&                     o,
       switch (inst.as.i_type.funct3()) {
         case dawn::riscv::i_type_func3_t::e_addiw:
           o << "addiw x" << std::dec << inst.as.i_type.rd() << ", x"
-            << inst.as.i_type.rs1() << ", " << std::hex << inst.as.i_type.imm();
+            << inst.as.i_type.rs1() << ", " << std::hex
+            << inst.as.i_type.imm_sext();
           break;
         case dawn::riscv::i_type_func3_t::e_slliw:
           o << "slliw x" << std::dec << inst.as.i_type.rd() << ", x"
@@ -398,33 +413,30 @@ std::ostream& operator<<(std::ostream&                     o,
         } break;
         case dawn::riscv::i_type_func3_t::e_csrrw:
           o << "csrrw x" << std::dec << inst.as.i_type.rd() << ", " << std::hex
-            << (inst.as.i_type.imm() >> 12) << ", x" << std::dec
+            << inst.as.i_type.imm() << ", x" << std::dec
             << inst.as.i_type.rs1();
           break;
         case dawn::riscv::i_type_func3_t::e_csrrs:
           o << "csrrs x" << std::dec << inst.as.i_type.rd() << ", " << std::hex
-            << (inst.as.i_type.imm() >> 12) << ", x" << std::dec
+            << inst.as.i_type.imm() << ", x" << std::dec
             << inst.as.i_type.rs1();
           break;
         case dawn::riscv::i_type_func3_t::e_csrrc:
           o << "csrrc x" << std::dec << inst.as.i_type.rd() << ", " << std::hex
-            << (inst.as.i_type.imm() >> 12) << ", x" << std::dec
+            << inst.as.i_type.imm() << ", x" << std::dec
             << inst.as.i_type.rs1();
           break;
         case dawn::riscv::i_type_func3_t::e_csrrwi:
           o << "csrrwi x" << std::dec << inst.as.i_type.rd() << ", " << std::hex
-            << (inst.as.i_type.imm() >> 12) << ", " << std::dec
-            << inst.as.i_type.rs1();
+            << inst.as.i_type.imm() << ", " << std::dec << inst.as.i_type.rs1();
           break;
         case dawn::riscv::i_type_func3_t::e_csrrsi:
           o << "csrrsi x" << std::dec << inst.as.i_type.rd() << ", " << std::hex
-            << (inst.as.i_type.imm() >> 12) << ", " << std::dec
-            << inst.as.i_type.rs1();
+            << inst.as.i_type.imm() << ", " << std::dec << inst.as.i_type.rs1();
           break;
         case dawn::riscv::i_type_func3_t::e_csrrci:
           o << "csrrci x" << std::dec << inst.as.i_type.rd() << ", " << std::hex
-            << (inst.as.i_type.imm() >> 12) << ", " << std::dec
-            << inst.as.i_type.rs1();
+            << inst.as.i_type.imm() << ", " << std::dec << inst.as.i_type.rs1();
           break;
 
         default:
