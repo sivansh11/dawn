@@ -156,10 +156,12 @@ std::optional<uint32_t> machine_t::fetch_instruction() {
 
 void machine_t::_write_csr(uint16_t address, uint64_t value) {
   // TODO: more involved csr writes
+  // TODO: log
   _csr[address] = value;
 }
 uint64_t machine_t::_read_csr(uint16_t address) {
   // TODO: more involved csr reads
+  // TODO: log
   return _csr[address];
 }
 
