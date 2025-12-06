@@ -114,6 +114,41 @@ std::optional<machine_t> machine_t::load_elf(
   return state;
 }
 
+std::vector<uint8_t> read_file(const std::string& file_path) {
+  std::ifstream file(file_path, std::ios::binary | std::ios::ate);
+  if (!file.is_open()) {
+    throw std::runtime_error("Failed to open file: " + file_path);
+  }
+  std::streamsize size = file.tellg();
+  file.seekg(0, std::ios::beg);
+  std::vector<uint8_t> buffer(size);
+  if (!file.read(reinterpret_cast<char*>(buffer.data()), size)) {
+    throw std::runtime_error("Failed to read file: " + file_path);
+  }
+  return buffer;
+}
+
+std::optional<machine_t> machine_t::load_binary(
+    const std::filesystem::path& path, uint64_t size, uint64_t offset) {
+  machine_t machine{};
+
+  uint8_t* base              = new uint8_t[size];
+  machine._memory            = memory_t::create(base, size);
+  machine._memory.guest_base = offset;
+
+  machine._memory.insert_memory(base, size, memory_protection_t::e_all, nullptr,
+                                nullptr);
+
+  auto blob = read_file(path);
+
+  if (!machine._memory.memcpy_host_to_guest(offset, blob.data(), blob.size()))
+    throw std::runtime_error("Failed to copy blob to guest");
+
+  machine._pc = offset;
+
+  return machine;
+}
+
 bool machine_t::add_syscall(uint64_t number, syscall_t syscall) {
   auto itr = _syscalls.find(number);
   if (itr != _syscalls.end()) return false;
@@ -545,8 +580,7 @@ bool machine_t::decode_and_exec_instruction(uint32_t instruction) {
             case riscv::srli_or_srai_t::e_srai: {
               int64_t rs1_val =
                   static_cast<int64_t>(_reg[inst.as.i_type.rs1()]);
-              uint32_t shamt =
-                  inst.as.i_type.imm() & 0x3F;
+              uint32_t shamt            = inst.as.i_type.imm() & 0x3F;
               _reg[inst.as.i_type.rd()] = rs1_val >> shamt;
               _pc += 4;
             } break;
@@ -909,8 +943,15 @@ bool machine_t::decode_and_exec_instruction(uint32_t instruction) {
               handle_trap(riscv::exception_code_t::e_ecall_m_mode, 0);
             } break;
             case riscv::sub_system_t::e_ebreak: {
-              std::cout << "TODO: implement EBREAK\n";
-              _pc += 4;
+              std::cout << "pc: " << std::hex << _pc << "\n" << std::dec;
+              for (uint32_t i = 0; i < 32; i++) {
+                if (_reg[i] != 0)
+                  std::cout << "x" << i << ": " << std::hex << _reg[i]
+                            << std::dec << '\n';
+              }
+              std::cout << '\n';
+              std::cout.flush();
+              handle_trap(riscv::exception_code_t::e_breakpoint, instruction);
             } break;
             case riscv::sub_system_t::e_mret: {
               uint64_t mstatus = _read_csr(riscv::MSTATUS);
@@ -961,12 +1002,20 @@ bool machine_t::decode_and_exec_instruction(uint32_t instruction) {
           _reg[inst.as.i_type.rd()] = *t;
           _pc += 4;
         } break;
-          // case riscv::i_type_func3_t::e_csrrsi: {
-          //   _pc += 4;
-          // } break;
-          // case riscv::i_type_func3_t::e_csrrci: {
-          //   _pc += 4;
-          // } break;
+        case riscv::i_type_func3_t::e_csrrsi: {
+          auto t = read_csr(instruction);
+          if (!t) break;
+          if (!write_csr(instruction, *t | inst.as.i_type.rs1())) break;
+          _reg[inst.as.i_type.rd()] = *t;
+          _pc += 4;
+        } break;
+        case riscv::i_type_func3_t::e_csrrci: {
+          auto t = read_csr(instruction);
+          if (!t) break;
+          if (!write_csr(instruction, *t & ~inst.as.i_type.rs1())) break;
+          _reg[inst.as.i_type.rd()] = *t;
+          _pc += 4;
+        } break;
 
         default:
           handle_trap(riscv::exception_code_t::e_illegal_instruction,

@@ -1,7 +1,9 @@
+#include <cassert>
 #include <csignal>
 #include <cstdio>
 #include <fstream>
 #include <iostream>
+#include <ostream>
 #include <stdexcept>
 #include <vector>
 
@@ -27,26 +29,9 @@ std::vector<uint8_t> load(const std::string& path) {
 
 static dawn::machine_t machine;
 
-void sigint_handler(int sig) {
-  std::cout << "pc: " << std::hex << machine._pc << "\n" << std::dec;
-  for (uint32_t i = 0; i < 32; i++) {
-    if (machine._reg[i] != 0)
-      std::cout << "x" << i << ": " << std::hex << machine._reg[i] << std::dec
-                << '\n';
-  }
-  std::cout << '\n';
-  std::cout.flush();
-  exit(0);
-}
-
 int main(int argc, char** argv) {
-  if (signal(SIGINT, sigint_handler) == SIG_ERR) {
-    perror("Error registering signal handler");
-    return 1;
-  }
-
   if (argc < 3) throw std::runtime_error("[linux] [elf] [dtb]!");
-  auto m = dawn::machine_t::load_elf(argv[1]);
+  auto m = dawn::machine_t::load_binary(argv[1], 1024 * 1024 * 8, 0x80000000);
   if (!m) {
     throw std::runtime_error("failed to load elf");
   }
@@ -56,13 +41,15 @@ int main(int argc, char** argv) {
   uint8_t* dtb_memory = new uint8_t[dtb_data.size()];
   std::memcpy(dtb_memory, dtb_data.data(), dtb_data.size());
   machine._memory.insert_memory(dtb_memory, dtb_data.size(),
-                                dawn::memory_protection_t::e_read, nullptr,
+                                dawn::memory_protection_t::e_all, nullptr,
                                 nullptr);
-  dawn::address_t dtb_guest_addr =
-      machine._memory.translate_host_to_guest(dtb_memory);
-  std::cout << "DTB loaded at guest address: 0x" << std::hex << dtb_guest_addr
-            << std::dec << std::endl;
-  machine._reg[11] = dtb_guest_addr;
+  // TODO: this
+  // dawn::address_t dtb_guest_addr =
+  //     machine._memory.translate_host_to_guest(dtb_memory);
+  // std::cout << "DTB loaded at guest address: 0x" << std::hex <<
+  // dtb_guest_addr
+  //           << std::dec << std::endl;
+  // machine._reg[11] = dtb_guest_addr;
 
   machine._memory.insert_memory(
       machine._memory.translate_guest_to_host(0x10000000), 256,
@@ -73,25 +60,31 @@ int main(int argc, char** argv) {
       },
       [](dawn::address_t addr) -> uint64_t { return 'a'; });
 
-  machine.simulate();
+  // machine.simulate();
 
-  // while (true) {
-  //   auto instruction = machine._memory.fetch_32(machine._pc);
-  //   std::cout << "pc: " << std::hex << machine._pc << "\n" << std::dec;
-  //   if (instruction)
-  //     std::cout << "instruction: " << std::hex << *instruction << '\n';
-  //   else
-  //     std::cout << "Error getting instruction\n";
-  //   if (instruction) machine.decode_and_exec_instruction(*instruction);
-  //   for (uint32_t i = 0; i < 32; i++) {
-  //     if (machine._reg[i] != 0)
-  //       std::cout << "x" << i << ": " << std::hex << machine._reg[i] << std::dec
-  //                 << '\n';
-  //   }
-  //   std::cout << '\n';
-  //   std::cout.flush();
-  //   if (machine._pc == 0xc0) getchar();
-  // }
+  std::ofstream log{"log", std::ios::trunc};
+  assert(log.is_open());
+
+  while (true) {
+    auto instruction = machine._memory.fetch_32(machine._pc);
+    log << std::hex << machine._pc << '\n';
+    log.flush();
+    // std::cout << "pc: " << std::hex << machine._pc << "\n" << std::dec;
+    // if (instruction)
+    //   std::cout << "instruction: " << std::hex << *instruction << '\n';
+    // else
+    //   std::cout << "Error getting instruction\n";
+    if (instruction) machine.decode_and_exec_instruction(*instruction);
+    // for (uint32_t i = 0; i < 32; i++) {
+    //   if (machine._reg[i] != 0)
+    //     std::cout << "x" << i << ": " << std::hex << machine._reg[i] <<
+    //     std::dec
+    //               << '\n';
+    // }
+    // std::cout << '\n';
+    // std::cout.flush();
+    // getchar();
+  }
 
   return machine._running ? 1 : machine._reg[10];
 }

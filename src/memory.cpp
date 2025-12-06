@@ -97,18 +97,25 @@ bool memory_t::is_region_in_memory(void* ptr, size_t size,
 
 std::optional<memory_range_t> memory_t::find_memory_range(
     void* ptr, size_t size, memory_protection_t protection) const {
+  // TODO: implement it properly optimised
   memory_range_t range = memory_range_t::create_from_start_and_size(
       ptr, size, protection, nullptr, nullptr);
-  auto itr = _ranges.lower_bound(range);
-  if (itr != _ranges.begin() && itr->_start > ptr) {
-    itr--;
-  }
-  if (itr != _ranges.end() && itr->_start <= ptr &&
-      itr->_end >= reinterpret_cast<char*>(ptr) + size &&
-      has_all(itr->_protection, protection)) {
-    return *itr;
+  for (auto _range : _ranges) {
+    if (_range.contains(range)) return _range;
   }
   return std::nullopt;
+
+  // auto itr = _ranges.lower_bound(range);
+  // if (itr == _ranges.end()) return std::nullopt;
+  // if (itr != _ranges.begin() && itr->_start > ptr) {
+  //   itr--;
+  // }
+  // if (itr != _ranges.end() && itr->_start <= ptr &&
+  //     itr->_end >= reinterpret_cast<char*>(ptr) + size &&
+  //     has_all(itr->_protection, protection)) {
+  //   return *itr;
+  // }
+  // return std::nullopt;
 }
 
 bool memory_t::memcpy_host_to_guest(address_t dst, const void* src,
