@@ -43,10 +43,11 @@ struct machine_t {
   memory_t                                          _memory;
   // TODO: maybe expose this to the user while loading an elf, then the user can
   // manually manage _brk syscall
-  address_t _heap_address;
-  bool      _running = true;
-  address_t _reservation_address;
-  bool      _is_reserved = false;
+  address_t             _heap_address;
+  bool                  _running = true;
+  address_t             _reservation_address;
+  bool                  _is_reserved = false;
+  uint32_t              _mode        = 0b11;
 };
 
 }  // namespace dawn

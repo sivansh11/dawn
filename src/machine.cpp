@@ -918,6 +918,7 @@ bool machine_t::decode_and_exec_instruction(uint32_t instruction) {
                              riscv::MSTATUS_MPP_SHIFT;
               uint64_t mpie = (mstatus & riscv::MSTATUS_MPIE_MASK) >>
                               riscv::MSTATUS_MPIE_SHIFT;
+              _mode   = mpp;
               _pc     = _read_csr(riscv::MEPC);
               mstatus = (mstatus & ~riscv::MSTATUS_MIE_MASK) |
                         (mpie << riscv::MSTATUS_MIE_SHIFT);
