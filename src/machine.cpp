@@ -177,8 +177,8 @@ void machine_t::handle_trap(riscv::exception_code_t cause, uint64_t value) {
   }
 #endif
 
-  _write_csr(riscv::MEPC, value);
-  _write_csr(riscv::MCAUSE, value);
+  _write_csr(riscv::MEPC, _pc);
+  _write_csr(riscv::MCAUSE, static_cast<uint64_t>(cause));
   _write_csr(riscv::MTVAL, value);
 
   uint64_t mstatus         = _read_csr(riscv::MSTATUS);
