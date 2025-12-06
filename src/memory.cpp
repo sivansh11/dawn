@@ -198,9 +198,6 @@ std::optional<uint64_t> memory_t::load_64(address_t addr) const {
 }
 
 bool memory_t::store_8(address_t addr, uint8_t value) const {
-  // std::cout << "addr: " << addr << " value: " << uint64_t(value) << '\n';
-  assert(is_region_in_memory(translate_guest_to_host(addr), 1,
-                             memory_protection_t::e_read));
   const auto& memory_range =
       find_memory_range(translate_guest_to_host(addr), sizeof(value),
                         memory_protection_t::e_write);
@@ -214,7 +211,6 @@ bool memory_t::store_8(address_t addr, uint8_t value) const {
   }
 }
 bool memory_t::store_16(address_t addr, uint16_t value) const {
-  // std::cout << "addr: " << addr << " value: " << uint64_t(value) << '\n';
   const auto& memory_range =
       find_memory_range(translate_guest_to_host(addr), sizeof(value),
                         memory_protection_t::e_write);
@@ -228,7 +224,6 @@ bool memory_t::store_16(address_t addr, uint16_t value) const {
   }
 }
 bool memory_t::store_32(address_t addr, uint32_t value) const {
-  // std::cout << "addr: " << addr << " value: " << uint64_t(value) << '\n';
   const auto& memory_range =
       find_memory_range(translate_guest_to_host(addr), sizeof(value),
                         memory_protection_t::e_write);
@@ -242,7 +237,6 @@ bool memory_t::store_32(address_t addr, uint32_t value) const {
   }
 }
 bool memory_t::store_64(address_t addr, uint64_t value) const {
-  // std::cout << "addr: " << addr << " value: " << uint64_t(value) << '\n';
   const auto& memory_range =
       find_memory_range(translate_guest_to_host(addr), sizeof(value),
                         memory_protection_t::e_write);
