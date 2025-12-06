@@ -69,6 +69,7 @@ enum class sub_system_t : uint32_t {
   e_ecall  = 0b000000000000,
   e_ebreak = 0b000000000001,
   e_mret   = 0b001100000010,
+  e_wfi    = 0b000100000101,
 };
 
 // TODO: cleanup and add func7 enum

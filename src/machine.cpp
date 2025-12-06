@@ -927,6 +927,10 @@ bool machine_t::decode_and_exec_instruction(uint32_t instruction) {
                         (0b11U << riscv::MSTATUS_MPP_SHIFT);
               _write_csr(riscv::MSTATUS, mstatus);
             } break;
+            case riscv::sub_system_t::e_wfi: {
+              _paused = true;
+              _pc += 4;
+            } break;
 
             default:
               handle_trap(riscv::exception_code_t::e_illegal_instruction,
