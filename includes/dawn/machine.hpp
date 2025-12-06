@@ -19,6 +19,7 @@ using syscall_t = std::function<void(machine_t&)>;
 
 struct machine_t {
   static std::optional<machine_t> load_elf(const std::filesystem::path& path);
+  static machine_t        create(uint64_t size, uint64_t offset);
   bool                    add_syscall(uint64_t number, syscall_t syscall);
   bool                    del_syscall(uint64_t number);
   std::optional<uint32_t> fetch_instruction();

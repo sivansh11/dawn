@@ -114,6 +114,19 @@ std::optional<machine_t> machine_t::load_elf(
   return state;
 }
 
+machine_t machine_t::create(uint64_t size, uint64_t offset) {
+  machine_t machine{};
+
+  uint8_t* base              = new uint8_t[size];
+  machine._memory            = memory_t::create(base, size);
+  machine._memory.guest_base = offset;
+
+  machine._memory.insert_memory(base, size, memory_protection_t::e_all, nullptr,
+                                nullptr);
+
+  return machine;
+}
+
 bool machine_t::add_syscall(uint64_t number, syscall_t syscall) {
   auto itr = _syscalls.find(number);
   if (itr != _syscalls.end()) return false;
