@@ -119,6 +119,7 @@ struct memory_t {
   void*                          _host_base{};
   address_t guest_base{};  // guest_base is set by the function loading the
                            // elf script
+  std::function<void(address_t, uint64_t)> _debug_write_callback;
 };
 
 }  // namespace dawn

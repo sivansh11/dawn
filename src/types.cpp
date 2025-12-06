@@ -1,4 +1,5 @@
 #include "dawn/types.hpp"
+#include <stdexcept>
 
 std::ostream& operator<<(std::ostream&                     o,
                          const dawn::riscv::instruction_t& inst) {
@@ -600,6 +601,9 @@ std::ostream& operator<<(std::ostream&                       o,
       break;
     case dawn::riscv::exception_code_t::e_ecall_m_mode:
       o << "ecall_m_mode";
+      break;
+    case dawn::riscv::exception_code_t::e_machine_timer_interrupt:
+      o << "machine_timer_interrupt";
       break;
     default:
       dawn::error("Error: unknown exception");

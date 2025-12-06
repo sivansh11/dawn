@@ -21,6 +21,7 @@ int main(int argc, char** argv) {
     exit(machine._reg[10]);
   });
 
+
   machine.simulate(10000);
   // while (true) {
   //   auto instruction = machine._memory.fetch_32(machine._pc);
@@ -40,7 +41,7 @@ int main(int argc, char** argv) {
   //   std::cout.flush();
   //   getchar();
   // }
-
+  //
   return machine._running ? 1 : machine._reg[10];
   return -1;
 }

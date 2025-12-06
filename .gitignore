@@ -4,3 +4,7 @@
 log*
 riscv-tests/
 mini-rv32ima/
+vmlinux_dump
+mini-rv32ima*
+ebreaks
+temp/

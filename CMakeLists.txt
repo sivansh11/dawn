@@ -26,6 +26,9 @@ file(GLOB_RECURSE SRC_FILES src/*.cpp)
 
 add_library(dawn ${SRC_FILES})
 
+# target_compile_options(dawn PUBLIC -fsanitize=address)
+# target_link_options(dawn PUBLIC -fsanitize=address)
+
 target_include_directories(dawn
   PUBLIC includes
 )

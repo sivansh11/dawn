@@ -114,6 +114,19 @@ std::optional<machine_t> machine_t::load_elf(
   return state;
 }
 
+machine_t machine_t::create(uint64_t size, uint64_t offset) {
+  machine_t machine{};
+
+  uint8_t* base              = new uint8_t[size];
+  machine._memory            = memory_t::create(base, size);
+  machine._memory.guest_base = offset;
+
+  machine._memory.insert_memory(base, size, memory_protection_t::e_all, nullptr,
+                                nullptr);
+
+  return machine;
+}
+
 bool machine_t::add_syscall(uint64_t number, syscall_t syscall) {
   auto itr = _syscalls.find(number);
   if (itr != _syscalls.end()) return false;
@@ -143,10 +156,12 @@ std::optional<uint32_t> machine_t::fetch_instruction() {
 
 void machine_t::_write_csr(uint16_t address, uint64_t value) {
   // TODO: more involved csr writes
+  // TODO: log
   _csr[address] = value;
 }
 uint64_t machine_t::_read_csr(uint16_t address) {
   // TODO: more involved csr reads
+  // TODO: log
   return _csr[address];
 }
 
@@ -170,7 +185,8 @@ std::optional<uint64_t> machine_t::read_csr(uint32_t instruction) {
 
 void machine_t::handle_trap(riscv::exception_code_t cause, uint64_t value) {
   // hack for host system calls
-  if (cause == riscv::exception_code_t::e_ecall_m_mode) {
+  if (cause == riscv::exception_code_t::e_ecall_m_mode ||
+      cause == riscv::exception_code_t::e_ecall_u_mode) {
     auto itr = _syscalls.find(_reg[17]);
     if (itr != _syscalls.end()) {
       itr->second(*this);
@@ -187,14 +203,28 @@ void machine_t::handle_trap(riscv::exception_code_t cause, uint64_t value) {
   }
 #endif
 
+  bool is_interrupt =
+      (static_cast<uint64_t>(cause) & riscv::MCAUSE_INTERRUPT_BIT) != 0;
+
+  uint64_t mstatus         = _read_csr(riscv::MSTATUS);
+  bool     current_mie_bit = (mstatus & riscv::MSTATUS_MIE_MASK) ? true : false;
+
+  if (is_interrupt && !current_mie_bit) {
+    // can do this since its an interrupt, not an exception
+    auto instruction = _memory.fetch_32(_pc);
+    if (instruction) decode_and_exec_instruction(*instruction);
+    return;
+  }
+
+  _is_reserved         = false;
+  _reservation_address = 0;
+
   _write_csr(riscv::MEPC, _pc);
   _write_csr(riscv::MCAUSE, static_cast<uint64_t>(cause));
   _write_csr(riscv::MTVAL, value);
 
-  uint64_t mstatus         = _read_csr(riscv::MSTATUS);
-  uint64_t current_mie_bit = (mstatus & riscv::MSTATUS_MIE_MASK) ? 1 : 0;
-  mstatus                  = (mstatus & ~riscv::MSTATUS_MPP_MASK) |
-            ((static_cast<uint64_t>(11) << riscv::MSTATUS_MPP_SHIFT) &
+  mstatus = (mstatus & ~riscv::MSTATUS_MPP_MASK) |
+            ((static_cast<uint64_t>(_mode) << riscv::MSTATUS_MPP_SHIFT) &
              riscv::MSTATUS_MPP_MASK);
   mstatus = (mstatus & ~riscv::MSTATUS_MPIE_MASK) |
             ((current_mie_bit << riscv::MSTATUS_MPIE_SHIFT) &
@@ -206,8 +236,6 @@ void machine_t::handle_trap(riscv::exception_code_t cause, uint64_t value) {
   uint64_t mtvec_base = mtvec & riscv::MTVEC_BASE_ALIGN_MASK;
   uint64_t mtvec_mode = mtvec & riscv::MTVEC_MODE_MASK;
 
-  bool is_interrupt =
-      (static_cast<uint64_t>(cause) & riscv::MCAUSE_INTERRUPT_BIT) != 0;
   if (mtvec_mode == 0b01 && is_interrupt) {
     uint64_t interrupt_code =
         static_cast<uint64_t>(cause) & ~riscv::MCAUSE_INTERRUPT_BIT;
@@ -227,9 +255,11 @@ void machine_t::handle_trap(riscv::exception_code_t cause, uint64_t value) {
 }
 
 bool machine_t::decode_and_exec_instruction(uint32_t instruction) {
+  if (_pre_decode_callback) _pre_decode_callback();
   _reg[0] = 0;
   riscv::instruction_t inst;
   reinterpret_cast<uint32_t&>(inst) = instruction;
+  address_t debug_pc                = _pc;
   switch (inst.as.base.opcode()) {
     case riscv::op_t::e_lui: {
       _reg[inst.as.u_type.rd()] = ::dawn::sext(inst.as.u_type.imm() << 12, 32);
@@ -243,7 +273,6 @@ bool machine_t::decode_and_exec_instruction(uint32_t instruction) {
     case riscv::op_t::e_jal: {
       address_t addr = _pc + inst.as.j_type.imm_sext();
       if (addr % 4 != 0) {
-        // TODO: verify if instruction address misaligned is correct trap here
         handle_trap(riscv::exception_code_t::e_instruction_address_misaligned,
                     addr);
         break;
@@ -252,15 +281,15 @@ bool machine_t::decode_and_exec_instruction(uint32_t instruction) {
       _pc                       = addr;
     } break;
     case riscv::op_t::e_jalr: {
-      address_t addr = _pc + 4;
-      if (addr % 4 != 0) {
-        // TODO: verify if instruction address misaligned is correct trap here
+      address_t target = _reg[inst.as.i_type.rs1()] + inst.as.i_type.imm_sext();
+      address_t next_pc = target & ~1ull;
+      if (next_pc % 4 != 0) {
         handle_trap(riscv::exception_code_t::e_instruction_address_misaligned,
-                    addr);
+                    next_pc);
         break;
       }
-      _pc = (_reg[inst.as.i_type.rs1()] + inst.as.i_type.imm_sext()) & ~1u;
-      _reg[inst.as.i_type.rd()] = addr;
+      _reg[inst.as.i_type.rd()] = _pc + 4;
+      _pc                       = next_pc;
     } break;
     case riscv::op_t::e_branch: {
       switch (inst.as.b_type.funct3()) {
@@ -384,6 +413,12 @@ bool machine_t::decode_and_exec_instruction(uint32_t instruction) {
         case riscv::i_type_func3_t::e_lh: {
           address_t addr =
               _reg[inst.as.i_type.rs1()] + inst.as.i_type.imm_sext();
+          if (addr % 2 != 0) {
+            std::cout << "addr: " << addr << '\n';
+            handle_trap(riscv::exception_code_t::e_load_address_misaligned,
+                        addr);
+            break;
+          }
           auto value = _memory.load_16(addr);
           if (!value) {
             handle_trap(riscv::exception_code_t::e_load_access_fault, addr);
@@ -395,6 +430,11 @@ bool machine_t::decode_and_exec_instruction(uint32_t instruction) {
         case riscv::i_type_func3_t::e_lw: {
           address_t addr =
               _reg[inst.as.i_type.rs1()] + inst.as.i_type.imm_sext();
+          if (addr % 4 != 0) {
+            handle_trap(riscv::exception_code_t::e_load_address_misaligned,
+                        addr);
+            break;
+          }
           auto value = _memory.load_32(addr);
           if (!value) {
             handle_trap(riscv::exception_code_t::e_load_access_fault, addr);
@@ -417,6 +457,11 @@ bool machine_t::decode_and_exec_instruction(uint32_t instruction) {
         case riscv::i_type_func3_t::e_lhu: {
           address_t addr =
               _reg[inst.as.i_type.rs1()] + inst.as.i_type.imm_sext();
+          if (addr % 2 != 0) {
+            handle_trap(riscv::exception_code_t::e_load_address_misaligned,
+                        addr);
+            break;
+          }
           auto value = _memory.load_16(addr);
           if (!value) {
             handle_trap(riscv::exception_code_t::e_load_access_fault, addr);
@@ -428,6 +473,11 @@ bool machine_t::decode_and_exec_instruction(uint32_t instruction) {
         case riscv::i_type_func3_t::e_lwu: {
           address_t addr =
               _reg[inst.as.i_type.rs1()] + inst.as.i_type.imm_sext();
+          if (addr % 4 != 0) {
+            handle_trap(riscv::exception_code_t::e_load_address_misaligned,
+                        addr);
+            break;
+          }
           auto value = _memory.load_32(addr);
           if (!value) {
             handle_trap(riscv::exception_code_t::e_load_access_fault, addr);
@@ -439,6 +489,11 @@ bool machine_t::decode_and_exec_instruction(uint32_t instruction) {
         case riscv::i_type_func3_t::e_ld: {
           address_t addr =
               _reg[inst.as.i_type.rs1()] + inst.as.i_type.imm_sext();
+          if (addr % 8 != 0) {
+            handle_trap(riscv::exception_code_t::e_load_address_misaligned,
+                        addr);
+            break;
+          }
           auto value = _memory.load_64(addr);
           if (!value) {
             handle_trap(riscv::exception_code_t::e_load_access_fault, addr);
@@ -466,6 +521,11 @@ bool machine_t::decode_and_exec_instruction(uint32_t instruction) {
         case riscv::store_t::e_sh: {
           address_t addr =
               _reg[inst.as.s_type.rs1()] + inst.as.s_type.imm_sext();
+          if (addr % 2 != 0) {
+            handle_trap(riscv::exception_code_t::e_store_address_misaligned,
+                        addr);
+            break;
+          }
           if (!_memory.store_16(addr, _reg[inst.as.s_type.rs2()])) {
             handle_trap(riscv::exception_code_t::e_store_access_fault, addr);
             break;
@@ -475,6 +535,11 @@ bool machine_t::decode_and_exec_instruction(uint32_t instruction) {
         case riscv::store_t::e_sw: {
           address_t addr =
               _reg[inst.as.s_type.rs1()] + inst.as.s_type.imm_sext();
+          if (addr % 4 != 0) {
+            handle_trap(riscv::exception_code_t::e_store_address_misaligned,
+                        addr);
+            break;
+          }
           if (!_memory.store_32(addr, _reg[inst.as.s_type.rs2()])) {
             handle_trap(riscv::exception_code_t::e_store_access_fault, addr);
             break;
@@ -484,6 +549,11 @@ bool machine_t::decode_and_exec_instruction(uint32_t instruction) {
         case riscv::store_t::e_sd: {
           address_t addr =
               _reg[inst.as.s_type.rs1()] + inst.as.s_type.imm_sext();
+          if (addr % 8 != 0) {
+            handle_trap(riscv::exception_code_t::e_store_address_misaligned,
+                        addr);
+            break;
+          }
           if (!_memory.store_64(addr, _reg[inst.as.s_type.rs2()])) {
             handle_trap(riscv::exception_code_t::e_store_access_fault, addr);
             break;
@@ -531,7 +601,7 @@ bool machine_t::decode_and_exec_instruction(uint32_t instruction) {
         } break;
         case riscv::i_type_func3_t::e_slli: {
           _reg[inst.as.i_type.rd()] = _reg[inst.as.i_type.rs1()]
-                                      << inst.as.i_type.imm_sext();
+                                      << (inst.as.i_type.imm() & 0x3f);
           _pc += 4;
         } break;
         case riscv::i_type_func3_t::e_srli_or_srai: {
@@ -539,14 +609,13 @@ bool machine_t::decode_and_exec_instruction(uint32_t instruction) {
               static_cast<riscv::srli_or_srai_t>(inst.as.i_type.imm() >> 6)) {
             case riscv::srli_or_srai_t::e_srli: {
               _reg[inst.as.i_type.rd()] =
-                  _reg[inst.as.i_type.rs1()] >> inst.as.i_type.imm_sext();
+                  _reg[inst.as.i_type.rs1()] >> (inst.as.i_type.imm() & 0x3f);
               _pc += 4;
             } break;
             case riscv::srli_or_srai_t::e_srai: {
               int64_t rs1_val =
                   static_cast<int64_t>(_reg[inst.as.i_type.rs1()]);
-              uint32_t shamt =
-                  inst.as.i_type.imm() & 0x3F;
+              uint32_t shamt            = inst.as.i_type.imm() & 0x3F;
               _reg[inst.as.i_type.rd()] = rs1_val >> shamt;
               _pc += 4;
             } break;
@@ -829,9 +898,10 @@ bool machine_t::decode_and_exec_instruction(uint32_t instruction) {
         case riscv::r_type_func7_t::e_0000001: {
           switch (inst.as.r_type.funct3()) {
             case riscv::r_type_func3_t::e_mulw: {
-              _reg[inst.as.r_type.rd()] = static_cast<uint64_t>(
+              _reg[inst.as.r_type.rd()] = ::dawn::sext(
                   static_cast<int32_t>(_reg[inst.as.r_type.rs1()]) *
-                  static_cast<int32_t>(_reg[inst.as.r_type.rs2()]));
+                      static_cast<int32_t>(_reg[inst.as.r_type.rs2()]),
+                  32);
               _pc += 4;
             } break;
             case riscv::r_type_func3_t::e_divw: {
@@ -844,6 +914,8 @@ bool machine_t::decode_and_exec_instruction(uint32_t instruction) {
               } else {
                 _reg[inst.as.r_type.rd()] = static_cast<uint64_t>(rs1 / rs2);
               }
+              _reg[inst.as.r_type.rd()] =
+                  ::dawn::sext(_reg[inst.as.r_type.rd()], 32);
               _pc += 4;
             } break;
             case riscv::r_type_func3_t::e_divuw: {
@@ -869,6 +941,8 @@ bool machine_t::decode_and_exec_instruction(uint32_t instruction) {
               } else {
                 _reg[inst.as.r_type.rd()] = static_cast<uint64_t>(rs1 % rs2);
               }
+              _reg[inst.as.r_type.rd()] =
+                  ::dawn::sext(_reg[inst.as.r_type.rd()], 32);
               _pc += 4;
             } break;
             case riscv::r_type_func3_t::e_remuw: {
@@ -896,8 +970,8 @@ bool machine_t::decode_and_exec_instruction(uint32_t instruction) {
     } break;
     case riscv::op_t::e_fence: {
 #ifndef NDEBUG
-      std::cerr << "Note: Fence encountered, fence is not implemented or "
-                   "required\n";
+      // std::cerr << "Note: Fence encountered, fence is not implemented or "
+      //              "required\n";
 #endif
       _pc += 4;
     } break;
@@ -906,11 +980,22 @@ bool machine_t::decode_and_exec_instruction(uint32_t instruction) {
         case riscv::i_type_func3_t::e_sub_system: {
           switch (static_cast<riscv::sub_system_t>(inst.as.i_type.imm())) {
             case riscv::sub_system_t::e_ecall: {
-              handle_trap(riscv::exception_code_t::e_ecall_m_mode, 0);
+              if (_mode == 0b11)
+                handle_trap(riscv::exception_code_t::e_ecall_m_mode, 0);
+              if (_mode == 0b00)
+                handle_trap(riscv::exception_code_t::e_ecall_u_mode, 0);
             } break;
             case riscv::sub_system_t::e_ebreak: {
-              std::cout << "TODO: implement EBREAK\n";
-              _pc += 4;
+              // TODO: make this debug only
+              // std::cout << "pc: " << std::hex << _pc << "\n" << std::dec;
+              // for (uint32_t i = 0; i < 32; i++) {
+              //   if (_reg[i] != 0)
+              //     std::cout << "x" << i << ": " << std::hex << _reg[i]
+              //               << std::dec << '\n';
+              // }
+              // std::cout << '\n';
+              // std::cout.flush();
+              handle_trap(riscv::exception_code_t::e_breakpoint, instruction);
             } break;
             case riscv::sub_system_t::e_mret: {
               uint64_t mstatus = _read_csr(riscv::MSTATUS);
@@ -918,14 +1003,19 @@ bool machine_t::decode_and_exec_instruction(uint32_t instruction) {
                              riscv::MSTATUS_MPP_SHIFT;
               uint64_t mpie = (mstatus & riscv::MSTATUS_MPIE_MASK) >>
                               riscv::MSTATUS_MPIE_SHIFT;
+              _mode   = mpp;
               _pc     = _read_csr(riscv::MEPC);
               mstatus = (mstatus & ~riscv::MSTATUS_MIE_MASK) |
                         (mpie << riscv::MSTATUS_MIE_SHIFT);
               mstatus = (mstatus & ~riscv::MSTATUS_MPIE_MASK) |
                         (1u << riscv::MSTATUS_MPIE_SHIFT);
               mstatus = (mstatus & ~riscv::MSTATUS_MPP_MASK) |
-                        (0b11U << riscv::MSTATUS_MPP_SHIFT);
+                        (0b00U << riscv::MSTATUS_MPP_SHIFT);
               _write_csr(riscv::MSTATUS, mstatus);
+            } break;
+            case riscv::sub_system_t::e_wfi: {
+              _paused = true;
+              _pc += 4;
             } break;
 
             default:
@@ -961,12 +1051,20 @@ bool machine_t::decode_and_exec_instruction(uint32_t instruction) {
           _reg[inst.as.i_type.rd()] = *t;
           _pc += 4;
         } break;
-          // case riscv::i_type_func3_t::e_csrrsi: {
-          //   _pc += 4;
-          // } break;
-          // case riscv::i_type_func3_t::e_csrrci: {
-          //   _pc += 4;
-          // } break;
+        case riscv::i_type_func3_t::e_csrrsi: {
+          auto t = read_csr(instruction);
+          if (!t) break;
+          if (!write_csr(instruction, *t | inst.as.i_type.rs1())) break;
+          _reg[inst.as.i_type.rd()] = *t;
+          _pc += 4;
+        } break;
+        case riscv::i_type_func3_t::e_csrrci: {
+          auto t = read_csr(instruction);
+          if (!t) break;
+          if (!write_csr(instruction, *t & ~inst.as.i_type.rs1())) break;
+          _reg[inst.as.i_type.rd()] = *t;
+          _pc += 4;
+        } break;
 
         default:
           handle_trap(riscv::exception_code_t::e_illegal_instruction,
@@ -978,7 +1076,8 @@ bool machine_t::decode_and_exec_instruction(uint32_t instruction) {
         case riscv::a_type_func3_t::e_w: {  // 010
           switch (inst.as.a_type.funct5()) {
             case riscv::a_type_func5_t::e_lr: {
-              const address_t addr      = _reg[inst.as.a_type.rs1()];
+              const uint64_t  rs1       = _reg[inst.as.a_type.rs1()];
+              const address_t addr      = rs1;
               const uint32_t  alignment = 4;  // 4 for w
               if (addr % alignment != 0) {
                 handle_trap(riscv::exception_code_t::e_load_address_misaligned,
@@ -996,7 +1095,9 @@ bool machine_t::decode_and_exec_instruction(uint32_t instruction) {
               _pc += 4;
             } break;
             case riscv::a_type_func5_t::e_sc: {
-              const address_t addr      = _reg[inst.as.a_type.rs1()];
+              const uint64_t  rs1       = _reg[inst.as.a_type.rs1()];
+              const uint64_t  rs2       = _reg[inst.as.a_type.rs2()];
+              const address_t addr      = rs1;
               const uint32_t  alignment = 4;  // 4 for w
               if (addr % alignment != 0) {
                 handle_trap(riscv::exception_code_t::e_store_address_misaligned,
@@ -1004,8 +1105,7 @@ bool machine_t::decode_and_exec_instruction(uint32_t instruction) {
                 break;
               }
               if (_is_reserved && _reservation_address == addr) {
-                if (!_memory.store_32(addr, static_cast<uint32_t>(
-                                                _reg[inst.as.a_type.rs2()]))) {
+                if (!_memory.store_32(addr, static_cast<uint32_t>(rs2))) {
                   handle_trap(riscv::exception_code_t::e_store_access_fault,
                               addr);
                   break;
@@ -1019,7 +1119,9 @@ bool machine_t::decode_and_exec_instruction(uint32_t instruction) {
               _pc += 4;
             } break;
             case riscv::a_type_func5_t::e_amoswap: {
-              const address_t addr      = _reg[inst.as.a_type.rs1()];
+              const uint64_t  rs1       = _reg[inst.as.a_type.rs1()];
+              const uint64_t  rs2       = _reg[inst.as.a_type.rs2()];
+              const address_t addr      = rs1;
               const uint32_t  alignment = 4;  // 4 for w
               if (addr % alignment != 0) {
                 handle_trap(riscv::exception_code_t::e_load_address_misaligned,
@@ -1032,16 +1134,19 @@ bool machine_t::decode_and_exec_instruction(uint32_t instruction) {
                 break;
               }
               _reg[inst.as.a_type.rd()] = sext(*value, 32);
-              if (!_memory.store_32(addr, static_cast<uint32_t>(
-                                              _reg[inst.as.a_type.rs2()]))) {
+              if (!_memory.store_32(addr, static_cast<uint32_t>(rs2))) {
                 handle_trap(riscv::exception_code_t::e_store_access_fault,
                             addr);
                 break;
               }
+              _is_reserved         = false;
+              _reservation_address = 0;
               _pc += 4;
             } break;
             case riscv::a_type_func5_t::e_amoadd: {
-              const address_t addr      = _reg[inst.as.a_type.rs1()];
+              const uint64_t  rs1       = _reg[inst.as.a_type.rs1()];
+              const uint64_t  rs2       = _reg[inst.as.a_type.rs2()];
+              const address_t addr      = rs1;
               const uint32_t  alignment = 4;  // 4 for w
               if (addr % alignment != 0) {
                 handle_trap(riscv::exception_code_t::e_load_address_misaligned,
@@ -1055,16 +1160,19 @@ bool machine_t::decode_and_exec_instruction(uint32_t instruction) {
               }
               _reg[inst.as.a_type.rd()] = sext(*value, 32);
               if (!_memory.store_32(addr,
-                                    static_cast<uint32_t>(
-                                        *value + _reg[inst.as.a_type.rs2()]))) {
+                                    static_cast<uint32_t>(*value + rs2))) {
                 handle_trap(riscv::exception_code_t::e_store_access_fault,
                             addr);
                 break;
               }
+              _is_reserved         = false;
+              _reservation_address = 0;
               _pc += 4;
             } break;
             case riscv::a_type_func5_t::e_amoxor: {
-              const address_t addr      = _reg[inst.as.a_type.rs1()];
+              const uint64_t  rs1       = _reg[inst.as.a_type.rs1()];
+              const uint64_t  rs2       = _reg[inst.as.a_type.rs2()];
+              const address_t addr      = rs1;
               const uint32_t  alignment = 4;  // 4 for w
               if (addr % alignment != 0) {
                 handle_trap(riscv::exception_code_t::e_load_address_misaligned,
@@ -1078,16 +1186,19 @@ bool machine_t::decode_and_exec_instruction(uint32_t instruction) {
               }
               _reg[inst.as.a_type.rd()] = sext(*value, 32);
               if (!_memory.store_32(addr,
-                                    static_cast<uint32_t>(
-                                        *value ^ _reg[inst.as.a_type.rs2()]))) {
+                                    static_cast<uint32_t>(*value ^ rs2))) {
                 handle_trap(riscv::exception_code_t::e_store_access_fault,
                             addr);
                 break;
               }
+              _is_reserved         = false;
+              _reservation_address = 0;
               _pc += 4;
             } break;
             case riscv::a_type_func5_t::e_amoand: {
-              const address_t addr      = _reg[inst.as.a_type.rs1()];
+              const uint64_t  rs1       = _reg[inst.as.a_type.rs1()];
+              const uint64_t  rs2       = _reg[inst.as.a_type.rs2()];
+              const address_t addr      = rs1;
               const uint32_t  alignment = 4;  // 4 for w
               if (addr % alignment != 0) {
                 handle_trap(riscv::exception_code_t::e_load_address_misaligned,
@@ -1101,16 +1212,19 @@ bool machine_t::decode_and_exec_instruction(uint32_t instruction) {
               }
               _reg[inst.as.a_type.rd()] = sext(*value, 32);
               if (!_memory.store_32(addr,
-                                    static_cast<uint32_t>(
-                                        *value & _reg[inst.as.a_type.rs2()]))) {
+                                    static_cast<uint32_t>(*value & rs2))) {
                 handle_trap(riscv::exception_code_t::e_store_access_fault,
                             addr);
                 break;
               }
+              _is_reserved         = false;
+              _reservation_address = 0;
               _pc += 4;
             } break;
             case riscv::a_type_func5_t::e_amoor: {
-              const address_t addr      = _reg[inst.as.a_type.rs1()];
+              const uint64_t  rs1       = _reg[inst.as.a_type.rs1()];
+              const uint64_t  rs2       = _reg[inst.as.a_type.rs2()];
+              const address_t addr      = rs1;
               const uint32_t  alignment = 4;  // 4 for w
               if (addr % alignment != 0) {
                 handle_trap(riscv::exception_code_t::e_load_address_misaligned,
@@ -1124,16 +1238,19 @@ bool machine_t::decode_and_exec_instruction(uint32_t instruction) {
               }
               _reg[inst.as.a_type.rd()] = sext(*value, 32);
               if (!_memory.store_32(addr,
-                                    static_cast<uint32_t>(
-                                        *value | _reg[inst.as.a_type.rs2()]))) {
+                                    static_cast<uint32_t>(*value | rs2))) {
                 handle_trap(riscv::exception_code_t::e_store_access_fault,
                             addr);
                 break;
               }
+              _is_reserved         = false;
+              _reservation_address = 0;
               _pc += 4;
             } break;
             case riscv::a_type_func5_t::e_amomin: {
-              const address_t addr      = _reg[inst.as.a_type.rs1()];
+              const uint64_t  rs1       = _reg[inst.as.a_type.rs1()];
+              const uint64_t  rs2       = _reg[inst.as.a_type.rs2()];
+              const address_t addr      = rs1;
               const uint32_t  alignment = 4;  // 4 for w
               if (addr % alignment != 0) {
                 handle_trap(riscv::exception_code_t::e_load_address_misaligned,
@@ -1146,19 +1263,21 @@ bool machine_t::decode_and_exec_instruction(uint32_t instruction) {
                 break;
               }
               _reg[inst.as.a_type.rd()] = sext(*value, 32);
-              if (!_memory.store_32(
-                      addr,
-                      static_cast<uint32_t>(std::min(
-                          static_cast<int32_t>(*value),
-                          static_cast<int32_t>(_reg[inst.as.a_type.rs2()]))))) {
+              if (!_memory.store_32(addr, static_cast<uint32_t>(std::min(
+                                              static_cast<int32_t>(*value),
+                                              static_cast<int32_t>(rs2))))) {
                 handle_trap(riscv::exception_code_t::e_store_access_fault,
                             addr);
                 break;
               }
+              _is_reserved         = false;
+              _reservation_address = 0;
               _pc += 4;
             } break;
             case riscv::a_type_func5_t::e_amomax: {
-              const address_t addr      = _reg[inst.as.a_type.rs1()];
+              const uint64_t  rs1       = _reg[inst.as.a_type.rs1()];
+              const uint64_t  rs2       = _reg[inst.as.a_type.rs2()];
+              const address_t addr      = rs1;
               const uint32_t  alignment = 4;  // 4 for w
               if (addr % alignment != 0) {
                 handle_trap(riscv::exception_code_t::e_load_address_misaligned,
@@ -1171,19 +1290,21 @@ bool machine_t::decode_and_exec_instruction(uint32_t instruction) {
                 break;
               }
               _reg[inst.as.a_type.rd()] = sext(*value, 32);
-              if (!_memory.store_32(
-                      addr,
-                      static_cast<uint32_t>(std::max(
-                          static_cast<int32_t>(*value),
-                          static_cast<int32_t>(_reg[inst.as.a_type.rs2()]))))) {
+              if (!_memory.store_32(addr, static_cast<uint32_t>(std::max(
+                                              static_cast<int32_t>(*value),
+                                              static_cast<int32_t>(rs2))))) {
                 handle_trap(riscv::exception_code_t::e_store_access_fault,
                             addr);
                 break;
               }
+              _is_reserved         = false;
+              _reservation_address = 0;
               _pc += 4;
             } break;
             case riscv::a_type_func5_t::e_amominu: {
-              const address_t addr      = _reg[inst.as.a_type.rs1()];
+              const uint64_t  rs1       = _reg[inst.as.a_type.rs1()];
+              const uint64_t  rs2       = _reg[inst.as.a_type.rs2()];
+              const address_t addr      = rs1;
               const uint32_t  alignment = 4;  // 4 for w
               if (addr % alignment != 0) {
                 handle_trap(riscv::exception_code_t::e_load_address_misaligned,
@@ -1196,18 +1317,21 @@ bool machine_t::decode_and_exec_instruction(uint32_t instruction) {
                 break;
               }
               _reg[inst.as.a_type.rd()] = sext(*value, 32);
-              if (!_memory.store_32(
-                      addr, std::min(static_cast<uint32_t>(*value),
-                                     static_cast<uint32_t>(
-                                         _reg[inst.as.a_type.rs2()])))) {
+              if (!_memory.store_32(addr,
+                                    std::min(static_cast<uint32_t>(*value),
+                                             static_cast<uint32_t>(rs2)))) {
                 handle_trap(riscv::exception_code_t::e_store_access_fault,
                             addr);
                 break;
               }
+              _is_reserved         = false;
+              _reservation_address = 0;
               _pc += 4;
             } break;
             case riscv::a_type_func5_t::e_amomaxu: {
-              const address_t addr      = _reg[inst.as.a_type.rs1()];
+              const uint64_t  rs1       = _reg[inst.as.a_type.rs1()];
+              const uint64_t  rs2       = _reg[inst.as.a_type.rs2()];
+              const address_t addr      = rs1;
               const uint32_t  alignment = 4;  // 4 for w
               if (addr % alignment != 0) {
                 handle_trap(riscv::exception_code_t::e_load_address_misaligned,
@@ -1220,14 +1344,15 @@ bool machine_t::decode_and_exec_instruction(uint32_t instruction) {
                 break;
               }
               _reg[inst.as.a_type.rd()] = sext(*value, 32);
-              if (!_memory.store_32(
-                      addr, std::max(static_cast<uint32_t>(*value),
-                                     static_cast<uint32_t>(
-                                         _reg[inst.as.a_type.rs2()])))) {
+              if (!_memory.store_32(addr,
+                                    std::max(static_cast<uint32_t>(*value),
+                                             static_cast<uint32_t>(rs2)))) {
                 handle_trap(riscv::exception_code_t::e_store_access_fault,
                             addr);
                 break;
               }
+              _is_reserved         = false;
+              _reservation_address = 0;
               _pc += 4;
             } break;
 
@@ -1239,7 +1364,8 @@ bool machine_t::decode_and_exec_instruction(uint32_t instruction) {
         case riscv::a_type_func3_t::e_d: {  // 011
           switch (inst.as.a_type.funct5()) {
             case riscv::a_type_func5_t::e_lr: {
-              const address_t addr      = _reg[inst.as.a_type.rs1()];
+              const uint64_t  rs1       = _reg[inst.as.a_type.rs1()];
+              const address_t addr      = rs1;
               const uint32_t  alignment = 8;  // 8 for d
               if (addr % alignment != 0) {
                 handle_trap(riscv::exception_code_t::e_load_address_misaligned,
@@ -1257,7 +1383,9 @@ bool machine_t::decode_and_exec_instruction(uint32_t instruction) {
               _pc += 4;
             } break;
             case riscv::a_type_func5_t::e_sc: {
-              const address_t addr      = _reg[inst.as.a_type.rs1()];
+              const uint64_t  rs1       = _reg[inst.as.a_type.rs1()];
+              const uint64_t  rs2       = _reg[inst.as.a_type.rs2()];
+              const address_t addr      = rs1;
               const uint32_t  alignment = 8;  // 8 for d
               if (addr % alignment != 0) {
                 handle_trap(riscv::exception_code_t::e_store_address_misaligned,
@@ -1265,7 +1393,7 @@ bool machine_t::decode_and_exec_instruction(uint32_t instruction) {
                 break;
               }
               if (_is_reserved && _reservation_address == addr) {
-                if (!_memory.store_64(addr, _reg[inst.as.a_type.rs2()])) {
+                if (!_memory.store_64(addr, rs2)) {
                   handle_trap(riscv::exception_code_t::e_store_access_fault,
                               addr);
                   break;
@@ -1279,7 +1407,9 @@ bool machine_t::decode_and_exec_instruction(uint32_t instruction) {
               _pc += 4;
             } break;
             case riscv::a_type_func5_t::e_amoswap: {
-              const address_t addr      = _reg[inst.as.a_type.rs1()];
+              const uint64_t  rs1       = _reg[inst.as.a_type.rs1()];
+              const uint64_t  rs2       = _reg[inst.as.a_type.rs2()];
+              const address_t addr      = rs1;
               const uint32_t  alignment = 8;  // 8 for d
               if (addr % alignment != 0) {
                 handle_trap(riscv::exception_code_t::e_load_address_misaligned,
@@ -1292,15 +1422,19 @@ bool machine_t::decode_and_exec_instruction(uint32_t instruction) {
                 break;
               }
               _reg[inst.as.a_type.rd()] = *value;
-              if (!_memory.store_64(addr, _reg[inst.as.a_type.rs2()])) {
+              if (!_memory.store_64(addr, rs2)) {
                 handle_trap(riscv::exception_code_t::e_store_access_fault,
                             addr);
                 break;
               }
+              _is_reserved         = false;
+              _reservation_address = 0;
               _pc += 4;
             } break;
             case riscv::a_type_func5_t::e_amoadd: {
-              const address_t addr      = _reg[inst.as.a_type.rs1()];
+              const uint64_t  rs1       = _reg[inst.as.a_type.rs1()];
+              const uint64_t  rs2       = _reg[inst.as.a_type.rs2()];
+              const address_t addr      = rs1;
               const uint32_t  alignment = 8;  // 8 for d
               if (addr % alignment != 0) {
                 handle_trap(riscv::exception_code_t::e_load_address_misaligned,
@@ -1313,16 +1447,19 @@ bool machine_t::decode_and_exec_instruction(uint32_t instruction) {
                 break;
               }
               _reg[inst.as.a_type.rd()] = *value;
-              if (!_memory.store_64(addr,
-                                    *value + _reg[inst.as.a_type.rs2()])) {
+              if (!_memory.store_64(addr, *value + rs2)) {
                 handle_trap(riscv::exception_code_t::e_store_access_fault,
                             addr);
                 break;
               }
+              _is_reserved         = false;
+              _reservation_address = 0;
               _pc += 4;
             } break;
             case riscv::a_type_func5_t::e_amoxor: {
-              const address_t addr      = _reg[inst.as.a_type.rs1()];
+              const uint64_t  rs1       = _reg[inst.as.a_type.rs1()];
+              const uint64_t  rs2       = _reg[inst.as.a_type.rs2()];
+              const address_t addr      = rs1;
               const uint32_t  alignment = 8;  // 8 for d
               if (addr % alignment != 0) {
                 handle_trap(riscv::exception_code_t::e_load_address_misaligned,
@@ -1335,16 +1472,19 @@ bool machine_t::decode_and_exec_instruction(uint32_t instruction) {
                 break;
               }
               _reg[inst.as.a_type.rd()] = *value;
-              if (!_memory.store_64(addr,
-                                    *value ^ _reg[inst.as.a_type.rs2()])) {
+              if (!_memory.store_64(addr, *value ^ rs2)) {
                 handle_trap(riscv::exception_code_t::e_store_access_fault,
                             addr);
                 break;
               }
+              _is_reserved         = false;
+              _reservation_address = 0;
               _pc += 4;
             } break;
             case riscv::a_type_func5_t::e_amoand: {
-              const address_t addr      = _reg[inst.as.a_type.rs1()];
+              const uint64_t  rs1       = _reg[inst.as.a_type.rs1()];
+              const uint64_t  rs2       = _reg[inst.as.a_type.rs2()];
+              const address_t addr      = rs1;
               const uint32_t  alignment = 8;  // 8 for d
               if (addr % alignment != 0) {
                 handle_trap(riscv::exception_code_t::e_load_address_misaligned,
@@ -1357,16 +1497,19 @@ bool machine_t::decode_and_exec_instruction(uint32_t instruction) {
                 break;
               }
               _reg[inst.as.a_type.rd()] = *value;
-              if (!_memory.store_64(addr,
-                                    *value & _reg[inst.as.a_type.rs2()])) {
+              if (!_memory.store_64(addr, *value & rs2)) {
                 handle_trap(riscv::exception_code_t::e_store_access_fault,
                             addr);
                 break;
               }
+              _is_reserved         = false;
+              _reservation_address = 0;
               _pc += 4;
             } break;
             case riscv::a_type_func5_t::e_amoor: {
-              const address_t addr      = _reg[inst.as.a_type.rs1()];
+              const uint64_t  rs1       = _reg[inst.as.a_type.rs1()];
+              const uint64_t  rs2       = _reg[inst.as.a_type.rs2()];
+              const address_t addr      = rs1;
               const uint32_t  alignment = 8;  // 8 for d
               if (addr % alignment != 0) {
                 handle_trap(riscv::exception_code_t::e_load_address_misaligned,
@@ -1379,16 +1522,19 @@ bool machine_t::decode_and_exec_instruction(uint32_t instruction) {
                 break;
               }
               _reg[inst.as.a_type.rd()] = *value;
-              if (!_memory.store_64(addr,
-                                    *value | _reg[inst.as.a_type.rs2()])) {
+              if (!_memory.store_64(addr, *value | rs2)) {
                 handle_trap(riscv::exception_code_t::e_store_access_fault,
                             addr);
                 break;
               }
+              _is_reserved         = false;
+              _reservation_address = 0;
               _pc += 4;
             } break;
             case riscv::a_type_func5_t::e_amomin: {
-              const address_t addr      = _reg[inst.as.a_type.rs1()];
+              const uint64_t  rs1       = _reg[inst.as.a_type.rs1()];
+              const uint64_t  rs2       = _reg[inst.as.a_type.rs2()];
+              const address_t addr      = rs1;
               const uint32_t  alignment = 8;  // 8 for d
               if (addr % alignment != 0) {
                 handle_trap(riscv::exception_code_t::e_load_address_misaligned,
@@ -1401,19 +1547,21 @@ bool machine_t::decode_and_exec_instruction(uint32_t instruction) {
                 break;
               }
               _reg[inst.as.a_type.rd()] = *value;
-              if (!_memory.store_64(
-                      addr,
-                      static_cast<uint64_t>(std::min(
-                          static_cast<int64_t>(*value),
-                          static_cast<int64_t>(_reg[inst.as.a_type.rs2()]))))) {
+              if (!_memory.store_64(addr, static_cast<uint64_t>(std::min(
+                                              static_cast<int64_t>(*value),
+                                              static_cast<int64_t>(rs2))))) {
                 handle_trap(riscv::exception_code_t::e_store_access_fault,
                             addr);
                 break;
               }
+              _is_reserved         = false;
+              _reservation_address = 0;
               _pc += 4;
             } break;
             case riscv::a_type_func5_t::e_amomax: {
-              const address_t addr      = _reg[inst.as.a_type.rs1()];
+              const uint64_t  rs1       = _reg[inst.as.a_type.rs1()];
+              const uint64_t  rs2       = _reg[inst.as.a_type.rs2()];
+              const address_t addr      = rs1;
               const uint32_t  alignment = 8;  // 8 for d
               if (addr % alignment != 0) {
                 handle_trap(riscv::exception_code_t::e_load_address_misaligned,
@@ -1426,19 +1574,21 @@ bool machine_t::decode_and_exec_instruction(uint32_t instruction) {
                 break;
               }
               _reg[inst.as.a_type.rd()] = *value;
-              if (!_memory.store_64(
-                      addr,
-                      static_cast<uint64_t>(std::max(
-                          static_cast<int64_t>(*value),
-                          static_cast<int64_t>(_reg[inst.as.a_type.rs2()]))))) {
+              if (!_memory.store_64(addr, static_cast<uint64_t>(std::max(
+                                              static_cast<int64_t>(*value),
+                                              static_cast<int64_t>(rs2))))) {
                 handle_trap(riscv::exception_code_t::e_store_access_fault,
                             addr);
                 break;
               }
+              _is_reserved         = false;
+              _reservation_address = 0;
               _pc += 4;
             } break;
             case riscv::a_type_func5_t::e_amominu: {
-              const address_t addr      = _reg[inst.as.a_type.rs1()];
+              const uint64_t  rs1       = _reg[inst.as.a_type.rs1()];
+              const uint64_t  rs2       = _reg[inst.as.a_type.rs2()];
+              const address_t addr      = rs1;
               const uint32_t  alignment = 8;  // 8 for d
               if (addr % alignment != 0) {
                 handle_trap(riscv::exception_code_t::e_load_address_misaligned,
@@ -1451,16 +1601,19 @@ bool machine_t::decode_and_exec_instruction(uint32_t instruction) {
                 break;
               }
               _reg[inst.as.a_type.rd()] = *value;
-              if (!_memory.store_64(
-                      addr, std::min(*value, _reg[inst.as.a_type.rs2()]))) {
+              if (!_memory.store_64(addr, std::min(*value, rs2))) {
                 handle_trap(riscv::exception_code_t::e_store_access_fault,
                             addr);
                 break;
               }
+              _is_reserved         = false;
+              _reservation_address = 0;
               _pc += 4;
             } break;
             case riscv::a_type_func5_t::e_amomaxu: {
-              const address_t addr      = _reg[inst.as.a_type.rs1()];
+              const uint64_t  rs1       = _reg[inst.as.a_type.rs1()];
+              const uint64_t  rs2       = _reg[inst.as.a_type.rs2()];
+              const address_t addr      = rs1;
               const uint32_t  alignment = 8;  // 8 for d
               if (addr % alignment != 0) {
                 handle_trap(riscv::exception_code_t::e_load_address_misaligned,
@@ -1473,12 +1626,13 @@ bool machine_t::decode_and_exec_instruction(uint32_t instruction) {
                 break;
               }
               _reg[inst.as.a_type.rd()] = *value;
-              if (!_memory.store_64(
-                      addr, std::max(*value, _reg[inst.as.a_type.rs2()]))) {
+              if (!_memory.store_64(addr, std::max(*value, rs2))) {
                 handle_trap(riscv::exception_code_t::e_store_access_fault,
                             addr);
                 break;
               }
+              _is_reserved         = false;
+              _reservation_address = 0;
               _pc += 4;
             } break;
 
@@ -1497,6 +1651,8 @@ bool machine_t::decode_and_exec_instruction(uint32_t instruction) {
     default:
       handle_trap(riscv::exception_code_t::e_illegal_instruction, instruction);
   }
+
+  if (_post_decode_callback && debug_pc != _pc) _post_decode_callback(inst);
   return true;
 }
 
