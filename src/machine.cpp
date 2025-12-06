@@ -169,6 +169,16 @@ std::optional<uint64_t> machine_t::read_csr(uint32_t instruction) {
 }
 
 void machine_t::handle_trap(riscv::exception_code_t cause, uint64_t value) {
+  // hack for host system calls
+  if (cause == riscv::exception_code_t::e_ecall_m_mode) {
+    auto itr = _syscalls.find(_reg[17]);
+    if (itr != _syscalls.end()) {
+      itr->second(*this);
+
+      _pc += 4;
+      return;
+    }
+  }
 #ifndef NDEBUG
   if (cause == riscv::exception_code_t::e_illegal_instruction ||
       cause == riscv::exception_code_t::e_instruction_access_fault) {
@@ -896,15 +906,7 @@ bool machine_t::decode_and_exec_instruction(uint32_t instruction) {
         case riscv::i_type_func3_t::e_sub_system: {
           switch (static_cast<riscv::sub_system_t>(inst.as.i_type.imm())) {
             case riscv::sub_system_t::e_ecall: {
-              auto itr = _syscalls.find(_reg[17]);
-              if (itr != _syscalls.end()) {
-                itr->second(*this);
-                _pc += 4;
-              } else {
-#ifndef NDEBUG
-                std::cerr << "Error: unhandled ecall - " << _reg[17] << '\n';
-#endif
-              }
+              handle_trap(riscv::exception_code_t::e_ecall_m_mode, 0);
             } break;
             case riscv::sub_system_t::e_ebreak: {
               std::cout << "TODO: implement EBREAK\n";
