@@ -319,38 +319,38 @@ enum class exception_code_t : uint32_t {
   e_ecall_m_mode                   = 11,
 };
 
-constexpr uint32_t MHARDID = 0xf14;
+constexpr uint64_t MHARDID = 0xf14;
 
 // unimplemented
-constexpr uint32_t MNSTATUS = 0x744;
-constexpr uint32_t SATP     = 0x180;
+constexpr uint64_t MNSTATUS = 0x744;
+constexpr uint64_t SATP     = 0x180;
 // TODO: better way to define PMPADDRs
-constexpr uint32_t PMPADDR0 = 0x3b0;
+constexpr uint64_t PMPADDR0 = 0x3b0;
 // TODO: better way to define PMPCFGs
-constexpr uint32_t PMPCFG0 = 0x3a0;
+constexpr uint64_t PMPCFG0 = 0x3a0;
 
-constexpr uint32_t MEDELEG = 0x302;
-constexpr uint32_t MIDELEG = 0x303;
-constexpr uint32_t MIE     = 0x304;
+constexpr uint64_t MEDELEG = 0x302;
+constexpr uint64_t MIDELEG = 0x303;
+constexpr uint64_t MIE     = 0x304;
 
-constexpr uint32_t MSTATUS            = 0x300;
-constexpr uint32_t MSTATUS_MIE_SHIFT  = 3;
-constexpr uint32_t MSTATUS_MIE_MASK   = 1u << MSTATUS_MIE_SHIFT;
-constexpr uint32_t MSTATUS_MPIE_SHIFT = 7;
-constexpr uint32_t MSTATUS_MPIE_MASK  = 1u << MSTATUS_MPIE_SHIFT;
-constexpr uint32_t MSTATUS_MPP_SHIFT  = 11;
-constexpr uint32_t MSTATUS_MPP_MASK   = 0b11u << MSTATUS_MPP_SHIFT;
+constexpr uint64_t MSTATUS            = 0x300;
+constexpr uint64_t MSTATUS_MIE_SHIFT  = 3;
+constexpr uint64_t MSTATUS_MIE_MASK   = 1u << MSTATUS_MIE_SHIFT;
+constexpr uint64_t MSTATUS_MPIE_SHIFT = 7;
+constexpr uint64_t MSTATUS_MPIE_MASK  = 1u << MSTATUS_MPIE_SHIFT;
+constexpr uint64_t MSTATUS_MPP_SHIFT  = 11;
+constexpr uint64_t MSTATUS_MPP_MASK   = 0b11u << MSTATUS_MPP_SHIFT;
 
-constexpr uint32_t MTVEC                 = 0x305;
-constexpr uint32_t MTVEC_MODE_MASK       = 0b11;
-constexpr uint32_t MTVEC_BASE_ALIGN_MASK = ~0b11u;
+constexpr uint64_t MTVEC                 = 0x305;
+constexpr uint64_t MTVEC_MODE_MASK       = 0b11;
+constexpr uint64_t MTVEC_BASE_ALIGN_MASK = ~0b11ull;
 
-constexpr uint32_t MEPC = 0x341;
+constexpr uint64_t MEPC = 0x341;
 
-constexpr uint32_t MCAUSE               = 0x342;
-constexpr uint32_t MCAUSE_INTERRUPT_BIT = 0x80000000;
+constexpr uint64_t MCAUSE               = 0x342;
+constexpr uint64_t MCAUSE_INTERRUPT_BIT = (1ull << 63);
 
-constexpr uint32_t MTVAL = 0x343;
+constexpr uint64_t MTVAL = 0x343;
 
 }  // namespace riscv
 
