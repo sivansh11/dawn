@@ -78,15 +78,19 @@ int main(int argc, char** argv) {
   //   }
   // };
 
+  // machine._memory._debug_write_callback = [&](dawn::address_t addr,
+  //                                             uint64_t        value) {
+  // };
+
   std::cout << "max non mmio'ed memory: " << std::hex << size << '\n';
 
   static uint64_t timercmp  = 0;
   static uint64_t timer     = 0;
   static uint64_t boot_time = 0;
 
-  // std::ofstream log{"log", std::ios::trunc};
-  // assert(log.is_open());
-  static std::stringstream log;
+  static std::ofstream log{"log", std::ios::trunc};
+  assert(log.is_open());
+  // static std::stringstream log;
 
   std::atexit([]() {
     struct termios term;
@@ -94,9 +98,9 @@ int main(int argc, char** argv) {
     term.c_lflag |= ICANON | ECHO;
     tcsetattr(0, TCSANOW, &term);
 
-    // maybe print states
-    std::ofstream log_final{"log", std::ios::trunc};
-    log_final << log.str();
+    // // maybe print states
+    // std::ofstream log_final{"log", std::ios::trunc};
+    // log_final << log.str();
 
     // std::ofstream weird_writes_final{"weird_writes", std::ios::trunc};
     // weird_writes_final << weird_writes.str();
@@ -191,8 +195,9 @@ int main(int argc, char** argv) {
       // }
 
       log << "epc: " << std::hex << machine._pc << "  "
-          << "tp: " << std::hex << machine._reg[4] << "  "
-          << "ra: " << std::hex << machine._reg[1] << "  ";
+          << "ra: " << std::hex << machine._reg[1] << "  "
+          << "sp: " << std::hex << machine._reg[2] << "  "
+          << "tp: " << std::hex << machine._reg[4] << "  ";
     };
     machine._post_decode_callback = [&](dawn::riscv::instruction_t inst) {
       log << "inst: " << inst << '\n';
@@ -207,19 +212,19 @@ int main(int argc, char** argv) {
     // auto now         = get_time_now_us();
     auto instruction = machine.fetch_instruction();
     if (timercmp) {
-      // timer += get_time_now_us() - now;
       // timer = (get_time_now_us() - boot_time);
       // if (should_log) timer = timer / 10;
+
       instruction_counter++;
-      const uint64_t TICK_RATE      = 10;
+      const uint64_t TICK_RATE      = 100;
       uint64_t       emulated_mtime = instruction_counter / TICK_RATE;
       timer                         = emulated_mtime;
 
       if (timer > timercmp) {
         machine._paused = false;
-        machine.handle_trap(
-            dawn::riscv::exception_code_t::e_machine_timer_interrupt, 0);
-        continue;
+        if (machine.handle_trap(
+                dawn::riscv::exception_code_t::e_machine_timer_interrupt, 0))
+          continue;
       }
     }
     if (machine._paused) continue;

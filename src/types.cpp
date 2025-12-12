@@ -3,6 +3,8 @@
 
 std::ostream& operator<<(std::ostream&                     o,
                          const dawn::riscv::instruction_t& inst) {
+  o << std::hex << reinterpret_cast<const uint32_t&>(inst) << "   ";
+  o.flush();
   switch (inst.as.base.opcode()) {
     case dawn::riscv::op_t::e_lui:
       o << "lui x" << inst.as.u_type.rd() << ", " << std::hex

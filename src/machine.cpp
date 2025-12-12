@@ -183,7 +183,7 @@ std::optional<uint64_t> machine_t::read_csr(uint32_t instruction) {
   return _read_csr(riscv_instruction.as.i_type.imm());
 }
 
-void machine_t::handle_trap(riscv::exception_code_t cause, uint64_t value) {
+bool machine_t::handle_trap(riscv::exception_code_t cause, uint64_t value) {
   // hack for host system calls
   if (cause == riscv::exception_code_t::e_ecall_m_mode ||
       cause == riscv::exception_code_t::e_ecall_u_mode) {
@@ -192,7 +192,7 @@ void machine_t::handle_trap(riscv::exception_code_t cause, uint64_t value) {
       itr->second(*this);
 
       _pc += 4;
-      return;
+      return true;
     }
   }
 #ifndef NDEBUG
@@ -200,6 +200,7 @@ void machine_t::handle_trap(riscv::exception_code_t cause, uint64_t value) {
       cause == riscv::exception_code_t::e_instruction_access_fault) {
     std::cerr << "got instruction: " << std::hex << value
               << " at pc: " << std::hex << _pc << '\n';
+    throw std::runtime_error("illegal instruction or instruction access fault");
   }
 #endif
 
@@ -211,9 +212,9 @@ void machine_t::handle_trap(riscv::exception_code_t cause, uint64_t value) {
 
   if (is_interrupt && !current_mie_bit) {
     // can do this since its an interrupt, not an exception
-    auto instruction = _memory.fetch_32(_pc);
-    if (instruction) decode_and_exec_instruction(*instruction);
-    return;
+    // auto instruction = _memory.fetch_32(_pc);
+    // if (instruction) decode_and_exec_instruction(*instruction);
+    return false;
   }
 
   _is_reserved         = false;
@@ -252,6 +253,7 @@ void machine_t::handle_trap(riscv::exception_code_t cause, uint64_t value) {
         error(ss.str().c_str());
     }
   }
+  return true;
 }
 
 bool machine_t::decode_and_exec_instruction(uint32_t instruction) {
@@ -407,14 +409,14 @@ bool machine_t::decode_and_exec_instruction(uint32_t instruction) {
             handle_trap(riscv::exception_code_t::e_load_access_fault, addr);
             break;
           }
-          _reg[inst.as.i_type.rd()] = static_cast<int8_t>(*value);
+          _reg[inst.as.i_type.rd()] =
+              static_cast<int64_t>(static_cast<int8_t>(*value));
           _pc += 4;
         } break;
         case riscv::i_type_func3_t::e_lh: {
           address_t addr =
               _reg[inst.as.i_type.rs1()] + inst.as.i_type.imm_sext();
           if (addr % 2 != 0) {
-            std::cout << "addr: " << addr << '\n';
             handle_trap(riscv::exception_code_t::e_load_address_misaligned,
                         addr);
             break;
@@ -424,7 +426,8 @@ bool machine_t::decode_and_exec_instruction(uint32_t instruction) {
             handle_trap(riscv::exception_code_t::e_load_access_fault, addr);
             break;
           }
-          _reg[inst.as.i_type.rd()] = static_cast<int16_t>(*value);
+          _reg[inst.as.i_type.rd()] =
+              static_cast<int64_t>(static_cast<int16_t>(*value));
           _pc += 4;
         } break;
         case riscv::i_type_func3_t::e_lw: {
@@ -440,7 +443,8 @@ bool machine_t::decode_and_exec_instruction(uint32_t instruction) {
             handle_trap(riscv::exception_code_t::e_load_access_fault, addr);
             break;
           }
-          _reg[inst.as.i_type.rd()] = static_cast<int32_t>(*value);
+          _reg[inst.as.i_type.rd()] =
+              static_cast<int64_t>(static_cast<int32_t>(*value));
           _pc += 4;
         } break;
         case riscv::i_type_func3_t::e_lbu: {
@@ -1010,7 +1014,7 @@ bool machine_t::decode_and_exec_instruction(uint32_t instruction) {
               mstatus = (mstatus & ~riscv::MSTATUS_MPIE_MASK) |
                         (1u << riscv::MSTATUS_MPIE_SHIFT);
               mstatus = (mstatus & ~riscv::MSTATUS_MPP_MASK) |
-                        (0b00U << riscv::MSTATUS_MPP_SHIFT);
+                        (0b00u << riscv::MSTATUS_MPP_SHIFT);
               _write_csr(riscv::MSTATUS, mstatus);
             } break;
             case riscv::sub_system_t::e_wfi: {

@@ -41,7 +41,7 @@ struct machine_t {
   bool                    write_csr(uint32_t instruction, uint64_t value);
   std::optional<uint64_t> read_csr(uint32_t instruction);
 
-  void handle_trap(riscv::exception_code_t cause, uint64_t value);
+  bool handle_trap(riscv::exception_code_t cause, uint64_t value);
 
   uint64_t                                          _reg[32];
   address_t                                         _pc;
