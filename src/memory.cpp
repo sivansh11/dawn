@@ -3,7 +3,6 @@
 #include <iostream>
 #include <cassert>
 #include <cstring>
-#include <flat_set>
 #include <optional>
 
 namespace dawn {

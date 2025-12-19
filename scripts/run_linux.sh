@@ -11,5 +11,5 @@ cd examples/linux
 dtc -I dts -O dtb -o dt.dtb dt.dts
 cd ../../
 
-# ./build/examples/linux/linux ../linux-6.18/arch/riscv/boot/Image examples/linux/dt.dtb n
-./build/examples/linux/linux ../buildroot/output/images/Image examples/linux/dt.dtb n
+./build/examples/linux/linux ../linux-6.18/arch/riscv/boot/Image examples/linux/dt.dtb n
+# ./build/examples/linux/linux ../buildroot/output/images/Image examples/linux/dt.dtb n
