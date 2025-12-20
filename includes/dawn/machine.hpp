@@ -1,5 +1,5 @@
-#ifndef DAWN_STATE_HPP
-#define DAWN_STATE_HPP
+#ifndef DAWN_MACHINE_HPP
+#define DAWN_MACHINE_HPP
 
 #include <ankerl/unordered_dense.h>
 
@@ -55,4 +55,4 @@ struct machine_t {
 
 }  // namespace dawn
 
-#endif  // !DAWN_STATE_HPP
+#endif  // !DAWN_MACHINE_HPP
