@@ -27,8 +27,8 @@ void* memory_t::translate_guest_to_host(address_t addr) const {
 
 void memory_t::insert_memory(
     void* ptr, size_t size, memory_protection_t protection,
-    std::function<void(address_t, uint32_t)> write_callback,
-    std::function<uint32_t(address_t)>       read_callback) {
+    std::function<void(address_t, uint64_t)> write_callback,
+    std::function<uint64_t(address_t)>       read_callback) {
   // TODO: merge adjacent ranges with same protection
   memory_range_t range = memory_range_t::create_from_start_and_size(
       ptr, size, protection, write_callback, read_callback);

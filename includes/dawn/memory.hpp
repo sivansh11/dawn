@@ -51,8 +51,8 @@ struct memory_range_t {
   std::function<uint64_t(address_t)>       read_callback;
   static memory_range_t                    create_from_start_and_size(
                          void* ptr, size_t size, memory_protection_t protection,
-                         std::function<void(address_t, uint32_t)> write_callback,
-                         std::function<uint32_t(address_t)>       read_callback) {
+                         std::function<void(address_t, uint64_t)> write_callback,
+                         std::function<uint64_t(address_t)>       read_callback) {
     memory_range_t range{._start         = ptr,
                          ._protection    = protection,
                          .write_callback = write_callback,
@@ -89,8 +89,8 @@ struct memory_t {
   // if there is overlap with different memory protection, it cuts the affected
   // ranges into sub ranges and inserts new range with appropriate protection
   void insert_memory(void* ptr, size_t size, memory_protection_t protection,
-                     std::function<void(address_t, uint32_t)> write_callback,
-                     std::function<uint32_t(address_t)>       read_callback);
+                     std::function<void(address_t, uint64_t)> write_callback,
+                     std::function<uint64_t(address_t)>       read_callback);
   bool is_region_in_memory(void* ptr, size_t size,
                            memory_protection_t protection) const;
   std::optional<memory_range_t> find_memory_range(
