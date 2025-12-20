@@ -4,3 +4,4 @@
 log*
 riscv-tests/
 mini-rv32ima/
+perf.data*
