@@ -143,12 +143,12 @@ bool machine_t::del_syscall(uint64_t number) {
 }
 
 std::optional<uint32_t> machine_t::fetch_instruction() {
-  if (_pc % 4 != 0) {
+  if (_pc % 4 != 0) [[unlikely]] {
     handle_trap(riscv::exception_code_t::e_instruction_address_misaligned, _pc);
     return std::nullopt;
   }
   auto instruction = _memory.fetch_32(_pc);
-  if (!instruction) {
+  if (!instruction) [[unlikely]] {
     handle_trap(riscv::exception_code_t::e_instruction_access_fault, _pc);
     return std::nullopt;
   }

@@ -3,6 +3,7 @@
 
 #include <cstdint>
 // #include <flat_set>
+#include <cstring>
 #include <functional>
 #include <optional>
 #include <ostream>
@@ -93,14 +94,57 @@ struct memory_t {
                      std::function<uint64_t(address_t)>       read_callback);
   bool is_region_in_memory(void* ptr, size_t size,
                            memory_protection_t protection) const;
-  memory_range_t* find_memory_range(void* ptr, size_t size,
-                                    memory_protection_t protection);
+  __attribute__((always_inline)) inline memory_range_t* find_memory_range(
+      void* ptr, size_t size, memory_protection_t protection) {
+    if (_mru_range) {
+      void* start = ptr;
+      void* end = reinterpret_cast<void*>(reinterpret_cast<size_t>(ptr) + size);
+      if (_mru_range->_start <= start && _mru_range->_end >= end) {
+        return _mru_range;
+      }
+    }
+    memory_range_t range = memory_range_t::create_from_start_and_size(
+        ptr, size, protection, nullptr, nullptr);
+    auto it = _ranges.lower_bound(range);
+    if (it != _ranges.end() && it->_start <= range._start &&
+        it->_end >= range._end) {
+      if (has_all(it->_protection, range._protection)) {
+        _mru_range = &(*it);
+        return it.base();
+      }
+    }
+    if (it != _ranges.begin()) {
+      --it;
+      if (it != _ranges.end() && it->_start <= range._start &&
+          it->_end >= range._end) {
+        if (has_all(it->_protection, range._protection)) {
+          _mru_range = &(*it);
+          return it.base();
+        }
+      }
+    }
+    _mru_range = {};
+    return _mru_range;
+  }
   bool memcpy_host_to_guest(address_t dst, const void* src, size_t size) const;
   bool memcpy_guest_to_host(void* dst, address_t src, size_t size) const;
   bool memset(address_t addr, int value, size_t size) const;
 
   // checks for exec memory protection
-  std::optional<uint32_t> fetch_32(address_t addr);
+  __attribute__((always_inline)) inline std::optional<uint32_t> fetch_32(
+      address_t addr) {
+    uint32_t value;
+    auto     memory_range =
+        find_memory_range(translate_guest_to_host(addr), sizeof(value),
+                          memory_protection_t::e_exec);
+    if (memory_range->read_callback)
+      return memory_range->read_callback(addr);
+    else {
+      std::memcpy(&value, translate_guest_to_host(addr), sizeof(value));
+      return value;
+    }
+    if (!memory_range) return std::nullopt;
+  }
 
   // checks for read memory protection
   std::optional<uint8_t>  load_8(address_t addr);

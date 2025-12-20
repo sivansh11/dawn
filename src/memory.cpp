@@ -94,39 +94,6 @@ bool memory_t::is_region_in_memory(void* ptr, size_t size,
   return true;
 }
 
-memory_range_t* memory_t::find_memory_range(void* ptr, size_t size,
-                                            memory_protection_t protection) {
-  if (_mru_range) {
-    void* start = ptr;
-    void* end   = reinterpret_cast<void*>(reinterpret_cast<size_t>(ptr) + size);
-    if (_mru_range->_start <= start && _mru_range->_end >= end) {
-      return _mru_range;
-    }
-  }
-  memory_range_t range = memory_range_t::create_from_start_and_size(
-      ptr, size, protection, nullptr, nullptr);
-  auto it = _ranges.lower_bound(range);
-  if (it != _ranges.end() && it->_start <= range._start &&
-      it->_end >= range._end) {
-    if (has_all(it->_protection, range._protection)) {
-      _mru_range = &(*it);
-      return it.base();
-    }
-  }
-  if (it != _ranges.begin()) {
-    --it;
-    if (it != _ranges.end() && it->_start <= range._start &&
-        it->_end >= range._end) {
-      if (has_all(it->_protection, range._protection)) {
-        _mru_range = &(*it);
-        return it.base();
-      }
-    }
-  }
-  _mru_range = {};
-  return _mru_range;
-}
-
 bool memory_t::memcpy_host_to_guest(address_t dst, const void* src,
                                     size_t size) const {
   // NOTE: no protection checking!
@@ -149,20 +116,6 @@ bool memory_t::memset(address_t addr, int value, size_t size) const {
     return false;
   std::memset(translate_guest_to_host(addr), value, size);
   return true;
-}
-
-std::optional<uint32_t> memory_t::fetch_32(address_t addr) {
-  uint32_t value;
-  auto     memory_range =
-      find_memory_range(translate_guest_to_host(addr), sizeof(value),
-                        memory_protection_t::e_exec);
-  if (memory_range->read_callback)
-    return memory_range->read_callback(addr);
-  else {
-    std::memcpy(&value, translate_guest_to_host(addr), sizeof(value));
-    return value;
-  }
-  if (!memory_range) return std::nullopt;
 }
 
 std::optional<uint8_t> memory_t::load_8(address_t addr) {
