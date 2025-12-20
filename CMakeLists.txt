@@ -27,6 +27,7 @@ file(GLOB_RECURSE SRC_FILES src/*.cpp)
 add_library(dawn ${SRC_FILES})
 
 set_target_properties(dawn PROPERTIES INTERPROCEDURAL_OPTIMIZATION TRUE)
+target_compile_options(dawn PUBLIC -fno-omit-frame-pointer)
 
 target_include_directories(dawn
   PUBLIC includes
