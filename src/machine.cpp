@@ -110,6 +110,7 @@ std::optional<machine_t> machine_t::load_elf(
   }
   state._pc     = reader.get_entry();
   state._reg[2] = state._memory._size - 8;
+  state._mode   = 0b00;
 
   return state;
 }
