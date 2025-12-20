@@ -29,7 +29,7 @@ void memory_t::insert_memory(
     void* ptr, size_t size, memory_protection_t protection,
     std::function<void(address_t, uint32_t)> write_callback,
     std::function<uint32_t(address_t)>       read_callback) {
-  // TODO: merge adjacent ranges with smae protection
+  // TODO: merge adjacent ranges with same protection
   memory_range_t range = memory_range_t::create_from_start_and_size(
       ptr, size, protection, write_callback, read_callback);
   dawn::flat_set<memory_range_t> new_ranges;
