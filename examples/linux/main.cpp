@@ -146,10 +146,18 @@ int main(int argc, char** argv) {
 
   boot_time = get_time_now_us();
 
+  uint64_t instruction_count = 0;
+
   while (true) {
     auto instruction = machine.fetch_instruction();
+    instruction_count++;
     if (timercmp) {
-      timer = (get_time_now_us() - boot_time);
+      // get timer every 100 or so instructions since getting time is an
+      // expensive call
+      if (instruction_count > 100) {
+        instruction_count = 0;
+        timer             = (get_time_now_us() - boot_time);
+      }
 
       if (timer > timercmp) {
         machine._paused = false;
