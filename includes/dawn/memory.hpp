@@ -93,27 +93,28 @@ struct memory_t {
                      std::function<uint64_t(address_t)>       read_callback);
   bool is_region_in_memory(void* ptr, size_t size,
                            memory_protection_t protection) const;
-  std::optional<memory_range_t> find_memory_range(
-      void* ptr, size_t size, memory_protection_t protection) const;
+  memory_range_t* find_memory_range(void* ptr, size_t size,
+                                    memory_protection_t protection);
   bool memcpy_host_to_guest(address_t dst, const void* src, size_t size) const;
   bool memcpy_guest_to_host(void* dst, address_t src, size_t size) const;
   bool memset(address_t addr, int value, size_t size) const;
 
   // checks for exec memory protection
-  std::optional<uint32_t> fetch_32(address_t addr) const;
+  std::optional<uint32_t> fetch_32(address_t addr);
 
   // checks for read memory protection
-  std::optional<uint8_t>  load_8(address_t addr) const;
-  std::optional<uint16_t> load_16(address_t addr) const;
-  std::optional<uint32_t> load_32(address_t addr) const;
-  std::optional<uint64_t> load_64(address_t addr) const;
+  std::optional<uint8_t>  load_8(address_t addr);
+  std::optional<uint16_t> load_16(address_t addr);
+  std::optional<uint32_t> load_32(address_t addr);
+  std::optional<uint64_t> load_64(address_t addr);
 
   // checks for write memory protection
-  bool store_8(address_t addr, uint8_t value) const;
-  bool store_16(address_t addr, uint16_t value) const;
-  bool store_32(address_t addr, uint32_t value) const;
-  bool store_64(address_t addr, uint64_t value) const;
+  bool store_8(address_t addr, uint8_t value);
+  bool store_16(address_t addr, uint16_t value);
+  bool store_32(address_t addr, uint32_t value);
+  bool store_64(address_t addr, uint64_t value);
 
+  memory_range_t*                _mru_range{};
   size_t                         _size;
   dawn::flat_set<memory_range_t> _ranges{};  // ranges with memory protection
   void*                          _host_base{};
