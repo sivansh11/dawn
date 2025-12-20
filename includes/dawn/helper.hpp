@@ -2,7 +2,7 @@
 #define DAWN_HELPER_HPP
 
 #include <cstdint>
-#include <ostream>
+#include <iostream>
 
 namespace dawn {
 
