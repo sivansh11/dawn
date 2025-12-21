@@ -8,6 +8,7 @@
 #include <ostream>
 #include <sstream>
 #include <stdexcept>
+#include <string>
 #include <vector>
 #include <cstdlib>
 #include <termios.h>
@@ -33,6 +34,42 @@ std::vector<uint8_t> read_file(const std::string& file_path) {
 }
 
 static dawn::machine_t machine;
+
+bool saveARGBtoPPM(const char* filename, const uint32_t* data, int width,
+                   int height) {
+  if (!data || width <= 0 || height <= 0) return false;
+
+  std::ofstream outFile(filename, std::ios::binary);
+  if (!outFile) {
+    std::cerr << "Error: Could not open file for writing." << std::endl;
+    return false;
+  }
+
+  // PPM Header:
+  // P6 = Binary color format
+  // Width Height
+  // 255 = Maximum color value
+  outFile << "P6\n" << width << " " << height << "\n255\n";
+
+  for (int i = 0; i < width * height; ++i) {
+    uint32_t pixel = data[i];
+
+    // Extracting channels from A8R8G8B8
+    // Assuming standard layout: Alpha is bits 24-31, Red 16-23, Green 8-15,
+    // Blue 0-7
+    uint8_t r = (pixel >> 16) & 0xFF;
+    uint8_t g = (pixel >> 8) & 0xFF;
+    uint8_t b = (pixel) & 0xFF;
+
+    // PPM P6 expects R, G, B bytes in that order
+    outFile.put(static_cast<char>(r));
+    outFile.put(static_cast<char>(g));
+    outFile.put(static_cast<char>(b));
+  }
+
+  outFile.close();
+  return true;
+}
 
 int main(int argc, char** argv) {
   if (argc < 4) throw std::runtime_error("[linux] [elf] [dtb] [logging]!");
@@ -69,6 +106,11 @@ int main(int argc, char** argv) {
     tcgetattr(0, &term);
     term.c_lflag |= ICANON | ECHO;
     tcsetattr(0, TCSANOW, &term);
+
+          saveARGBtoPPM("test.ppm",
+                        reinterpret_cast<uint32_t*>(
+                            machine._memory.translate_guest_to_host(0x7000000)),
+                        100, 100);
   });
 
   signal(SIGINT, [](int sig) { exit(0); });
