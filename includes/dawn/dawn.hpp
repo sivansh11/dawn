@@ -1,0 +1,1037 @@
+#ifndef dawn_machine_hpp
+#define dawn_machine_hpp
+
+#include <bitset>
+#include <cassert>
+#include <cstddef>
+#include <cstdint>
+#include <cstring>
+#include <functional>
+#include <iostream>
+#include <map>
+#include <sstream>
+#include <stdexcept>
+
+namespace dawn {
+
+// TODO: optional runtime memory bounds checking
+struct memory_t {
+  memory_t(size_t ram_size, uint64_t offset)
+      : _ram_size(ram_size), _offset(offset) {
+    _data  = new uint8_t[ram_size];
+    _final = reinterpret_cast<uint8_t *>(reinterpret_cast<uintptr_t>(_data) -
+                                         _offset);
+  }
+  ~memory_t() { delete[] _data; }
+
+  inline uint32_t fetch32(uint64_t addr) {
+    return *reinterpret_cast<uint32_t *>(_final + addr);
+  }
+
+  inline uint8_t load8(uint64_t addr) {
+    return *reinterpret_cast<uint8_t *>(_final + addr);
+  }
+  inline uint16_t load16(uint64_t addr) {
+    return *reinterpret_cast<uint16_t *>(_final + addr);
+  }
+  inline uint32_t load32(uint64_t addr) {
+    return *reinterpret_cast<uint32_t *>(_final + addr);
+  }
+  inline uint64_t load64(uint64_t addr) {
+    return *reinterpret_cast<uint64_t *>(_final + addr);
+  }
+  inline int8_t load8i(uint64_t addr) {
+    return *reinterpret_cast<int8_t *>(_final + addr);
+  }
+  inline int16_t load16i(uint64_t addr) {
+    return *reinterpret_cast<int16_t *>(_final + addr);
+  }
+  inline int32_t load32i(uint64_t addr) {
+    return *reinterpret_cast<int32_t *>(_final + addr);
+  }
+
+  inline void store8(uint64_t addr, uint8_t value) {
+    *reinterpret_cast<uint8_t *>(_final + addr) = value;
+  }
+  inline void store16(uint64_t addr, uint16_t value) {
+    *reinterpret_cast<uint16_t *>(_final + addr) = value;
+  }
+  inline void store32(uint64_t addr, uint32_t value) {
+    *reinterpret_cast<uint32_t *>(_final + addr) = value;
+  }
+  inline void store64(uint64_t addr, uint64_t value) {
+    *reinterpret_cast<uint64_t *>(_final + addr) = value;
+  }
+
+  inline void memcpy_host_to_guest(uint64_t dst, const void *src, size_t size) {
+    std::memcpy(_final + dst, src, size);
+  }
+  inline void memset(uint64_t addr, int value, size_t size) {
+    std::memset(_final + addr, value, size);
+  }
+
+  const size_t _ram_size;
+  uint8_t     *_data;
+  uint64_t     _offset{};
+  uint8_t     *_final{};
+};
+
+// [start, end)
+constexpr inline uint32_t extract_bit_range(uint32_t value, uint8_t start,
+                                            uint8_t end) {
+  constexpr uint8_t total_bits = sizeof(uint32_t) * 8;
+  uint8_t           length     = end - start;
+  uint32_t          shifted    = value >> start;
+  uint32_t          mask =
+      (length >= total_bits) ? ~uint32_t(0) : (uint32_t(1) << length) - 1;
+  return shifted & mask;
+}
+
+template <uint32_t sign_bit>
+constexpr inline int32_t sext(uint32_t val) {
+  struct internal_t {
+    int32_t val : sign_bit;
+  } s;
+  return s.val = val;
+}
+
+enum class exception_code_t : uint64_t {
+  e_instruction_address_misaligned = 0,
+  e_instruction_access_fault       = 1,
+  e_illegal_instruction            = 2,
+  e_breakpoint                     = 3,
+  e_load_address_misaligned        = 4,
+  e_load_access_fault              = 5,
+  e_store_address_misaligned       = 6,
+  e_store_access_fault             = 7,
+  e_ecall_u_mode                   = 8,
+  e_ecall_s_mode                   = 9,
+  e_ecall_m_mode                   = 11,
+
+  e_machine_timer_interrupt = 7 | (1ull << 63),
+};
+
+constexpr uint64_t MHARDID = 0xf14;
+
+constexpr uint64_t MNSTATUS = 0x744;
+
+constexpr uint64_t MEDELEG = 0x302;
+constexpr uint64_t MIDELEG = 0x303;
+constexpr uint64_t MIE     = 0x304;
+
+constexpr uint64_t MSTATUS            = 0x300;
+constexpr uint64_t MSTATUS_MIE_SHIFT  = 3;
+constexpr uint64_t MSTATUS_MIE_MASK   = 1u << MSTATUS_MIE_SHIFT;
+constexpr uint64_t MSTATUS_MPIE_SHIFT = 7;
+constexpr uint64_t MSTATUS_MPIE_MASK  = 1u << MSTATUS_MPIE_SHIFT;
+constexpr uint64_t MSTATUS_MPP_SHIFT  = 11;
+constexpr uint64_t MSTATUS_MPP_MASK   = 0b11u << MSTATUS_MPP_SHIFT;
+
+constexpr uint64_t MTVEC                 = 0x305;
+constexpr uint64_t MTVEC_MODE_MASK       = 0b11;
+constexpr uint64_t MTVEC_BASE_ALIGN_MASK = ~0b11ull;
+
+constexpr uint64_t MEPC = 0x341;
+
+constexpr uint64_t MCAUSE               = 0x342;
+constexpr uint64_t MCAUSE_INTERRUPT_BIT = (1ull << 63);
+
+constexpr uint64_t MTVAL = 0x343;
+
+struct base_t {
+  uint32_t _opcode : 7;   // 0-6
+  uint32_t _pad    : 25;  // 7-31
+
+  constexpr uint32_t opcode() const { return _opcode; }
+};
+
+struct i_type_t {
+  uint32_t _opcode : 7;   // 0-6
+  uint32_t _rd     : 5;   // 7-11
+  uint32_t _funct3 : 3;   // 12-14
+  uint32_t _rs1    : 5;   // 15-19
+  uint32_t _imm    : 12;  // 20-31
+
+  constexpr uint32_t opcode() const { return _opcode; }
+  constexpr uint32_t rd() const { return _rd; }
+  constexpr uint32_t funct3() const { return _funct3; }
+  constexpr uint32_t rs1() const { return _rs1; }
+  constexpr uint32_t imm() const { return _imm; }
+  constexpr int32_t  imm_sext() const { return sext<12>(imm()); }
+  constexpr uint32_t shamt() const { return extract_bit_range(imm(), 0, 6); }
+  constexpr uint32_t shamt_w() const { return extract_bit_range(imm(), 0, 5); }
+  constexpr          operator uint64_t() const {
+    return *reinterpret_cast<const uint32_t *>(this);
+  }
+};
+
+struct s_type_t {
+  uint32_t _opcode : 7;  // 0-6
+  uint32_t _imm1   : 5;  // 7-11
+  uint32_t _funct3 : 3;  // 12-14
+  uint32_t _rs1    : 5;  // 15-19
+  uint32_t _rs2    : 5;  // 20-24
+  uint32_t _imm2   : 7;  // 25-31
+
+  constexpr uint32_t opcode() const { return _opcode; }
+  constexpr uint32_t funct3() const { return _funct3; }
+  constexpr uint32_t rs1() const { return _rs1; }
+  constexpr uint32_t rs2() const { return _rs2; }
+  constexpr uint32_t imm() const { return (_imm2 << 5) | _imm1; }
+  constexpr int32_t  imm_sext() const { return sext<12>(imm()); }
+  constexpr          operator uint64_t() const {
+    return *reinterpret_cast<const uint32_t *>(this);
+  }
+};
+
+struct u_type_t {
+  uint32_t _opcode : 7;   // 0-6
+  uint32_t _rd     : 5;   // 7-11
+  uint32_t _imm    : 20;  // 12-31
+
+  constexpr uint32_t opcode() const { return _opcode; }
+  constexpr uint32_t rd() const { return _rd; }
+  constexpr uint32_t imm() const { return _imm; }
+  constexpr int32_t  imm_sext() const { return sext<20>(imm()); }
+  constexpr          operator uint64_t() const {
+    return *reinterpret_cast<const uint32_t *>(this);
+  }
+};
+
+struct r_type_t {
+  uint32_t _opcode : 7;  // 0-6
+  uint32_t _rd     : 5;  // 7-11
+  uint32_t _funct3 : 3;  // 12-14
+  uint32_t _rs1    : 5;  // 15-19
+  uint32_t _rs2    : 5;  // 20-24
+  uint32_t _funct7 : 7;  // 25-31
+
+  constexpr uint32_t opcode() const { return _opcode; }
+  constexpr uint32_t rd() const { return _rd; }
+  constexpr uint32_t funct3() const { return _funct3; }
+  constexpr uint32_t rs1() const { return _rs1; }
+  constexpr uint32_t rs2() const { return _rs2; }
+  constexpr uint32_t funct7() const { return _funct7; }
+  constexpr          operator uint64_t() const {
+    return *reinterpret_cast<const uint32_t *>(this);
+  }
+};
+
+struct a_type_t {
+  uint32_t _opcode : 7;
+  uint32_t _rd     : 5;
+  uint32_t _funct3 : 3;
+  uint32_t _rs1    : 5;
+  uint32_t _rs2    : 5;
+  uint32_t _rl     : 1;
+  uint32_t _aq     : 1;
+  uint32_t _funct5 : 5;
+
+  constexpr uint32_t opcode() const { return _opcode; }
+  constexpr uint32_t rd() const { return _rd; }
+  constexpr uint32_t funct3() const { return _funct3; }
+  constexpr uint32_t rs1() const { return _rs1; }
+  constexpr uint32_t rs2() const { return _rs2; }
+  constexpr uint32_t rl() const { return _rl; }
+  constexpr uint32_t aq() const { return _aq; }
+  constexpr uint32_t funct5() const { return _funct5; }
+  constexpr          operator uint64_t() const {
+    return *reinterpret_cast<const uint32_t *>(this);
+  }
+};
+
+struct b_type_t {
+  uint32_t _opcode : 7;  // 0-6
+  uint32_t _imm1   : 1;  // 7
+  uint32_t _imm2   : 4;  // 8-11
+  uint32_t _funct3 : 3;  // 12-14
+  uint32_t _rs1    : 5;  // 15-19
+  uint32_t _rs2    : 5;  // 20-24
+  uint32_t _imm3   : 6;  // 25-30
+  uint32_t _imm4   : 1;  // 31
+
+  constexpr uint32_t opcode() const { return _opcode; }
+  constexpr uint32_t imm1() const { return _imm1; }
+  constexpr uint32_t imm2() const { return _imm2; }
+  constexpr uint32_t funct3() const { return _funct3; }
+  constexpr uint32_t rs1() const { return _rs1; }
+  constexpr uint32_t rs2() const { return _rs2; }
+  constexpr uint32_t imm3() const { return _imm3; }
+  constexpr uint32_t imm4() const { return _imm4; }
+  constexpr uint32_t imm() const {
+    return _imm4 << 12 | _imm1 << 11 | _imm3 << 5 | _imm2 << 1;
+  }
+  constexpr int32_t imm_sext() const { return sext<13>(imm()); }
+  constexpr         operator uint64_t() const {
+    return *reinterpret_cast<const uint32_t *>(this);
+  }
+};
+
+struct j_type_t {
+  uint32_t _opcode : 7;   // 0-6
+  uint32_t _rd     : 5;   // 7-11
+  uint32_t _imm1   : 8;   // 12-19
+  uint32_t _imm2   : 1;   // 20
+  uint32_t _imm3   : 10;  // 21-30
+  uint32_t _imm4   : 1;   // 31
+
+  constexpr uint32_t opcode() const { return _opcode; }
+  constexpr uint32_t rd() const { return _rd; }
+  constexpr uint32_t imm1() const { return _imm1; }
+  constexpr uint32_t imm2() const { return _imm2; }
+  constexpr uint32_t imm3() const { return _imm3; }
+  constexpr uint32_t imm4() const { return _imm4; }
+  constexpr uint32_t imm() const {
+    return _imm4 << 20 | _imm1 << 12 | _imm2 << 11 | _imm3 << 1;
+  }
+  constexpr int64_t imm_sext() const { return sext<21>(imm()); }
+  constexpr         operator uint64_t() const {
+    return *reinterpret_cast<const uint32_t *>(this);
+  }
+};
+
+struct instruction_t {
+  union as_t {
+    base_t   base;
+    i_type_t i_type;
+    s_type_t s_type;
+    u_type_t u_type;
+    r_type_t r_type;
+    b_type_t b_type;
+    j_type_t j_type;
+    a_type_t a_type;
+  } as;
+  constexpr operator uint64_t() const {
+    return *reinterpret_cast<const uint32_t *>(this);
+  }
+};
+static_assert(sizeof(instruction_t) == 4, "instruction size should be 4 bytes");
+
+struct machine_t {
+  machine_t(size_t ram_size, uint64_t offset) : _memory(ram_size, offset) {}
+
+  // TODO: test with and without inline
+  inline bool handle_trap(exception_code_t cause, uint64_t value) {
+    // hack
+    if (cause == exception_code_t::e_ecall_m_mode ||
+        cause == exception_code_t::e_ecall_u_mode) {
+      auto itr = _syscalls.find(_reg[17]);
+      if (itr != _syscalls.end()) {
+        itr->second(*this);
+        _pc += 4;
+        return true;
+      }
+    }
+
+    bool is_interrupt =
+        (static_cast<uint64_t>(cause) & MCAUSE_INTERRUPT_BIT) != 0;
+    uint64_t &mstatus    = _csr[MSTATUS];
+    bool      global_mie = (mstatus & MSTATUS_MIE_MASK) != 0;
+
+    if (is_interrupt) {
+      // if interrupt is globally disabled or individually disabled return
+      uint64_t interrupt_bit =
+          1ULL << (static_cast<uint64_t>(cause) & ~MCAUSE_INTERRUPT_BIT);
+      bool individual_enabled = (_csr[MIE] & interrupt_bit) != 0;
+      if (!global_mie || !individual_enabled) {
+        return false;
+      }
+    }
+
+    _csr[MEPC]   = _pc;
+    _csr[MCAUSE] = static_cast<uint64_t>(cause);
+    _csr[MTVAL]  = value;
+
+    mstatus = (mstatus & ~MSTATUS_MPP_MASK) |
+              ((static_cast<uint64_t>(_mode) << MSTATUS_MPP_SHIFT) &
+               MSTATUS_MPP_MASK);
+    mstatus = (mstatus & ~MSTATUS_MPIE_MASK) |
+              ((global_mie << MSTATUS_MPIE_SHIFT) & MSTATUS_MPIE_MASK);
+    mstatus &= ~MSTATUS_MIE_MASK;
+
+    uint64_t mtvec      = _csr[MTVEC];
+    uint64_t mtvec_base = mtvec & MTVEC_BASE_ALIGN_MASK;
+    uint64_t mtvec_mode = mtvec & MTVEC_MODE_MASK;
+
+    if (mtvec_mode == 0b01 && is_interrupt) {
+      uint64_t interrupt_code =
+          static_cast<uint64_t>(cause) & ~MCAUSE_INTERRUPT_BIT;
+      _pc = mtvec_base + (interrupt_code * 4);
+    } else {
+      _pc = mtvec_base;
+    }
+    _mode = 0b11;
+
+    // generally will only happen if mtvec is not set
+    if (_pc == 0) [[unlikely]] {
+      switch (cause) {
+        default:
+          std::stringstream ss;
+          ss << "Error: " << static_cast<uint64_t>(cause) << '\n';
+          ss << "at: " << std::hex << _pc << std::dec << '\n';
+          throw std::runtime_error(ss.str());
+      }
+    }
+
+    return true;
+  }
+
+  inline void step(uint64_t n) {
+    static void *dispatch_table[256] = {nullptr};
+
+    // initialize
+    static bool initialized = false;
+    if (!initialized) [[unlikely]] {
+      initialized = true;
+      for (auto &entry : dispatch_table) entry = &&do_unknown_instruction;
+
+#define register_range(op, label)                                             \
+  do {                                                                        \
+    for (uint32_t i = 0; i < 8; i++) dispatch_table[op | (i << 5)] = &&label; \
+  } while (false)
+#define register_instr(op, func3, label)       \
+  do {                                         \
+    dispatch_table[op | func3 << 5] = &&label; \
+  } while (false)
+
+      register_range(0b01101, do_lui);
+      register_range(0b00101, do_auipc);
+      register_range(0b11011, do_jal);
+      register_range(0b11001, do_jalr);
+      register_instr(0b11000, 0b000, do_beq);
+      register_instr(0b11000, 0b001, do_bne);
+      register_instr(0b11000, 0b100, do_blt);
+      register_instr(0b11000, 0b101, do_bge);
+      register_instr(0b11000, 0b110, do_bltu);
+      register_instr(0b11000, 0b111, do_bgeu);
+      register_instr(0b00000, 0b000, do_lb);
+      register_instr(0b00000, 0b001, do_lh);
+      register_instr(0b00000, 0b010, do_lw);
+      register_instr(0b00000, 0b100, do_lbu);
+      register_instr(0b00000, 0b101, do_lhu);
+      register_instr(0b01000, 0b000, do_sb);
+      register_instr(0b01000, 0b001, do_sh);
+      register_instr(0b01000, 0b010, do_sw);
+      register_instr(0b00100, 0b000, do_addi);
+      register_instr(0b00100, 0b010, do_slti);
+      register_instr(0b00100, 0b011, do_sltiu);
+      register_instr(0b00100, 0b100, do_xori);
+      register_instr(0b00100, 0b110, do_ori);
+      register_instr(0b00100, 0b111, do_andi);
+      register_instr(0b00000, 0b110, do_lwu);
+      register_instr(0b00000, 0b011, do_ld);
+      register_instr(0b01000, 0b011, do_sd);
+      register_instr(0b00100, 0b001, do_slli);
+      register_instr(0b00100, 0b101, do_srli_or_srai);
+      register_instr(0b00110, 0b000, do_addiw);
+      register_instr(0b00110, 0b001, do_slliw);
+      register_instr(0b00110, 0b101, do_srliw_or_sraiw);
+      register_instr(0b01110, 0b000, do_addw_or_subw);
+      register_instr(0b01110, 0b001, do_sllw);
+      register_instr(0b01110, 0b101, do_srlw_or_sraw);
+      register_instr(0b01100, 0b000, do_add_or_sub);
+      register_instr(0b01100, 0b001, do_sll);
+      register_instr(0b01100, 0b010, do_slt);
+      register_instr(0b01100, 0b011, do_sltu);
+      register_instr(0b01100, 0b100, do_xor);
+      register_instr(0b01100, 0b101, do_srl_or_sra);
+      register_instr(0b01100, 0b110, do_or);
+      register_instr(0b01100, 0b111, do_and);
+      register_instr(0b00011, 0b000, do_fence);
+      register_instr(0b11100, 0b000, do_system);  // ecall ebreak mret wfi
+      register_instr(0b11100, 0b001, do_csrrw);
+      register_instr(0b11100, 0b010, do_csrrs);
+
+      register_instr(0b11100, 0b101, do_csrrwi);
+    }
+
+    // no need to check every loop, checking once is enough since jump/branch
+    // handle misaligned addresses
+    if (_pc % 4 != 0) [[unlikely]] {
+      handle_trap(exception_code_t::e_instruction_address_misaligned, _pc);
+    }
+
+    uint32_t      _inst;
+    instruction_t inst;
+
+    // f f f o o o o o (f is func3, o is op)
+    // note, we ignore the first 2 bits of op since we dont implement compressed
+    // instructions
+#define dispatch()                                                         \
+  do {                                                                     \
+    _reg[0] = 0;                                                           \
+    if (n-- == 0) [[unlikely]]                                             \
+      return;                                                              \
+    _inst                         = _memory.fetch32(_pc);                  \
+    const uint32_t dispatch_index = extract_bit_range(_inst, 2, 7) |       \
+                                    extract_bit_range(_inst, 12, 15) << 5; \
+    reinterpret_cast<uint32_t &>(inst) = _inst;                            \
+    goto *dispatch_table[dispatch_index];                                  \
+  } while (false)
+
+    dispatch();
+
+  do_lui: {
+    _reg[inst.as.u_type.rd()] =
+        static_cast<int64_t>(static_cast<int32_t>(inst.as.u_type.imm() << 12));
+    _pc += 4;
+  }
+    dispatch();
+
+  do_auipc: {
+    _reg[inst.as.u_type.rd()] =
+        _pc + static_cast<int32_t>(inst.as.u_type.imm() << 12);
+    _pc += 4;
+  }
+    dispatch();
+
+  do_jal: {
+    uint64_t addr = _pc + inst.as.j_type.imm_sext();
+    if (addr % 4 != 0) [[unlikely]] {
+      handle_trap(exception_code_t::e_instruction_address_misaligned, addr);
+      dispatch();
+    }
+    _reg[inst.as.j_type.rd()] = _pc + 4;
+    _pc                       = addr;
+  }
+    dispatch();
+
+  do_jalr: {
+    uint64_t target  = _reg[inst.as.i_type.rs1()] + inst.as.i_type.imm_sext();
+    uint64_t next_pc = target & ~1ull;
+    if (next_pc % 4 != 0) {
+      handle_trap(exception_code_t::e_instruction_address_misaligned, next_pc);
+      dispatch();
+    }
+    _reg[inst.as.i_type.rd()] = _pc + 4;
+    _pc                       = next_pc;
+  }
+    dispatch();
+
+  do_beq: {
+    if (_reg[inst.as.b_type.rs1()] == _reg[inst.as.b_type.rs2()]) {
+      uint64_t addr = _pc + inst.as.b_type.imm_sext();
+      if (addr % 4 != 0) {
+        handle_trap(exception_code_t::e_instruction_address_misaligned, addr);
+        dispatch();
+      }
+      _pc = addr;
+    } else {
+      _pc += 4;
+    }
+  }
+    dispatch();
+
+  do_bne: {
+    if (_reg[inst.as.b_type.rs1()] != _reg[inst.as.b_type.rs2()]) {
+      uint64_t addr = _pc + inst.as.b_type.imm_sext();
+      if (addr % 4 != 0) {
+        handle_trap(exception_code_t::e_instruction_address_misaligned, addr);
+        dispatch();
+      }
+      _pc = addr;
+    } else {
+      _pc += 4;
+    }
+  }
+    dispatch();
+
+  do_blt: {
+    if (static_cast<int64_t>(_reg[inst.as.b_type.rs1()]) <
+        static_cast<int64_t>(_reg[inst.as.b_type.rs2()])) {
+      uint64_t addr = _pc + inst.as.b_type.imm_sext();
+      if (addr % 4 != 0) {
+        handle_trap(exception_code_t::e_instruction_address_misaligned, addr);
+        dispatch();
+      }
+      _pc = addr;
+    } else {
+      _pc += 4;
+    }
+  }
+    dispatch();
+
+  do_bge: {
+    if (static_cast<int64_t>(_reg[inst.as.b_type.rs1()]) >=
+        static_cast<int64_t>(_reg[inst.as.b_type.rs2()])) {
+      uint64_t addr = _pc + inst.as.b_type.imm_sext();
+      if (addr % 4 != 0) {
+        handle_trap(exception_code_t::e_instruction_address_misaligned, addr);
+        dispatch();
+      }
+      _pc = addr;
+    } else {
+      _pc += 4;
+    }
+  }
+    dispatch();
+
+  do_bltu: {
+    if (_reg[inst.as.b_type.rs1()] < _reg[inst.as.b_type.rs2()]) {
+      uint64_t addr = _pc + inst.as.b_type.imm_sext();
+      if (addr % 4 != 0) {
+        handle_trap(exception_code_t::e_instruction_address_misaligned, addr);
+        dispatch();
+      }
+      _pc = addr;
+    } else {
+      _pc += 4;
+    }
+  }
+    dispatch();
+
+  do_bgeu: {
+    if (_reg[inst.as.b_type.rs1()] >= _reg[inst.as.b_type.rs2()]) {
+      uint64_t addr = _pc + inst.as.b_type.imm_sext();
+      if (addr % 4 != 0) {
+        handle_trap(exception_code_t::e_instruction_address_misaligned, addr);
+        dispatch();
+      }
+      _pc = addr;
+    } else {
+      _pc += 4;
+    }
+  }
+    dispatch();
+
+  do_lb: {
+    uint64_t addr = _reg[inst.as.i_type.rs1()] + inst.as.i_type.imm_sext();
+    // never e_load_access_fault in this implementation
+    int8_t value              = _memory.load8i(addr);
+    _reg[inst.as.i_type.rd()] = static_cast<int64_t>(value);
+    _pc += 4;
+  }
+    dispatch();
+
+  do_lh: {
+    uint64_t addr = _reg[inst.as.i_type.rs1()] + inst.as.i_type.imm_sext();
+    // never e_load_access_fault in this implementation
+    int16_t value             = _memory.load16i(addr);
+    _reg[inst.as.i_type.rd()] = static_cast<int64_t>(value);
+    _pc += 4;
+  }
+    dispatch();
+
+  do_lw: {
+    uint64_t addr = _reg[inst.as.i_type.rs1()] + inst.as.i_type.imm_sext();
+    // never e_load_access_fault in this implementation
+    int32_t value             = _memory.load32i(addr);
+    _reg[inst.as.i_type.rd()] = static_cast<int64_t>(value);
+    _pc += 4;
+  }
+    dispatch();
+
+  do_lbu: {
+    uint64_t addr = _reg[inst.as.i_type.rs1()] + inst.as.i_type.imm_sext();
+    // never e_load_access_fault in this implementation
+    uint8_t value             = _memory.load8(addr);
+    _reg[inst.as.i_type.rd()] = value;
+    _pc += 4;
+  }
+    dispatch();
+
+  do_lhu: {
+    uint64_t addr = _reg[inst.as.i_type.rs1()] + inst.as.i_type.imm_sext();
+    // never e_load_access_fault in this implementation
+    uint16_t value            = _memory.load16(addr);
+    _reg[inst.as.i_type.rd()] = value;
+    _pc += 4;
+  }
+    dispatch();
+
+  do_sb: {
+    uint64_t addr = _reg[inst.as.s_type.rs1()] + inst.as.s_type.imm_sext();
+    // never e_store_access_fault in this implementation
+    _memory.store8(addr, _reg[inst.as.s_type.rs2()]);
+    _pc += 4;
+  }
+    dispatch();
+
+  do_sh: {
+    uint64_t addr = _reg[inst.as.s_type.rs1()] + inst.as.s_type.imm_sext();
+    // never e_store_access_fault in this implementation
+    _memory.store16(addr, _reg[inst.as.s_type.rs2()]);
+    _pc += 4;
+  }
+    dispatch();
+
+  do_sw: {
+    uint64_t addr = _reg[inst.as.s_type.rs1()] + inst.as.s_type.imm_sext();
+    // never e_store_access_fault in this implementation
+    _memory.store32(addr, _reg[inst.as.s_type.rs2()]);
+    _pc += 4;
+  }
+    dispatch();
+
+  do_addi: {
+    _reg[inst.as.i_type.rd()] =
+        _reg[inst.as.i_type.rs1()] + inst.as.i_type.imm_sext();
+    _pc += 4;
+  }
+    dispatch();
+
+  do_slti: {
+    _reg[inst.as.i_type.rd()] =
+        static_cast<int64_t>(_reg[inst.as.i_type.rs1()]) <
+        inst.as.i_type.imm_sext();
+    _pc += 4;
+  }
+    dispatch();
+
+  do_sltiu: {
+    _reg[inst.as.i_type.rd()] =
+        _reg[inst.as.i_type.rs1()] < inst.as.i_type.imm_sext();
+    _pc += 4;
+  }
+    dispatch();
+
+  do_xori: {
+    _reg[inst.as.i_type.rd()] =
+        _reg[inst.as.i_type.rs1()] ^ inst.as.i_type.imm_sext();
+    _pc += 4;
+  }
+    dispatch();
+
+  do_ori: {
+    _reg[inst.as.i_type.rd()] =
+        _reg[inst.as.i_type.rs1()] | inst.as.i_type.imm_sext();
+    _pc += 4;
+  }
+    dispatch();
+
+  do_andi: {
+    _reg[inst.as.i_type.rd()] =
+        _reg[inst.as.i_type.rs1()] & inst.as.i_type.imm_sext();
+    _pc += 4;
+  }
+    dispatch();
+
+  do_lwu: {
+    uint64_t addr = _reg[inst.as.i_type.rs1()] + inst.as.i_type.imm_sext();
+    // never e_load_access_fault in this implementation
+    uint32_t value            = _memory.load32(addr);
+    _reg[inst.as.i_type.rd()] = value;
+    _pc += 4;
+  }
+    dispatch();
+
+  do_ld: {
+    uint64_t addr = _reg[inst.as.i_type.rs1()] + inst.as.i_type.imm_sext();
+    // never e_load_access_fault in this implementation
+    uint64_t value            = _memory.load64(addr);
+    _reg[inst.as.i_type.rd()] = value;
+    _pc += 4;
+  }
+    dispatch();
+
+  do_sd: {
+    uint64_t addr = _reg[inst.as.s_type.rs1()] + inst.as.s_type.imm_sext();
+    // never e_store_access_fault in this implementation
+    _memory.store64(addr, _reg[inst.as.s_type.rs2()]);
+    _pc += 4;
+  }
+    dispatch();
+
+  do_slli: {
+    _reg[inst.as.i_type.rd()] = _reg[inst.as.i_type.rs1()]
+                                << (inst.as.i_type.imm() & 0x3f);
+    _pc += 4;
+  }
+    dispatch();
+
+  do_srli_or_srai: {
+    switch (inst.as.i_type.imm() >> 6) {
+      case 0b000000: {  // srli
+        _reg[inst.as.i_type.rd()] =
+            _reg[inst.as.i_type.rs1()] >> (inst.as.i_type.imm() & 0x3f);
+        _pc += 4;
+      } break;
+      case 0b010000: {  // srai
+        int64_t  rs1_val = static_cast<int64_t>(_reg[inst.as.i_type.rs1()]);
+        uint32_t shamt   = inst.as.i_type.imm() & 0x3f;
+        _reg[inst.as.i_type.rd()] = rs1_val >> shamt;
+        _pc += 4;
+      } break;
+
+      default:
+        goto do_unknown_instruction;
+    }
+  }
+    dispatch();
+
+  do_addiw: {
+    _reg[inst.as.i_type.rd()] = static_cast<int32_t>(static_cast<uint32_t>(
+        _reg[inst.as.i_type.rs1()] + inst.as.i_type.imm_sext()));
+    _pc += 4;
+  }
+    dispatch();
+
+  do_slliw: {
+    _reg[inst.as.i_type.rd()] = static_cast<int32_t>(static_cast<uint32_t>(
+        _reg[inst.as.i_type.rs1()]
+        << static_cast<uint32_t>(inst.as.i_type.shamt_w())));
+    _pc += 4;
+  }
+    dispatch();
+
+  do_srliw_or_sraiw: {
+    switch (inst.as.i_type.imm() >> 5) {
+      case 0b0000000: {  // srliw
+        _reg[inst.as.i_type.rd()] = static_cast<int32_t>(
+            static_cast<uint32_t>(_reg[inst.as.i_type.rs1()]) >>
+            inst.as.i_type.shamt_w());
+        _pc += 4;
+      } break;
+      case 0b0100000: {  // sraiw
+        _reg[inst.as.i_type.rd()] = static_cast<int32_t>(
+            static_cast<int32_t>(_reg[inst.as.i_type.rs1()]) >>
+            inst.as.i_type.shamt_w());
+        _pc += 4;
+      } break;
+
+      default:
+        goto do_unknown_instruction;
+    }
+  }
+    dispatch();
+
+  do_addw_or_subw: {
+    switch (inst.as.r_type.funct7()) {
+      case 0b0000000: {  // addw
+        _reg[inst.as.r_type.rd()] = static_cast<int32_t>(
+            static_cast<uint32_t>(_reg[inst.as.r_type.rs1()]) +
+            static_cast<uint32_t>(_reg[inst.as.r_type.rs2()]));
+        _pc += 4;
+      } break;
+      case 0b0100000: {  // subw
+        _reg[inst.as.r_type.rd()] = static_cast<int32_t>(
+            (static_cast<uint32_t>(_reg[inst.as.r_type.rs1()]) -
+             static_cast<uint32_t>(_reg[inst.as.r_type.rs2()])));
+        _pc += 4;
+      } break;
+
+      default:
+        goto do_unknown_instruction;
+    }
+  }
+    dispatch();
+
+  do_sllw: {
+    _reg[inst.as.r_type.rd()] =
+        static_cast<int32_t>(static_cast<int32_t>(_reg[inst.as.r_type.rs1()])
+                             << (_reg[inst.as.r_type.rs2()] & 0b11111));
+    _pc += 4;
+  }
+    dispatch();
+  do_srlw_or_sraw: {
+    switch (inst.as.r_type.funct7()) {
+      case 0b0000000: {  // srlw
+        _reg[inst.as.r_type.rd()] = static_cast<int32_t>(
+            static_cast<uint32_t>(_reg[inst.as.r_type.rs1()]) >>
+            (_reg[inst.as.r_type.rs2()] & 0b11111));
+        _pc += 4;
+      } break;
+      case 0b0100000: {  // sraw
+        _reg[inst.as.r_type.rd()] = static_cast<int32_t>(
+            static_cast<int32_t>(_reg[inst.as.r_type.rs1()]) >>
+            (_reg[inst.as.r_type.rs2()] & 0b11111));
+        _pc += 4;
+      } break;
+
+      default:
+        goto do_unknown_instruction;
+    }
+  }
+    dispatch();
+
+  do_add_or_sub: {
+    switch (inst.as.r_type.funct7()) {
+      case 0b0000000: {  // add
+        _reg[inst.as.r_type.rd()] =
+            _reg[inst.as.r_type.rs1()] + _reg[inst.as.r_type.rs2()];
+        _pc += 4;
+      } break;
+      case 0b0100000: {  // sub
+        _reg[inst.as.r_type.rd()] =
+            _reg[inst.as.r_type.rs1()] - _reg[inst.as.r_type.rs2()];
+        _pc += 4;
+      } break;
+
+      default:
+        goto do_unknown_instruction;
+    }
+  }
+    dispatch();
+
+  do_sll: {
+    _reg[inst.as.r_type.rd()] = _reg[inst.as.r_type.rs1()]
+                                << (_reg[inst.as.r_type.rs2()] & 0b111111);
+    _pc += 4;
+  }
+    dispatch();
+
+  do_slt: {
+    _reg[inst.as.r_type.rd()] =
+        static_cast<int64_t>(_reg[inst.as.r_type.rs1()]) <
+        static_cast<int64_t>(_reg[inst.as.r_type.rs2()]);
+    _pc += 4;
+  }
+    dispatch();
+
+  do_sltu: {
+    _reg[inst.as.r_type.rd()] =
+        _reg[inst.as.r_type.rs1()] < _reg[inst.as.r_type.rs2()];
+    _pc += 4;
+  }
+    dispatch();
+
+  do_xor: {
+    _reg[inst.as.r_type.rd()] =
+        _reg[inst.as.r_type.rs1()] ^ _reg[inst.as.r_type.rs2()];
+    _pc += 4;
+  }
+    dispatch();
+
+  do_srl_or_sra: {
+    switch (inst.as.r_type.funct7()) {
+      case 0b0000000: {  // srl
+        _reg[inst.as.r_type.rd()] = _reg[inst.as.r_type.rs1()] >>
+                                    (_reg[inst.as.r_type.rs2()] & 0b111111);
+        _pc += 4;
+      } break;
+      case 0b0100000: {  // sra
+        _reg[inst.as.r_type.rd()] =
+            static_cast<int64_t>(_reg[inst.as.r_type.rs1()]) >>
+            (_reg[inst.as.r_type.rs2()] & 0b111111);
+        _pc += 4;
+      } break;
+
+      default:
+        goto do_unknown_instruction;
+    }
+  }
+    dispatch();
+
+  do_or: {
+    _reg[inst.as.r_type.rd()] =
+        _reg[inst.as.r_type.rs1()] | _reg[inst.as.r_type.rs2()];
+    _pc += 4;
+  }
+    dispatch();
+
+  do_and: {
+    _reg[inst.as.r_type.rd()] =
+        _reg[inst.as.r_type.rs1()] & _reg[inst.as.r_type.rs2()];
+    _pc += 4;
+  }
+    dispatch();
+
+  do_fence: {
+    // fence not required ?
+    _pc += 4;
+  }
+    dispatch();
+
+  do_system: {
+    switch (inst.as.i_type.imm()) {
+      case 0b000000000000: {  // ecall
+        if (_mode == 0b11)
+          handle_trap(exception_code_t::e_ecall_m_mode, _pc);
+        else
+          handle_trap(exception_code_t::e_ecall_u_mode, _pc);
+      }
+        dispatch();           // goto next instruction no need to break
+      case 0b000000000001: {  // ebreak
+        handle_trap(exception_code_t::e_breakpoint, _pc);
+      }
+        dispatch();           // goto next instruction no need to break
+      case 0b001100000010: {  // mret
+        uint64_t &mstatus = _csr[MSTATUS];
+        uint64_t  mpp     = (mstatus & MSTATUS_MPP_MASK) >> MSTATUS_MPP_SHIFT;
+        uint64_t  mpie    = (mstatus & MSTATUS_MPIE_MASK) >> MSTATUS_MPIE_SHIFT;
+        _mode             = mpp;
+        _pc               = _csr[MEPC];
+        mstatus = (mstatus & ~MSTATUS_MIE_MASK) | (mpie << MSTATUS_MIE_SHIFT);
+        mstatus = (mstatus & ~MSTATUS_MPIE_MASK) | (1u << MSTATUS_MPIE_SHIFT);
+        mstatus = (mstatus & ~MSTATUS_MPP_MASK) | (0b00u << MSTATUS_MPP_SHIFT);
+      }
+        dispatch();  // goto next instruction no need to break
+
+      default:
+        goto do_unknown_instruction;
+    }
+  }
+    dispatch();  // technically not needed, just putting for the sake of
+                 // continuity
+
+  do_csrrw: {
+    // TODO: can reading csr fail ?
+    uint16_t  addr = inst.as.i_type.imm();
+    uint64_t &csr  = _csr[addr];
+
+    uint8_t rs1 = inst.as.i_type.rs1();
+    if ((addr >> 10) == 0b11 && rs1 != 0) {
+      handle_trap(exception_code_t::e_illegal_instruction, inst);
+      dispatch();
+    }
+    // write old value to rd
+    _reg[inst.as.i_type.rd()] = csr;
+    csr                       = _reg[rs1];
+    _pc += 4;
+  }
+    dispatch();
+
+  do_csrrs: {
+    // TODO: can reading csr fail ?
+    uint16_t  addr = inst.as.i_type.imm();
+    uint64_t &csr  = _csr[addr];
+
+    uint8_t rs1 = inst.as.i_type.rs1();
+    if ((addr >> 10) == 0b11 && rs1 != 0) {
+      handle_trap(exception_code_t::e_illegal_instruction, inst);
+      dispatch();
+    }
+    // write old value to rd
+    _reg[inst.as.i_type.rd()] = csr;
+    csr                       = csr | _reg[rs1];
+    _pc += 4;
+  }
+    dispatch();
+
+  do_csrrwi: {
+    // TODO: can reading csr fail ?
+    uint16_t  addr = inst.as.i_type.imm();
+    uint64_t &csr  = _csr[addr];
+
+    uint8_t rs1 = inst.as.i_type.rs1();
+    if ((addr >> 10) == 0b11 && rs1 != 0) {
+      handle_trap(exception_code_t::e_illegal_instruction, inst);
+      dispatch();
+    }
+    // write old value to rd
+    _reg[inst.as.i_type.rd()] = csr;
+    csr                       = rs1;
+    _pc += 4;
+  }
+    dispatch();
+
+  do_unknown_instruction:
+    std::stringstream ss;
+    ss << "error: unknown_instruction at " << std::hex << _pc << '\n';
+    throw std::runtime_error(ss.str());
+  }
+
+  memory_t _memory;
+  uint64_t _reg[32] = {0};
+  uint64_t _pc{0};
+  uint64_t _mode{0b11};
+
+  // hack
+  std::map<uint64_t, std::function<void(machine_t &)>> _syscalls;
+
+  // TODO: optimise csr
+  std::map<uint16_t, uint64_t> _csr;
+};
+
+}  // namespace dawn
+#endif
