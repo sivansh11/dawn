@@ -146,13 +146,7 @@ int main(int argc, char** argv) {
         }
       }
     }
-    // if (machine._paused) continue; // wfi
     machine.step(100);
-    // for (uint32_t i = 0; i < 32; i++) {
-    //   if (machine->_reg[i] != 0)
-    //     std::cout << "\tx" << std::dec << i << ": " << std::hex
-    //               << machine->_reg[i] << '\n';
-    // }
   }
 
   return -1;
