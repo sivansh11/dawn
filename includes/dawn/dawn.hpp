@@ -1,5 +1,5 @@
-#ifndef dawn_machine_hpp
-#define dawn_machine_hpp
+#ifndef DAWN_MACHINE_HPP
+#define DAWN_MACHINE_HPP
 
 #include <bitset>
 #include <cassert>
@@ -7,74 +7,18 @@
 #include <cstdint>
 #include <cstring>
 #include <functional>
+#include <fstream>
 #include <iostream>
 #include <map>
 #include <sstream>
 #include <stdexcept>
 
+extern uint64_t _mmio_load(uint64_t addr);
+extern void     _mmio_store(uint64_t addr, uint64_t value);
+extern uint64_t _mmio_start;
+extern uint64_t _mmio_stop;
+
 namespace dawn {
-
-// TODO: optional runtime memory bounds checking
-struct memory_t {
-  memory_t(size_t ram_size, uint64_t offset)
-      : _ram_size(ram_size), _offset(offset) {
-    _data  = new uint8_t[ram_size];
-    _final = reinterpret_cast<uint8_t *>(reinterpret_cast<uintptr_t>(_data) -
-                                         _offset);
-  }
-  ~memory_t() { delete[] _data; }
-
-  inline uint32_t fetch32(uint64_t addr) {
-    return *reinterpret_cast<uint32_t *>(_final + addr);
-  }
-
-  inline uint8_t load8(uint64_t addr) {
-    return *reinterpret_cast<uint8_t *>(_final + addr);
-  }
-  inline uint16_t load16(uint64_t addr) {
-    return *reinterpret_cast<uint16_t *>(_final + addr);
-  }
-  inline uint32_t load32(uint64_t addr) {
-    return *reinterpret_cast<uint32_t *>(_final + addr);
-  }
-  inline uint64_t load64(uint64_t addr) {
-    return *reinterpret_cast<uint64_t *>(_final + addr);
-  }
-  inline int8_t load8i(uint64_t addr) {
-    return *reinterpret_cast<int8_t *>(_final + addr);
-  }
-  inline int16_t load16i(uint64_t addr) {
-    return *reinterpret_cast<int16_t *>(_final + addr);
-  }
-  inline int32_t load32i(uint64_t addr) {
-    return *reinterpret_cast<int32_t *>(_final + addr);
-  }
-
-  inline void store8(uint64_t addr, uint8_t value) {
-    *reinterpret_cast<uint8_t *>(_final + addr) = value;
-  }
-  inline void store16(uint64_t addr, uint16_t value) {
-    *reinterpret_cast<uint16_t *>(_final + addr) = value;
-  }
-  inline void store32(uint64_t addr, uint32_t value) {
-    *reinterpret_cast<uint32_t *>(_final + addr) = value;
-  }
-  inline void store64(uint64_t addr, uint64_t value) {
-    *reinterpret_cast<uint64_t *>(_final + addr) = value;
-  }
-
-  inline void memcpy_host_to_guest(uint64_t dst, const void *src, size_t size) {
-    std::memcpy(_final + dst, src, size);
-  }
-  inline void memset(uint64_t addr, int value, size_t size) {
-    std::memset(_final + addr, value, size);
-  }
-
-  const size_t _ram_size;
-  uint8_t     *_data;
-  uint64_t     _offset{};
-  uint8_t     *_final{};
-};
 
 // [start, end)
 constexpr inline uint32_t extract_bit_range(uint32_t value, uint8_t start,
@@ -322,8 +266,158 @@ constexpr inline void mul_64x64_u(uint64_t a, uint64_t b, uint64_t result[2]) {
   result[1] = p3 + (p1 >> 32) + (p2 >> 32) + (carry_to_high_32 >> 32);
 }
 
+// TODO: optional runtime memory bounds checking
 struct machine_t {
-  machine_t(size_t ram_size, uint64_t offset) : _memory(ram_size, offset) {}
+  machine_t(size_t ram_size, uint64_t offset)
+      : _ram_size(ram_size), _offset(offset) {
+    _data  = new uint8_t[ram_size];
+    _final = reinterpret_cast<uint8_t *>(reinterpret_cast<uintptr_t>(_data) -
+                                         _offset);
+  }
+  ~machine_t() { delete[] _data; }
+
+  inline uint32_t fetch32(uint64_t addr) {
+    if ((_final + addr) < _data && (_final + addr) >= (_data + _offset)) {
+      std::stringstream ss;
+      ss << "out of bound access in " << std::hex << uint64_t(_final + addr);
+      throw std::runtime_error(ss.str());
+    }
+    return *reinterpret_cast<uint32_t *>(_final + addr);
+  }
+
+  inline uint8_t load8(uint64_t addr) {
+    if (_mmio_start <= addr && addr < _mmio_stop) [[unlikely]] {
+      return _mmio_load(addr);
+    }
+    if ((_final + addr) < _data && (_final + addr) >= (_data + _offset)) {
+      std::stringstream ss;
+      ss << "out of bound access in " << std::hex << uint64_t(_final + addr);
+      throw std::runtime_error(ss.str());
+    }
+    return *reinterpret_cast<uint8_t *>(_final + addr);
+  }
+  inline uint16_t load16(uint64_t addr) {
+    if (_mmio_start <= addr && addr < _mmio_stop) [[unlikely]] {
+      return _mmio_load(addr);
+    }
+    if ((_final + addr) < _data && (_final + addr) >= (_data + _offset)) {
+      std::stringstream ss;
+      ss << "out of bound access in " << std::hex << uint64_t(_final + addr);
+      throw std::runtime_error(ss.str());
+    }
+    return *reinterpret_cast<uint16_t *>(_final + addr);
+  }
+  inline uint32_t load32(uint64_t addr) {
+    if (_mmio_start <= addr && addr < _mmio_stop) [[unlikely]] {
+      return _mmio_load(addr);
+    }
+    if ((_final + addr) < _data && (_final + addr) >= (_data + _offset)) {
+      std::stringstream ss;
+      ss << "out of bound access in " << std::hex << uint64_t(_final + addr);
+      throw std::runtime_error(ss.str());
+    }
+    return *reinterpret_cast<uint32_t *>(_final + addr);
+  }
+  inline uint64_t load64(uint64_t addr) {
+    if (_mmio_start <= addr && addr < _mmio_stop) [[unlikely]] {
+      return _mmio_load(addr);
+    }
+    if ((_final + addr) < _data && (_final + addr) >= (_data + _offset)) {
+      std::stringstream ss;
+      ss << "out of bound access in " << std::hex << uint64_t(_final + addr);
+      throw std::runtime_error(ss.str());
+    }
+    return *reinterpret_cast<uint64_t *>(_final + addr);
+  }
+  inline int8_t load8i(uint64_t addr) {
+    if (_mmio_start <= addr && addr < _mmio_stop) [[unlikely]] {
+      return _mmio_load(addr);
+    }
+    if ((_final + addr) < _data && (_final + addr) >= (_data + _offset)) {
+      std::stringstream ss;
+      ss << "out of bound access in " << std::hex << uint64_t(_final + addr);
+      throw std::runtime_error(ss.str());
+    }
+    return *reinterpret_cast<int8_t *>(_final + addr);
+  }
+  inline int16_t load16i(uint64_t addr) {
+    if (_mmio_start <= addr && addr < _mmio_stop) [[unlikely]] {
+      return _mmio_load(addr);
+    }
+    if ((_final + addr) < _data && (_final + addr) >= (_data + _offset)) {
+      std::stringstream ss;
+      ss << "out of bound access in " << std::hex << uint64_t(_final + addr);
+      throw std::runtime_error(ss.str());
+    }
+    return *reinterpret_cast<int16_t *>(_final + addr);
+  }
+  inline int32_t load32i(uint64_t addr) {
+    if (_mmio_start <= addr && addr < _mmio_stop) [[unlikely]] {
+      return _mmio_load(addr);
+    }
+    if ((_final + addr) < _data && (_final + addr) >= (_data + _offset)) {
+      std::stringstream ss;
+      ss << "out of bound access in " << std::hex << uint64_t(_final + addr);
+      throw std::runtime_error(ss.str());
+    }
+    return *reinterpret_cast<int32_t *>(_final + addr);
+  }
+
+  inline void store8(uint64_t addr, uint8_t value) {
+    if (_mmio_start <= addr && addr < _mmio_stop) [[unlikely]] {
+      _mmio_store(addr, value);
+      return;
+    }
+    if ((_final + addr) < _data && (_final + addr) >= (_data + _offset)) {
+      std::stringstream ss;
+      ss << "out of bound access in " << std::hex << uint64_t(_final + addr);
+      throw std::runtime_error(ss.str());
+    }
+    *reinterpret_cast<uint8_t *>(_final + addr) = value;
+  }
+  inline void store16(uint64_t addr, uint16_t value) {
+    if (_mmio_start <= addr && addr < _mmio_stop) [[unlikely]] {
+      _mmio_store(addr, value);
+      return;
+    }
+    if ((_final + addr) < _data && (_final + addr) >= (_data + _offset)) {
+      std::stringstream ss;
+      ss << "out of bound access in " << std::hex << uint64_t(_final + addr);
+      throw std::runtime_error(ss.str());
+    }
+    *reinterpret_cast<uint16_t *>(_final + addr) = value;
+  }
+  inline void store32(uint64_t addr, uint32_t value) {
+    if (_mmio_start <= addr && addr < _mmio_stop) [[unlikely]] {
+      _mmio_store(addr, value);
+      return;
+    }
+    if ((_final + addr) < _data && (_final + addr) >= (_data + _offset)) {
+      std::stringstream ss;
+      ss << "out of bound access in " << std::hex << uint64_t(_final + addr);
+      throw std::runtime_error(ss.str());
+    }
+    *reinterpret_cast<uint32_t *>(_final + addr) = value;
+  }
+  inline void store64(uint64_t addr, uint64_t value) {
+    if (_mmio_start <= addr && addr < _mmio_stop) [[unlikely]] {
+      _mmio_store(addr, value);
+      return;
+    }
+    if ((_final + addr) < _data && (_final + addr) >= (_data + _offset)) {
+      std::stringstream ss;
+      ss << "out of bound access in " << std::hex << uint64_t(_final + addr);
+      throw std::runtime_error(ss.str());
+    }
+    *reinterpret_cast<uint64_t *>(_final + addr) = value;
+  }
+
+  inline void memcpy_host_to_guest(uint64_t dst, const void *src, size_t size) {
+    std::memcpy(_final + dst, src, size);
+  }
+  inline void memset(uint64_t addr, int value, size_t size) {
+    std::memset(_final + addr, value, size);
+  }
 
   // TODO: test with and without inline
   inline bool handle_trap(exception_code_t cause, uint64_t value) {
@@ -456,11 +550,14 @@ struct machine_t {
       register_instr(0b01100, 0b110, do_or_or_rem);
       register_instr(0b01100, 0b111, do_and_or_remu);
       register_instr(0b00011, 0b000, do_fence);
+      register_instr(0b00011, 0b001, do_fence);
       register_instr(0b11100, 0b000, do_system);  // ecall ebreak mret wfi
       register_instr(0b11100, 0b001, do_csrrw);
       register_instr(0b11100, 0b010, do_csrrs);
-
+      register_instr(0b11100, 0b011, do_csrrc);
       register_instr(0b11100, 0b101, do_csrrwi);
+      register_instr(0b11100, 0b110, do_csrrsi);
+      register_instr(0b11100, 0b111, do_csrrci);
       register_instr(0b01011, 0b010, do_atomic_w);
       register_instr(0b01011, 0b011, do_atomic_d);
     }
@@ -482,79 +579,91 @@ struct machine_t {
     _reg[0] = 0;                                                           \
     if (n-- == 0) [[unlikely]]                                             \
       return;                                                              \
-    _inst                         = _memory.fetch32(_pc);                  \
+    _inst                         = fetch32(_pc);                          \
     const uint32_t dispatch_index = extract_bit_range(_inst, 2, 7) |       \
                                     extract_bit_range(_inst, 12, 15) << 5; \
     reinterpret_cast<uint32_t &>(inst) = _inst;                            \
     goto *dispatch_table[dispatch_index];                                  \
   } while (false)
 
-    dispatch();
+#ifdef DAWN_ENABLE_LOGGING
+#define do_dispatch()                                                    \
+  do {                                                                   \
+    _log << "pc: " << std::hex << _pc << "  ra: " << std::hex << _reg[1] \
+         << "  sp: " << _reg[2] << '\n';                                 \
+    _log.flush();                                                        \
+    dispatch();                                                          \
+  } while (false)
+#else
+#define do_dispatch() dispatch()
+#endif
+
+    do_dispatch();
 
   do_lui: {
     _reg[inst.as.u_type.rd()] =
         static_cast<int64_t>(static_cast<int32_t>(inst.as.u_type.imm() << 12));
     _pc += 4;
   }
-    dispatch();
+    do_dispatch();
 
   do_auipc: {
     _reg[inst.as.u_type.rd()] =
         _pc + static_cast<int32_t>(inst.as.u_type.imm() << 12);
     _pc += 4;
   }
-    dispatch();
+    do_dispatch();
 
   do_jal: {
     uint64_t addr = _pc + inst.as.j_type.imm_sext();
     if (addr % 4 != 0) [[unlikely]] {
       handle_trap(exception_code_t::e_instruction_address_misaligned, addr);
-      dispatch();
+      do_dispatch();
     }
     _reg[inst.as.j_type.rd()] = _pc + 4;
     _pc                       = addr;
   }
-    dispatch();
+    do_dispatch();
 
   do_jalr: {
     uint64_t target  = _reg[inst.as.i_type.rs1()] + inst.as.i_type.imm_sext();
     uint64_t next_pc = target & ~1ull;
     if (next_pc % 4 != 0) {
       handle_trap(exception_code_t::e_instruction_address_misaligned, next_pc);
-      dispatch();
+      do_dispatch();
     }
     _reg[inst.as.i_type.rd()] = _pc + 4;
     _pc                       = next_pc;
   }
-    dispatch();
+    do_dispatch();
 
   do_beq: {
     if (_reg[inst.as.b_type.rs1()] == _reg[inst.as.b_type.rs2()]) {
       uint64_t addr = _pc + inst.as.b_type.imm_sext();
       if (addr % 4 != 0) {
         handle_trap(exception_code_t::e_instruction_address_misaligned, addr);
-        dispatch();
+        do_dispatch();
       }
       _pc = addr;
     } else {
       _pc += 4;
     }
   }
-    dispatch();
+    do_dispatch();
 
   do_bne: {
     if (_reg[inst.as.b_type.rs1()] != _reg[inst.as.b_type.rs2()]) {
       uint64_t addr = _pc + inst.as.b_type.imm_sext();
       if (addr % 4 != 0) {
         handle_trap(exception_code_t::e_instruction_address_misaligned, addr);
-        dispatch();
+        do_dispatch();
       }
       _pc = addr;
     } else {
       _pc += 4;
     }
   }
-    dispatch();
+    do_dispatch();
 
   do_blt: {
     if (static_cast<int64_t>(_reg[inst.as.b_type.rs1()]) <
@@ -562,14 +671,14 @@ struct machine_t {
       uint64_t addr = _pc + inst.as.b_type.imm_sext();
       if (addr % 4 != 0) {
         handle_trap(exception_code_t::e_instruction_address_misaligned, addr);
-        dispatch();
+        do_dispatch();
       }
       _pc = addr;
     } else {
       _pc += 4;
     }
   }
-    dispatch();
+    do_dispatch();
 
   do_bge: {
     if (static_cast<int64_t>(_reg[inst.as.b_type.rs1()]) >=
@@ -577,118 +686,118 @@ struct machine_t {
       uint64_t addr = _pc + inst.as.b_type.imm_sext();
       if (addr % 4 != 0) {
         handle_trap(exception_code_t::e_instruction_address_misaligned, addr);
-        dispatch();
+        do_dispatch();
       }
       _pc = addr;
     } else {
       _pc += 4;
     }
   }
-    dispatch();
+    do_dispatch();
 
   do_bltu: {
     if (_reg[inst.as.b_type.rs1()] < _reg[inst.as.b_type.rs2()]) {
       uint64_t addr = _pc + inst.as.b_type.imm_sext();
       if (addr % 4 != 0) {
         handle_trap(exception_code_t::e_instruction_address_misaligned, addr);
-        dispatch();
+        do_dispatch();
       }
       _pc = addr;
     } else {
       _pc += 4;
     }
   }
-    dispatch();
+    do_dispatch();
 
   do_bgeu: {
     if (_reg[inst.as.b_type.rs1()] >= _reg[inst.as.b_type.rs2()]) {
       uint64_t addr = _pc + inst.as.b_type.imm_sext();
       if (addr % 4 != 0) {
         handle_trap(exception_code_t::e_instruction_address_misaligned, addr);
-        dispatch();
+        do_dispatch();
       }
       _pc = addr;
     } else {
       _pc += 4;
     }
   }
-    dispatch();
+    do_dispatch();
 
   do_lb: {
     uint64_t addr = _reg[inst.as.i_type.rs1()] + inst.as.i_type.imm_sext();
     // never e_load_access_fault in this implementation
-    int8_t value              = _memory.load8i(addr);
+    int8_t value              = load8i(addr);
     _reg[inst.as.i_type.rd()] = static_cast<int64_t>(value);
     _pc += 4;
   }
-    dispatch();
+    do_dispatch();
 
   do_lh: {
     uint64_t addr = _reg[inst.as.i_type.rs1()] + inst.as.i_type.imm_sext();
     // never e_load_access_fault in this implementation
-    int16_t value             = _memory.load16i(addr);
+    int16_t value             = load16i(addr);
     _reg[inst.as.i_type.rd()] = static_cast<int64_t>(value);
     _pc += 4;
   }
-    dispatch();
+    do_dispatch();
 
   do_lw: {
     uint64_t addr = _reg[inst.as.i_type.rs1()] + inst.as.i_type.imm_sext();
     // never e_load_access_fault in this implementation
-    int32_t value             = _memory.load32i(addr);
+    int32_t value             = load32i(addr);
     _reg[inst.as.i_type.rd()] = static_cast<int64_t>(value);
     _pc += 4;
   }
-    dispatch();
+    do_dispatch();
 
   do_lbu: {
     uint64_t addr = _reg[inst.as.i_type.rs1()] + inst.as.i_type.imm_sext();
     // never e_load_access_fault in this implementation
-    uint8_t value             = _memory.load8(addr);
+    uint8_t value             = load8(addr);
     _reg[inst.as.i_type.rd()] = value;
     _pc += 4;
   }
-    dispatch();
+    do_dispatch();
 
   do_lhu: {
     uint64_t addr = _reg[inst.as.i_type.rs1()] + inst.as.i_type.imm_sext();
     // never e_load_access_fault in this implementation
-    uint16_t value            = _memory.load16(addr);
+    uint16_t value            = load16(addr);
     _reg[inst.as.i_type.rd()] = value;
     _pc += 4;
   }
-    dispatch();
+    do_dispatch();
 
   do_sb: {
     uint64_t addr = _reg[inst.as.s_type.rs1()] + inst.as.s_type.imm_sext();
     // never e_store_access_fault in this implementation
-    _memory.store8(addr, _reg[inst.as.s_type.rs2()]);
+    store8(addr, _reg[inst.as.s_type.rs2()]);
     _pc += 4;
   }
-    dispatch();
+    do_dispatch();
 
   do_sh: {
     uint64_t addr = _reg[inst.as.s_type.rs1()] + inst.as.s_type.imm_sext();
     // never e_store_access_fault in this implementation
-    _memory.store16(addr, _reg[inst.as.s_type.rs2()]);
+    store16(addr, _reg[inst.as.s_type.rs2()]);
     _pc += 4;
   }
-    dispatch();
+    do_dispatch();
 
   do_sw: {
     uint64_t addr = _reg[inst.as.s_type.rs1()] + inst.as.s_type.imm_sext();
     // never e_store_access_fault in this implementation
-    _memory.store32(addr, _reg[inst.as.s_type.rs2()]);
+    store32(addr, _reg[inst.as.s_type.rs2()]);
     _pc += 4;
   }
-    dispatch();
+    do_dispatch();
 
   do_addi: {
     _reg[inst.as.i_type.rd()] =
         _reg[inst.as.i_type.rs1()] + inst.as.i_type.imm_sext();
     _pc += 4;
   }
-    dispatch();
+    do_dispatch();
 
   do_slti: {
     _reg[inst.as.i_type.rd()] =
@@ -696,68 +805,68 @@ struct machine_t {
         inst.as.i_type.imm_sext();
     _pc += 4;
   }
-    dispatch();
+    do_dispatch();
 
   do_sltiu: {
     _reg[inst.as.i_type.rd()] =
         _reg[inst.as.i_type.rs1()] < inst.as.i_type.imm_sext();
     _pc += 4;
   }
-    dispatch();
+    do_dispatch();
 
   do_xori: {
     _reg[inst.as.i_type.rd()] =
         _reg[inst.as.i_type.rs1()] ^ inst.as.i_type.imm_sext();
     _pc += 4;
   }
-    dispatch();
+    do_dispatch();
 
   do_ori: {
     _reg[inst.as.i_type.rd()] =
         _reg[inst.as.i_type.rs1()] | inst.as.i_type.imm_sext();
     _pc += 4;
   }
-    dispatch();
+    do_dispatch();
 
   do_andi: {
     _reg[inst.as.i_type.rd()] =
         _reg[inst.as.i_type.rs1()] & inst.as.i_type.imm_sext();
     _pc += 4;
   }
-    dispatch();
+    do_dispatch();
 
   do_lwu: {
     uint64_t addr = _reg[inst.as.i_type.rs1()] + inst.as.i_type.imm_sext();
     // never e_load_access_fault in this implementation
-    uint32_t value            = _memory.load32(addr);
+    uint32_t value            = load32(addr);
     _reg[inst.as.i_type.rd()] = value;
     _pc += 4;
   }
-    dispatch();
+    do_dispatch();
 
   do_ld: {
     uint64_t addr = _reg[inst.as.i_type.rs1()] + inst.as.i_type.imm_sext();
     // never e_load_access_fault in this implementation
-    uint64_t value            = _memory.load64(addr);
+    uint64_t value            = load64(addr);
     _reg[inst.as.i_type.rd()] = value;
     _pc += 4;
   }
-    dispatch();
+    do_dispatch();
 
   do_sd: {
     uint64_t addr = _reg[inst.as.s_type.rs1()] + inst.as.s_type.imm_sext();
     // never e_store_access_fault in this implementation
-    _memory.store64(addr, _reg[inst.as.s_type.rs2()]);
+    store64(addr, _reg[inst.as.s_type.rs2()]);
     _pc += 4;
   }
-    dispatch();
+    do_dispatch();
 
   do_slli: {
     _reg[inst.as.i_type.rd()] = _reg[inst.as.i_type.rs1()]
                                 << (inst.as.i_type.imm() & 0x3f);
     _pc += 4;
   }
-    dispatch();
+    do_dispatch();
 
   do_srli_or_srai: {
     switch (inst.as.i_type.imm() >> 6) {
@@ -777,14 +886,14 @@ struct machine_t {
         goto do_unknown_instruction;
     }
   }
-    dispatch();
+    do_dispatch();
 
   do_addiw: {
     _reg[inst.as.i_type.rd()] = static_cast<int32_t>(static_cast<uint32_t>(
         _reg[inst.as.i_type.rs1()] + inst.as.i_type.imm_sext()));
     _pc += 4;
   }
-    dispatch();
+    do_dispatch();
 
   do_slliw: {
     _reg[inst.as.i_type.rd()] = static_cast<int32_t>(static_cast<uint32_t>(
@@ -792,7 +901,7 @@ struct machine_t {
         << static_cast<uint32_t>(inst.as.i_type.shamt_w())));
     _pc += 4;
   }
-    dispatch();
+    do_dispatch();
 
   do_srliw_or_sraiw: {
     switch (inst.as.i_type.imm() >> 5) {
@@ -813,7 +922,7 @@ struct machine_t {
         goto do_unknown_instruction;
     }
   }
-    dispatch();
+    do_dispatch();
 
   do_addw_or_subw_or_mulw: {
     switch (inst.as.r_type.funct7()) {
@@ -840,7 +949,7 @@ struct machine_t {
         goto do_unknown_instruction;
     }
   }
-    dispatch();
+    do_dispatch();
 
   do_sllw: {
     _reg[inst.as.r_type.rd()] =
@@ -848,7 +957,7 @@ struct machine_t {
                              << (_reg[inst.as.r_type.rs2()] & 0b11111));
     _pc += 4;
   }
-    dispatch();
+    do_dispatch();
 
   do_divw: {
     int32_t rs1 = static_cast<int32_t>(_reg[inst.as.r_type.rs1()]);
@@ -864,7 +973,7 @@ struct machine_t {
         static_cast<int64_t>(static_cast<int32_t>(_reg[inst.as.r_type.rd()]));
     _pc += 4;
   }
-    dispatch();
+    do_dispatch();
 
   do_srlw_or_sraw_or_divuw: {
     switch (inst.as.r_type.funct7()) {
@@ -897,7 +1006,7 @@ struct machine_t {
         goto do_unknown_instruction;
     }
   }
-    dispatch();
+    do_dispatch();
 
   do_remw: {
     int32_t rs1 = static_cast<int32_t>(_reg[inst.as.r_type.rs1()]);
@@ -913,7 +1022,7 @@ struct machine_t {
         static_cast<int64_t>(static_cast<int32_t>(_reg[inst.as.r_type.rd()]));
     _pc += 4;
   }
-    dispatch();
+    do_dispatch();
 
   do_remuw: {
     uint32_t rs1 = static_cast<uint32_t>(_reg[inst.as.r_type.rs1()]);
@@ -927,7 +1036,7 @@ struct machine_t {
         static_cast<int32_t>(static_cast<uint32_t>(_reg[inst.as.r_type.rd()])));
     _pc += 4;
   }
-    dispatch();
+    do_dispatch();
 
   do_add_or_sub_or_mul: {
     switch (inst.as.r_type.funct7()) {
@@ -952,7 +1061,7 @@ struct machine_t {
         goto do_unknown_instruction;
     }
   }
-    dispatch();
+    do_dispatch();
 
   do_sll_or_mulh: {
     switch (inst.as.r_type.funct7()) {
@@ -977,7 +1086,7 @@ struct machine_t {
         goto do_unknown_instruction;
     }
   }
-    dispatch();
+    do_dispatch();
 
   do_slt_or_mulhsu: {
     switch (inst.as.r_type.funct7()) {
@@ -1002,7 +1111,7 @@ struct machine_t {
         goto do_unknown_instruction;
     }
   }
-    dispatch();
+    do_dispatch();
 
   do_sltu_or_mulhu: {
     switch (inst.as.r_type.funct7()) {
@@ -1024,7 +1133,7 @@ struct machine_t {
         goto do_unknown_instruction;
     }
   }
-    dispatch();
+    do_dispatch();
 
   do_xor_or_div: {
     switch (inst.as.r_type.funct7()) {
@@ -1050,7 +1159,7 @@ struct machine_t {
         goto do_unknown_instruction;
     }
   }
-    dispatch();
+    do_dispatch();
 
   do_srl_or_sra_or_divu: {
     switch (inst.as.r_type.funct7()) {
@@ -1080,7 +1189,7 @@ struct machine_t {
         goto do_unknown_instruction;
     }
   }
-    dispatch();
+    do_dispatch();
 
   do_or_or_rem: {
     switch (inst.as.r_type.funct7()) {
@@ -1106,7 +1215,7 @@ struct machine_t {
         goto do_unknown_instruction;
     }
   }
-    dispatch();
+    do_dispatch();
 
   do_and_or_remu: {
     switch (inst.as.r_type.funct7()) {
@@ -1130,13 +1239,13 @@ struct machine_t {
         goto do_unknown_instruction;
     }
   }
-    dispatch();
+    do_dispatch();
 
   do_fence: {
     // fence not required ?
     _pc += 4;
   }
-    dispatch();
+    do_dispatch();
 
   do_system: {
     switch (inst.as.i_type.imm()) {
@@ -1146,11 +1255,13 @@ struct machine_t {
         else
           handle_trap(exception_code_t::e_ecall_u_mode, _pc);
       }
-        dispatch();           // goto next instruction no need to break
+        do_dispatch();  // goto next instruction no need to break
+
       case 0b000000000001: {  // ebreak
         handle_trap(exception_code_t::e_breakpoint, _pc);
       }
-        dispatch();           // goto next instruction no need to break
+        do_dispatch();  // goto next instruction no need to break
+
       case 0b001100000010: {  // mret
         uint64_t &mstatus = _csr[MSTATUS];
         uint64_t  mpp     = (mstatus & MSTATUS_MPP_MASK) >> MSTATUS_MPP_SHIFT;
@@ -1161,14 +1272,14 @@ struct machine_t {
         mstatus = (mstatus & ~MSTATUS_MPIE_MASK) | (1u << MSTATUS_MPIE_SHIFT);
         mstatus = (mstatus & ~MSTATUS_MPP_MASK) | (0b00u << MSTATUS_MPP_SHIFT);
       }
-        dispatch();  // goto next instruction no need to break
+        do_dispatch();  // goto next instruction no need to break
 
       default:
         goto do_unknown_instruction;
     }
   }
-    dispatch();  // technically not needed, just putting for the sake of
-                 // continuity
+    do_dispatch();  // technically not needed, just putting for the sake of
+                    // continuity
 
   do_csrrw: {
     // TODO: can reading csr fail ?
@@ -1178,14 +1289,14 @@ struct machine_t {
     uint8_t rs1 = inst.as.i_type.rs1();
     if ((addr >> 10) == 0b11 && rs1 != 0) {
       handle_trap(exception_code_t::e_illegal_instruction, inst);
-      dispatch();
+      do_dispatch();
     }
     // write old value to rd
     _reg[inst.as.i_type.rd()] = csr;
     csr                       = _reg[rs1];
     _pc += 4;
   }
-    dispatch();
+    do_dispatch();
 
   do_csrrs: {
     // TODO: can reading csr fail ?
@@ -1195,14 +1306,31 @@ struct machine_t {
     uint8_t rs1 = inst.as.i_type.rs1();
     if ((addr >> 10) == 0b11 && rs1 != 0) {
       handle_trap(exception_code_t::e_illegal_instruction, inst);
-      dispatch();
+      do_dispatch();
     }
     // write old value to rd
     _reg[inst.as.i_type.rd()] = csr;
     csr                       = csr | _reg[rs1];
     _pc += 4;
   }
-    dispatch();
+    do_dispatch();
+
+  do_csrrc: {
+    // TODO: can reading csr fail ?
+    uint16_t  addr = inst.as.i_type.imm();
+    uint64_t &csr  = _csr[addr];
+
+    uint8_t rs1 = inst.as.i_type.rs1();
+    if ((addr >> 10) == 0b11 && rs1 != 0) {
+      handle_trap(exception_code_t::e_illegal_instruction, inst);
+      do_dispatch();
+    }
+    // write old value to rd
+    _reg[inst.as.i_type.rd()] = csr;
+    csr                       = csr & ~_reg[rs1];
+    _pc += 4;
+  }
+    do_dispatch();
 
   do_csrrwi: {
     // TODO: can reading csr fail ?
@@ -1212,14 +1340,47 @@ struct machine_t {
     uint8_t rs1 = inst.as.i_type.rs1();
     if ((addr >> 10) == 0b11 && rs1 != 0) {
       handle_trap(exception_code_t::e_illegal_instruction, inst);
-      dispatch();
+      do_dispatch();
     }
     // write old value to rd
     _reg[inst.as.i_type.rd()] = csr;
     csr                       = rs1;
     _pc += 4;
   }
-    dispatch();
+    do_dispatch();
+
+  do_csrrsi: {
+    // TODO: can reading csr fail ?
+    uint16_t  addr = inst.as.i_type.imm();
+    uint64_t &csr  = _csr[addr];
+
+    uint8_t rs1 = inst.as.i_type.rs1();
+    if ((addr >> 10) == 0b11 && rs1 != 0) {
+      handle_trap(exception_code_t::e_illegal_instruction, inst);
+      do_dispatch();
+    }
+    // write old value to rd
+    _reg[inst.as.i_type.rd()] = csr | inst.as.i_type.rs1();
+    csr                       = rs1;
+    _pc += 4;
+  }
+    do_dispatch();
+  do_csrrci: {
+    // TODO: can reading csr fail ?
+    uint16_t  addr = inst.as.i_type.imm();
+    uint64_t &csr  = _csr[addr];
+
+    uint8_t rs1 = inst.as.i_type.rs1();
+    if ((addr >> 10) == 0b11 && rs1 != 0) {
+      handle_trap(exception_code_t::e_illegal_instruction, inst);
+      do_dispatch();
+    }
+    // write old value to rd
+    _reg[inst.as.i_type.rd()] = csr & ~inst.as.i_type.rs1();
+    csr                       = rs1;
+    _pc += 4;
+  }
+    do_dispatch();
 
   do_atomic_w: {
     switch (inst.as.a_type.funct5()) {
@@ -1232,7 +1393,7 @@ struct machine_t {
           goto do_unknown_instruction;
         }
         // no e_load_access_fault in this implementation
-        auto value                = _memory.load32(addr);
+        auto value                = load32(addr);
         _reg[inst.as.a_type.rd()] = sext<32>(value);
         _reservation_address      = addr;
         _is_reserved              = true;
@@ -1249,7 +1410,7 @@ struct machine_t {
         }
         if (_is_reserved && _reservation_address == addr) {
           // no e_store_access_fault in this implementation
-          _memory.store32(addr, static_cast<uint32_t>(rs2));
+          store32(addr, static_cast<uint32_t>(rs2));
           _reg[inst.as.a_type.rd()] = 0;
         } else {
           _reg[inst.as.a_type.rd()] = 1;
@@ -1268,9 +1429,9 @@ struct machine_t {
           goto do_unknown_instruction;
         }
         // no e_load_access_fault in this implementation
-        auto value                = _memory.load32(addr);
+        auto value                = load32(addr);
         _reg[inst.as.a_type.rd()] = sext<32>(value);
-        _memory.store32(addr, static_cast<uint32_t>(rs2));
+        store32(addr, static_cast<uint32_t>(rs2));
         _is_reserved         = false;
         _reservation_address = 0;
         _pc += 4;
@@ -1285,9 +1446,9 @@ struct machine_t {
           goto do_unknown_instruction;
         }
         // no e_load_access_fault in this implementation
-        auto value                = _memory.load32(addr);
+        auto value                = load32(addr);
         _reg[inst.as.a_type.rd()] = sext<32>(value);
-        _memory.store32(addr, static_cast<uint32_t>(value + rs2));
+        store32(addr, static_cast<uint32_t>(value + rs2));
         _is_reserved         = false;
         _reservation_address = 0;
         _pc += 4;
@@ -1301,9 +1462,9 @@ struct machine_t {
           handle_trap(exception_code_t::e_load_address_misaligned, addr);
           goto do_unknown_instruction;
         }
-        auto value                = _memory.load32(addr);
+        auto value                = load32(addr);
         _reg[inst.as.a_type.rd()] = sext<32>(value);
-        _memory.store32(addr, static_cast<uint32_t>(value ^ rs2));
+        store32(addr, static_cast<uint32_t>(value ^ rs2));
         _is_reserved         = false;
         _reservation_address = 0;
         _pc += 4;
@@ -1317,9 +1478,9 @@ struct machine_t {
           handle_trap(exception_code_t::e_load_address_misaligned, addr);
           goto do_unknown_instruction;
         }
-        auto value                = _memory.load32(addr);
+        auto value                = load32(addr);
         _reg[inst.as.a_type.rd()] = sext<32>(value);
-        _memory.store32(addr, static_cast<uint32_t>(value & rs2));
+        store32(addr, static_cast<uint32_t>(value & rs2));
         _is_reserved         = false;
         _reservation_address = 0;
         _pc += 4;
@@ -1333,9 +1494,9 @@ struct machine_t {
           handle_trap(exception_code_t::e_load_address_misaligned, addr);
           goto do_unknown_instruction;
         }
-        auto value                = _memory.load32(addr);
+        auto value                = load32(addr);
         _reg[inst.as.a_type.rd()] = sext<32>(value);
-        _memory.store32(addr, static_cast<uint32_t>(value | rs2));
+        store32(addr, static_cast<uint32_t>(value | rs2));
         _is_reserved         = false;
         _reservation_address = 0;
         _pc += 4;
@@ -1349,11 +1510,11 @@ struct machine_t {
           handle_trap(exception_code_t::e_load_address_misaligned, addr);
           goto do_unknown_instruction;
         }
-        auto value                = _memory.load32(addr);
+        auto value                = load32(addr);
         _reg[inst.as.a_type.rd()] = sext<32>(value);
-        _memory.store32(
-            addr, static_cast<uint32_t>(std::min(static_cast<int32_t>(value),
-                                                 static_cast<int32_t>(rs2))));
+        store32(addr,
+                static_cast<uint32_t>(std::min(static_cast<int32_t>(value),
+                                               static_cast<int32_t>(rs2))));
         _is_reserved         = false;
         _reservation_address = 0;
         _pc += 4;
@@ -1367,11 +1528,11 @@ struct machine_t {
           handle_trap(exception_code_t::e_load_address_misaligned, addr);
           goto do_unknown_instruction;
         }
-        auto value                = _memory.load32(addr);
+        auto value                = load32(addr);
         _reg[inst.as.a_type.rd()] = sext<32>(value);
-        _memory.store32(
-            addr, static_cast<uint32_t>(std::max(static_cast<int32_t>(value),
-                                                 static_cast<int32_t>(rs2))));
+        store32(addr,
+                static_cast<uint32_t>(std::max(static_cast<int32_t>(value),
+                                               static_cast<int32_t>(rs2))));
         _is_reserved         = false;
         _reservation_address = 0;
         _pc += 4;
@@ -1385,10 +1546,10 @@ struct machine_t {
           handle_trap(exception_code_t::e_load_address_misaligned, addr);
           goto do_unknown_instruction;
         }
-        auto value                = _memory.load32(addr);
+        auto value                = load32(addr);
         _reg[inst.as.a_type.rd()] = sext<32>(value);
-        _memory.store32(addr, std::min(static_cast<uint32_t>(value),
-                                       static_cast<uint32_t>(rs2)));
+        store32(addr, std::min(static_cast<uint32_t>(value),
+                               static_cast<uint32_t>(rs2)));
         _is_reserved         = false;
         _reservation_address = 0;
         _pc += 4;
@@ -1402,10 +1563,10 @@ struct machine_t {
           handle_trap(exception_code_t::e_load_address_misaligned, addr);
           goto do_unknown_instruction;
         }
-        auto value                = _memory.load32(addr);
+        auto value                = load32(addr);
         _reg[inst.as.a_type.rd()] = sext<32>(value);
-        _memory.store32(addr, std::max(static_cast<uint32_t>(value),
-                                       static_cast<uint32_t>(rs2)));
+        store32(addr, std::max(static_cast<uint32_t>(value),
+                               static_cast<uint32_t>(rs2)));
         _is_reserved         = false;
         _reservation_address = 0;
         _pc += 4;
@@ -1415,7 +1576,7 @@ struct machine_t {
         goto do_unknown_instruction;
     }
   }
-    dispatch();
+    do_dispatch();
 
   do_atomic_d: {
     switch (inst.as.a_type.funct5()) {
@@ -1428,7 +1589,7 @@ struct machine_t {
           goto do_unknown_instruction;
         }
         // no e_load_access_fault in this implementation
-        auto value                = _memory.load64(addr);
+        auto value                = load64(addr);
         _reg[inst.as.a_type.rd()] = value;
         _reservation_address      = addr;
         _is_reserved              = true;
@@ -1445,7 +1606,7 @@ struct machine_t {
         }
         if (_is_reserved && _reservation_address == addr) {
           // no e_store_access_fault in this implementation
-          _memory.store64(addr, rs2);
+          store64(addr, rs2);
           _reg[inst.as.a_type.rd()] = 0;
         } else {
           _reg[inst.as.a_type.rd()] = 1;
@@ -1464,9 +1625,9 @@ struct machine_t {
           goto do_unknown_instruction;
         }
         // no e_load_access_fault in this implementation
-        auto value                = _memory.load64(addr);
+        auto value                = load64(addr);
         _reg[inst.as.a_type.rd()] = value;
-        _memory.store64(addr, rs2);
+        store64(addr, rs2);
         _is_reserved         = false;
         _reservation_address = 0;
         _pc += 4;
@@ -1481,9 +1642,9 @@ struct machine_t {
           goto do_unknown_instruction;
         }
         // no e_load_access_fault in this implementation
-        auto value                = _memory.load64(addr);
+        auto value                = load64(addr);
         _reg[inst.as.a_type.rd()] = value;
-        _memory.store64(addr, value + rs2);
+        store64(addr, value + rs2);
         _is_reserved         = false;
         _reservation_address = 0;
         _pc += 4;
@@ -1497,9 +1658,9 @@ struct machine_t {
           handle_trap(exception_code_t::e_load_address_misaligned, addr);
           goto do_unknown_instruction;
         }
-        auto value                = _memory.load64(addr);
+        auto value                = load64(addr);
         _reg[inst.as.a_type.rd()] = value;
-        _memory.store64(addr, value ^ rs2);
+        store64(addr, value ^ rs2);
         _is_reserved         = false;
         _reservation_address = 0;
         _pc += 4;
@@ -1513,9 +1674,9 @@ struct machine_t {
           handle_trap(exception_code_t::e_load_address_misaligned, addr);
           goto do_unknown_instruction;
         }
-        auto value                = _memory.load64(addr);
+        auto value                = load64(addr);
         _reg[inst.as.a_type.rd()] = value;
-        _memory.store64(addr, value & rs2);
+        store64(addr, value & rs2);
         _is_reserved         = false;
         _reservation_address = 0;
         _pc += 4;
@@ -1529,9 +1690,9 @@ struct machine_t {
           handle_trap(exception_code_t::e_load_address_misaligned, addr);
           goto do_unknown_instruction;
         }
-        auto value                = _memory.load64(addr);
+        auto value                = load64(addr);
         _reg[inst.as.a_type.rd()] = value;
-        _memory.store64(addr, value | rs2);
+        store64(addr, value | rs2);
         _is_reserved         = false;
         _reservation_address = 0;
         _pc += 4;
@@ -1545,10 +1706,10 @@ struct machine_t {
           handle_trap(exception_code_t::e_load_address_misaligned, addr);
           goto do_unknown_instruction;
         }
-        auto value                = _memory.load64(addr);
+        auto value                = load64(addr);
         _reg[inst.as.a_type.rd()] = value;
-        _memory.store64(addr, std::min(static_cast<int64_t>(value),
-                                       static_cast<int64_t>(rs2)));
+        store64(addr, std::min(static_cast<int64_t>(value),
+                               static_cast<int64_t>(rs2)));
         _is_reserved         = false;
         _reservation_address = 0;
         _pc += 4;
@@ -1562,10 +1723,10 @@ struct machine_t {
           handle_trap(exception_code_t::e_load_address_misaligned, addr);
           goto do_unknown_instruction;
         }
-        auto value                = _memory.load64(addr);
+        auto value                = load64(addr);
         _reg[inst.as.a_type.rd()] = value;
-        _memory.store64(addr, std::max(static_cast<int64_t>(value),
-                                       static_cast<int64_t>(rs2)));
+        store64(addr, std::max(static_cast<int64_t>(value),
+                               static_cast<int64_t>(rs2)));
         _is_reserved         = false;
         _reservation_address = 0;
         _pc += 4;
@@ -1579,10 +1740,10 @@ struct machine_t {
           handle_trap(exception_code_t::e_load_address_misaligned, addr);
           goto do_unknown_instruction;
         }
-        auto value                = _memory.load64(addr);
+        auto value                = load64(addr);
         _reg[inst.as.a_type.rd()] = value;
-        _memory.store64(addr, std::min(static_cast<uint64_t>(value),
-                                       static_cast<uint64_t>(rs2)));
+        store64(addr, std::min(static_cast<uint64_t>(value),
+                               static_cast<uint64_t>(rs2)));
         _is_reserved         = false;
         _reservation_address = 0;
         _pc += 4;
@@ -1596,10 +1757,10 @@ struct machine_t {
           handle_trap(exception_code_t::e_load_address_misaligned, addr);
           goto do_unknown_instruction;
         }
-        auto value                = _memory.load64(addr);
+        auto value                = load64(addr);
         _reg[inst.as.a_type.rd()] = value;
-        _memory.store64(addr, std::max(static_cast<uint64_t>(value),
-                                       static_cast<uint64_t>(rs2)));
+        store64(addr, std::max(static_cast<uint64_t>(value),
+                               static_cast<uint64_t>(rs2)));
         _is_reserved         = false;
         _reservation_address = 0;
         _pc += 4;
@@ -1609,7 +1770,7 @@ struct machine_t {
         goto do_unknown_instruction;
     }
   }
-    dispatch();
+    do_dispatch();
 
   do_unknown_instruction:
     std::stringstream ss;
@@ -1617,12 +1778,21 @@ struct machine_t {
     throw std::runtime_error(ss.str());
   }
 
-  memory_t _memory;
+  // memory
+  const size_t _ram_size;
+  uint8_t     *_data;
+  uint64_t     _offset{};
+  uint8_t     *_final{};
+
   uint64_t _reg[32] = {0};
   uint64_t _pc{0};
   uint64_t _mode{0b11};
   uint64_t _reservation_address;
   bool     _is_reserved = false;
+
+#ifdef DAWN_ENABLE_LOGGING
+  std::ofstream _log{"/tmp/dawn", std::ios::trunc};
+#endif
 
   // hack
   std::map<uint64_t, std::function<void(machine_t &)>> _syscalls;
