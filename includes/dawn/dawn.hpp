@@ -277,9 +277,9 @@ struct machine_t {
   ~machine_t() { delete[] _data; }
 
   inline uint32_t fetch32(uint64_t addr) {
-    if ((_final + addr) < _data && (_final + addr) >= (_data + _offset)) {
+    if ((addr < _offset) || addr >= (_offset + _ram_size)) {
       std::stringstream ss;
-      ss << "out of bound access in " << std::hex << uint64_t(_final + addr);
+      ss << "out of bound access in " << std::hex << uint64_t(addr);
       throw std::runtime_error(ss.str());
     }
     return *reinterpret_cast<uint32_t *>(_final + addr);
@@ -289,9 +289,9 @@ struct machine_t {
     if (_mmio_start <= addr && addr < _mmio_stop) [[unlikely]] {
       return _mmio_load(addr);
     }
-    if ((_final + addr) < _data && (_final + addr) >= (_data + _offset)) {
+    if ((addr < _offset) || addr >= (_offset + _ram_size)) {
       std::stringstream ss;
-      ss << "out of bound access in " << std::hex << uint64_t(_final + addr);
+      ss << "out of bound access in " << std::hex << uint64_t(addr);
       throw std::runtime_error(ss.str());
     }
     return *reinterpret_cast<uint8_t *>(_final + addr);
@@ -300,9 +300,9 @@ struct machine_t {
     if (_mmio_start <= addr && addr < _mmio_stop) [[unlikely]] {
       return _mmio_load(addr);
     }
-    if ((_final + addr) < _data && (_final + addr) >= (_data + _offset)) {
+    if ((addr < _offset) || addr >= (_offset + _ram_size)) {
       std::stringstream ss;
-      ss << "out of bound access in " << std::hex << uint64_t(_final + addr);
+      ss << "out of bound access in " << std::hex << uint64_t(addr);
       throw std::runtime_error(ss.str());
     }
     return *reinterpret_cast<uint16_t *>(_final + addr);
@@ -311,9 +311,9 @@ struct machine_t {
     if (_mmio_start <= addr && addr < _mmio_stop) [[unlikely]] {
       return _mmio_load(addr);
     }
-    if ((_final + addr) < _data && (_final + addr) >= (_data + _offset)) {
+    if ((addr < _offset) || addr >= (_offset + _ram_size)) {
       std::stringstream ss;
-      ss << "out of bound access in " << std::hex << uint64_t(_final + addr);
+      ss << "out of bound access in " << std::hex << uint64_t(addr);
       throw std::runtime_error(ss.str());
     }
     return *reinterpret_cast<uint32_t *>(_final + addr);
@@ -322,9 +322,9 @@ struct machine_t {
     if (_mmio_start <= addr && addr < _mmio_stop) [[unlikely]] {
       return _mmio_load(addr);
     }
-    if ((_final + addr) < _data && (_final + addr) >= (_data + _offset)) {
+    if ((addr < _offset) || addr >= (_offset + _ram_size)) {
       std::stringstream ss;
-      ss << "out of bound access in " << std::hex << uint64_t(_final + addr);
+      ss << "out of bound access in " << std::hex << uint64_t(addr);
       throw std::runtime_error(ss.str());
     }
     return *reinterpret_cast<uint64_t *>(_final + addr);
@@ -333,9 +333,9 @@ struct machine_t {
     if (_mmio_start <= addr && addr < _mmio_stop) [[unlikely]] {
       return _mmio_load(addr);
     }
-    if ((_final + addr) < _data && (_final + addr) >= (_data + _offset)) {
+    if ((addr < _offset) || addr >= (_offset + _ram_size)) {
       std::stringstream ss;
-      ss << "out of bound access in " << std::hex << uint64_t(_final + addr);
+      ss << "out of bound access in " << std::hex << uint64_t(addr);
       throw std::runtime_error(ss.str());
     }
     return *reinterpret_cast<int8_t *>(_final + addr);
@@ -344,9 +344,9 @@ struct machine_t {
     if (_mmio_start <= addr && addr < _mmio_stop) [[unlikely]] {
       return _mmio_load(addr);
     }
-    if ((_final + addr) < _data && (_final + addr) >= (_data + _offset)) {
+    if ((addr < _offset) || addr >= (_offset + _ram_size)) {
       std::stringstream ss;
-      ss << "out of bound access in " << std::hex << uint64_t(_final + addr);
+      ss << "out of bound access in " << std::hex << uint64_t(addr);
       throw std::runtime_error(ss.str());
     }
     return *reinterpret_cast<int16_t *>(_final + addr);
@@ -355,9 +355,9 @@ struct machine_t {
     if (_mmio_start <= addr && addr < _mmio_stop) [[unlikely]] {
       return _mmio_load(addr);
     }
-    if ((_final + addr) < _data && (_final + addr) >= (_data + _offset)) {
+    if ((addr < _offset) || addr >= (_offset + _ram_size)) {
       std::stringstream ss;
-      ss << "out of bound access in " << std::hex << uint64_t(_final + addr);
+      ss << "out of bound access in " << std::hex << uint64_t(addr);
       throw std::runtime_error(ss.str());
     }
     return *reinterpret_cast<int32_t *>(_final + addr);
@@ -368,9 +368,9 @@ struct machine_t {
       _mmio_store(addr, value);
       return;
     }
-    if ((_final + addr) < _data && (_final + addr) >= (_data + _offset)) {
+    if ((addr < _offset) || addr >= (_offset + _ram_size)) {
       std::stringstream ss;
-      ss << "out of bound access in " << std::hex << uint64_t(_final + addr);
+      ss << "out of bound access in " << std::hex << uint64_t(addr);
       throw std::runtime_error(ss.str());
     }
     *reinterpret_cast<uint8_t *>(_final + addr) = value;
@@ -380,9 +380,9 @@ struct machine_t {
       _mmio_store(addr, value);
       return;
     }
-    if ((_final + addr) < _data && (_final + addr) >= (_data + _offset)) {
+    if ((addr < _offset) || addr >= (_offset + _ram_size)) {
       std::stringstream ss;
-      ss << "out of bound access in " << std::hex << uint64_t(_final + addr);
+      ss << "out of bound access in " << std::hex << uint64_t(addr);
       throw std::runtime_error(ss.str());
     }
     *reinterpret_cast<uint16_t *>(_final + addr) = value;
@@ -392,9 +392,9 @@ struct machine_t {
       _mmio_store(addr, value);
       return;
     }
-    if ((_final + addr) < _data && (_final + addr) >= (_data + _offset)) {
+    if ((addr < _offset) || addr >= (_offset + _ram_size)) {
       std::stringstream ss;
-      ss << "out of bound access in " << std::hex << uint64_t(_final + addr);
+      ss << "out of bound access in " << std::hex << uint64_t(addr);
       throw std::runtime_error(ss.str());
     }
     *reinterpret_cast<uint32_t *>(_final + addr) = value;
@@ -404,9 +404,9 @@ struct machine_t {
       _mmio_store(addr, value);
       return;
     }
-    if ((_final + addr) < _data && (_final + addr) >= (_data + _offset)) {
+    if ((addr < _offset) || addr >= (_offset + _ram_size)) {
       std::stringstream ss;
-      ss << "out of bound access in " << std::hex << uint64_t(_final + addr);
+      ss << "out of bound access in " << std::hex << uint64_t(addr);
       throw std::runtime_error(ss.str());
     }
     *reinterpret_cast<uint64_t *>(_final + addr) = value;
