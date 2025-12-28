@@ -587,12 +587,22 @@ struct machine_t {
   } while (false)
 
 #ifdef DAWN_ENABLE_LOGGING
-#define do_dispatch()                                                    \
-  do {                                                                   \
-    _log << "pc: " << std::hex << _pc << "  ra: " << std::hex << _reg[1] \
-         << "  sp: " << _reg[2] << '\n';                                 \
-    _log.flush();                                                        \
-    dispatch();                                                          \
+    auto logger = [&]() {
+      _log << std::hex                       //
+           << "pc: " << _pc << '\n'          //
+           << "\tra: " << _reg[1] << '\n'    //
+           << "\tsp: " << _reg[2] << '\n'    //
+           << "\tx9: " << _reg[9] << '\n'    //
+           << "\tx14: " << _reg[14] << '\n'  //
+           << "\tx15: " << _reg[15] << '\n';
+
+      _log.flush();
+    };
+
+#define do_dispatch() \
+  do {                \
+    logger();         \
+    dispatch();       \
   } while (false)
 #else
 #define do_dispatch() dispatch()

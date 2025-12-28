@@ -1,6 +1,7 @@
 #include <csignal>
 #include <cstdlib>
 #include <filesystem>
+#include <fstream>
 #include <iostream>
 
 #include <termios.h>
@@ -135,7 +136,6 @@ int main(int argc, char** argv) {
   boot_time = get_time_now_us();
 
   while (1) {
-    // std::cout << "pc: " << std::hex << machine->_pc << '\n';
     if (timercmp) {
       timer = (get_time_now_us() - boot_time);
       if (timer > timercmp) {
