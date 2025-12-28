@@ -4,6 +4,13 @@
 
 #include <elfio/elfio.hpp>
 
+uint64_t _mmio_start = 0x1000;  // doesnt really matter
+uint64_t _mmio_stop  = 0x2000;  // doesnt really matter
+
+inline uint64_t _mmio_load(uint64_t addr) { return 0; }
+
+inline void _mmio_store(uint64_t addr, uint64_t val) {}
+
 #include "dawn/dawn.hpp"
 
 dawn::machine_t* load_elf(const std::filesystem::path& path) {
@@ -37,12 +44,11 @@ dawn::machine_t* load_elf(const std::filesystem::path& path) {
     bool              is_write        = segment->get_flags() & ELFIO::PF_W;
     bool              is_exec         = segment->get_flags() & ELFIO::PF_X;
 
-    machine->_memory.memcpy_host_to_guest(
+    machine->memcpy_host_to_guest(
         virtual_address, reinterpret_cast<const void*>(segment->get_data()),
         file_size);
     if (memory_size - file_size) {
-      machine->_memory.memset(virtual_address + file_size, 0,
-                              memory_size - file_size);
+      machine->memset(virtual_address + file_size, 0, memory_size - file_size);
     }
   }
 
@@ -71,7 +77,7 @@ dawn::machine_t* load_elf(const std::filesystem::path& path) {
   //   assert(state._heap_address != 0);
   // }
   machine->_pc     = reader.get_entry();
-  machine->_reg[2] = machine->_memory._ram_size - 8;
+  machine->_reg[2] = machine->_ram_size - 8;
   machine->_mode   = 0b00;
 
   return machine;

@@ -13,6 +13,9 @@ target_include_directories(dawn
   PUBLIC includes
 )
 
+target_compile_options(dawn PUBLIC -fsanitize=address)
+target_link_options(dawn PUBLIC -fsanitize=address)
+
 if (DAWN_BUILD_EXAMPLES)
   add_subdirectory(examples)
 endif()
