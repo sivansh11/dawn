@@ -1485,7 +1485,7 @@ struct machine_t {
         _reservation_address = 0;
         _pc += 4;
       } break;
-      case 0b1000: {  // amoor
+      case 0b01000: {  // amoor
         const uint64_t rs1       = _reg[inst.as.a_type.rs1()];
         const uint64_t rs2       = _reg[inst.as.a_type.rs2()];
         const uint64_t addr      = rs1;
@@ -1681,7 +1681,7 @@ struct machine_t {
         _reservation_address = 0;
         _pc += 4;
       } break;
-      case 0b1000: {  // amoor
+      case 0b01000: {  // amoor
         const uint64_t rs1       = _reg[inst.as.a_type.rs1()];
         const uint64_t rs2       = _reg[inst.as.a_type.rs2()];
         const uint64_t addr      = rs1;
