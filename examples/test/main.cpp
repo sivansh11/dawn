@@ -96,12 +96,12 @@ int main(int argc, char** argv) {
 
   while (1) {
     // std::cout << "pc: " << std::hex << machine->_pc << '\n';
+    machine->step(1);
     // for (uint32_t i = 0; i < 32; i++) {
     //   if (machine->_reg[i] != 0)
     //     std::cout << "\tx" << std::dec << i << ": " << std::hex
     //               << machine->_reg[i] << '\n';
     // }
-    machine->step(1);
   }
 
   return -1;

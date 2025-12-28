@@ -88,9 +88,9 @@ constexpr inline uint32_t extract_bit_range(uint32_t value, uint8_t start,
 }
 
 template <uint32_t sign_bit>
-constexpr inline int32_t sext(uint32_t val) {
+constexpr inline int64_t sext(uint32_t val) {
   struct internal_t {
-    int32_t val : sign_bit;
+    int64_t val : sign_bit;
   } s;
   return s.val = val;
 }
@@ -461,6 +461,8 @@ struct machine_t {
       register_instr(0b11100, 0b010, do_csrrs);
 
       register_instr(0b11100, 0b101, do_csrrwi);
+      register_instr(0b01011, 0b010, do_atomic_w);
+      register_instr(0b01011, 0b011, do_atomic_d);
     }
 
     // no need to check every loop, checking once is enough since jump/branch
@@ -1219,6 +1221,396 @@ struct machine_t {
   }
     dispatch();
 
+  do_atomic_w: {
+    switch (inst.as.a_type.funct5()) {
+      case 0b00010: {  // lr
+        const uint64_t rs1       = _reg[inst.as.a_type.rs1()];
+        const uint64_t addr      = rs1;
+        const uint32_t alignment = 4;  // 4 for w
+        if (addr % alignment != 0) {
+          handle_trap(exception_code_t::e_load_address_misaligned, addr);
+          goto do_unknown_instruction;
+        }
+        // no e_load_access_fault in this implementation
+        auto value                = _memory.load32(addr);
+        _reg[inst.as.a_type.rd()] = sext<32>(value);
+        _reservation_address      = addr;
+        _is_reserved              = true;
+        _pc += 4;
+      } break;
+      case 0b00011: {  // sc
+        const uint64_t rs1       = _reg[inst.as.a_type.rs1()];
+        const uint64_t rs2       = _reg[inst.as.a_type.rs2()];
+        const uint64_t addr      = rs1;
+        const uint32_t alignment = 4;  // 4 for w
+        if (addr % alignment != 0) {
+          handle_trap(exception_code_t::e_store_address_misaligned, addr);
+          goto do_unknown_instruction;
+        }
+        if (_is_reserved && _reservation_address == addr) {
+          // no e_store_access_fault in this implementation
+          _memory.store32(addr, static_cast<uint32_t>(rs2));
+          _reg[inst.as.a_type.rd()] = 0;
+        } else {
+          _reg[inst.as.a_type.rd()] = 1;
+        }
+        _is_reserved         = false;
+        _reservation_address = 0;
+        _pc += 4;
+      } break;
+      case 0b00001: {  // amoswap
+        const uint64_t rs1       = _reg[inst.as.a_type.rs1()];
+        const uint64_t rs2       = _reg[inst.as.a_type.rs2()];
+        const uint64_t addr      = rs1;
+        const uint32_t alignment = 4;  // 4 for w
+        if (addr % alignment != 0) {
+          handle_trap(exception_code_t::e_load_address_misaligned, addr);
+          goto do_unknown_instruction;
+        }
+        // no e_load_access_fault in this implementation
+        auto value                = _memory.load32(addr);
+        _reg[inst.as.a_type.rd()] = sext<32>(value);
+        _memory.store32(addr, static_cast<uint32_t>(rs2));
+        _is_reserved         = false;
+        _reservation_address = 0;
+        _pc += 4;
+      } break;
+      case 0b00000: {  // amoadd
+        const uint64_t rs1       = _reg[inst.as.a_type.rs1()];
+        const uint64_t rs2       = _reg[inst.as.a_type.rs2()];
+        const uint64_t addr      = rs1;
+        const uint32_t alignment = 4;  // 4 for w
+        if (addr % alignment != 0) {
+          handle_trap(exception_code_t::e_load_address_misaligned, addr);
+          goto do_unknown_instruction;
+        }
+        // no e_load_access_fault in this implementation
+        auto value                = _memory.load32(addr);
+        _reg[inst.as.a_type.rd()] = sext<32>(value);
+        _memory.store32(addr, static_cast<uint32_t>(value + rs2));
+        _is_reserved         = false;
+        _reservation_address = 0;
+        _pc += 4;
+      } break;
+      case 0b00100: {  // amoxor
+        const uint64_t rs1       = _reg[inst.as.a_type.rs1()];
+        const uint64_t rs2       = _reg[inst.as.a_type.rs2()];
+        const uint64_t addr      = rs1;
+        const uint32_t alignment = 4;  // 4 for w
+        if (addr % alignment != 0) {
+          handle_trap(exception_code_t::e_load_address_misaligned, addr);
+          goto do_unknown_instruction;
+        }
+        auto value                = _memory.load32(addr);
+        _reg[inst.as.a_type.rd()] = sext<32>(value);
+        _memory.store32(addr, static_cast<uint32_t>(value ^ rs2));
+        _is_reserved         = false;
+        _reservation_address = 0;
+        _pc += 4;
+      } break;
+      case 0b01100: {  // amoand
+        const uint64_t rs1       = _reg[inst.as.a_type.rs1()];
+        const uint64_t rs2       = _reg[inst.as.a_type.rs2()];
+        const uint64_t addr      = rs1;
+        const uint32_t alignment = 4;  // 4 for w
+        if (addr % alignment != 0) {
+          handle_trap(exception_code_t::e_load_address_misaligned, addr);
+          goto do_unknown_instruction;
+        }
+        auto value                = _memory.load32(addr);
+        _reg[inst.as.a_type.rd()] = sext<32>(value);
+        _memory.store32(addr, static_cast<uint32_t>(value & rs2));
+        _is_reserved         = false;
+        _reservation_address = 0;
+        _pc += 4;
+      } break;
+      case 0b1000: {  // amoor
+        const uint64_t rs1       = _reg[inst.as.a_type.rs1()];
+        const uint64_t rs2       = _reg[inst.as.a_type.rs2()];
+        const uint64_t addr      = rs1;
+        const uint32_t alignment = 4;  // 4 for w
+        if (addr % alignment != 0) {
+          handle_trap(exception_code_t::e_load_address_misaligned, addr);
+          goto do_unknown_instruction;
+        }
+        auto value                = _memory.load32(addr);
+        _reg[inst.as.a_type.rd()] = sext<32>(value);
+        _memory.store32(addr, static_cast<uint32_t>(value | rs2));
+        _is_reserved         = false;
+        _reservation_address = 0;
+        _pc += 4;
+      } break;
+      case 0b10000: {  // amomin
+        const uint64_t rs1       = _reg[inst.as.a_type.rs1()];
+        const uint64_t rs2       = _reg[inst.as.a_type.rs2()];
+        const uint64_t addr      = rs1;
+        const uint32_t alignment = 4;  // 4 for w
+        if (addr % alignment != 0) {
+          handle_trap(exception_code_t::e_load_address_misaligned, addr);
+          goto do_unknown_instruction;
+        }
+        auto value                = _memory.load32(addr);
+        _reg[inst.as.a_type.rd()] = sext<32>(value);
+        _memory.store32(
+            addr, static_cast<uint32_t>(std::min(static_cast<int32_t>(value),
+                                                 static_cast<int32_t>(rs2))));
+        _is_reserved         = false;
+        _reservation_address = 0;
+        _pc += 4;
+      } break;
+      case 0b10100: {  // amomax
+        const uint64_t rs1       = _reg[inst.as.a_type.rs1()];
+        const uint64_t rs2       = _reg[inst.as.a_type.rs2()];
+        const uint64_t addr      = rs1;
+        const uint32_t alignment = 4;  // 4 for w
+        if (addr % alignment != 0) {
+          handle_trap(exception_code_t::e_load_address_misaligned, addr);
+          goto do_unknown_instruction;
+        }
+        auto value                = _memory.load32(addr);
+        _reg[inst.as.a_type.rd()] = sext<32>(value);
+        _memory.store32(
+            addr, static_cast<uint32_t>(std::max(static_cast<int32_t>(value),
+                                                 static_cast<int32_t>(rs2))));
+        _is_reserved         = false;
+        _reservation_address = 0;
+        _pc += 4;
+      } break;
+      case 0b11000: {  // amominu
+        const uint64_t rs1       = _reg[inst.as.a_type.rs1()];
+        const uint64_t rs2       = _reg[inst.as.a_type.rs2()];
+        const uint64_t addr      = rs1;
+        const uint32_t alignment = 4;  // 4 for w
+        if (addr % alignment != 0) {
+          handle_trap(exception_code_t::e_load_address_misaligned, addr);
+          goto do_unknown_instruction;
+        }
+        auto value                = _memory.load32(addr);
+        _reg[inst.as.a_type.rd()] = sext<32>(value);
+        _memory.store32(addr, std::min(static_cast<uint32_t>(value),
+                                       static_cast<uint32_t>(rs2)));
+        _is_reserved         = false;
+        _reservation_address = 0;
+        _pc += 4;
+      } break;
+      case 0b11100: {  // amomaxu
+        const uint64_t rs1       = _reg[inst.as.a_type.rs1()];
+        const uint64_t rs2       = _reg[inst.as.a_type.rs2()];
+        const uint64_t addr      = rs1;
+        const uint32_t alignment = 4;  // 4 for w
+        if (addr % alignment != 0) {
+          handle_trap(exception_code_t::e_load_address_misaligned, addr);
+          goto do_unknown_instruction;
+        }
+        auto value                = _memory.load32(addr);
+        _reg[inst.as.a_type.rd()] = sext<32>(value);
+        _memory.store32(addr, std::max(static_cast<uint32_t>(value),
+                                       static_cast<uint32_t>(rs2)));
+        _is_reserved         = false;
+        _reservation_address = 0;
+        _pc += 4;
+      } break;
+
+      default:
+        goto do_unknown_instruction;
+    }
+  }
+    dispatch();
+
+  do_atomic_d: {
+    switch (inst.as.a_type.funct5()) {
+      case 0b00010: {  // lr
+        const uint64_t rs1       = _reg[inst.as.a_type.rs1()];
+        const uint64_t addr      = rs1;
+        const uint32_t alignment = 8;  // 8 for d
+        if (addr % alignment != 0) {
+          handle_trap(exception_code_t::e_load_address_misaligned, addr);
+          goto do_unknown_instruction;
+        }
+        // no e_load_access_fault in this implementation
+        auto value                = _memory.load64(addr);
+        _reg[inst.as.a_type.rd()] = value;
+        _reservation_address      = addr;
+        _is_reserved              = true;
+        _pc += 4;
+      } break;
+      case 0b00011: {  // sc
+        const uint64_t rs1       = _reg[inst.as.a_type.rs1()];
+        const uint64_t rs2       = _reg[inst.as.a_type.rs2()];
+        const uint64_t addr      = rs1;
+        const uint32_t alignment = 8;  // 8 for d
+        if (addr % alignment != 0) {
+          handle_trap(exception_code_t::e_store_address_misaligned, addr);
+          goto do_unknown_instruction;
+        }
+        if (_is_reserved && _reservation_address == addr) {
+          // no e_store_access_fault in this implementation
+          _memory.store64(addr, rs2);
+          _reg[inst.as.a_type.rd()] = 0;
+        } else {
+          _reg[inst.as.a_type.rd()] = 1;
+        }
+        _is_reserved         = false;
+        _reservation_address = 0;
+        _pc += 4;
+      } break;
+      case 0b00001: {  // amoswap
+        const uint64_t rs1       = _reg[inst.as.a_type.rs1()];
+        const uint64_t rs2       = _reg[inst.as.a_type.rs2()];
+        const uint64_t addr      = rs1;
+        const uint32_t alignment = 8;  // 8 for d
+        if (addr % alignment != 0) {
+          handle_trap(exception_code_t::e_load_address_misaligned, addr);
+          goto do_unknown_instruction;
+        }
+        // no e_load_access_fault in this implementation
+        auto value                = _memory.load64(addr);
+        _reg[inst.as.a_type.rd()] = value;
+        _memory.store64(addr, rs2);
+        _is_reserved         = false;
+        _reservation_address = 0;
+        _pc += 4;
+      } break;
+      case 0b00000: {  // amoadd
+        const uint64_t rs1       = _reg[inst.as.a_type.rs1()];
+        const uint64_t rs2       = _reg[inst.as.a_type.rs2()];
+        const uint64_t addr      = rs1;
+        const uint32_t alignment = 8;  // 8 for d
+        if (addr % alignment != 0) {
+          handle_trap(exception_code_t::e_load_address_misaligned, addr);
+          goto do_unknown_instruction;
+        }
+        // no e_load_access_fault in this implementation
+        auto value                = _memory.load64(addr);
+        _reg[inst.as.a_type.rd()] = value;
+        _memory.store64(addr, value + rs2);
+        _is_reserved         = false;
+        _reservation_address = 0;
+        _pc += 4;
+      } break;
+      case 0b00100: {  // amoxor
+        const uint64_t rs1       = _reg[inst.as.a_type.rs1()];
+        const uint64_t rs2       = _reg[inst.as.a_type.rs2()];
+        const uint64_t addr      = rs1;
+        const uint32_t alignment = 8;  // 8 for d
+        if (addr % alignment != 0) {
+          handle_trap(exception_code_t::e_load_address_misaligned, addr);
+          goto do_unknown_instruction;
+        }
+        auto value                = _memory.load64(addr);
+        _reg[inst.as.a_type.rd()] = value;
+        _memory.store64(addr, value ^ rs2);
+        _is_reserved         = false;
+        _reservation_address = 0;
+        _pc += 4;
+      } break;
+      case 0b01100: {  // amoand
+        const uint64_t rs1       = _reg[inst.as.a_type.rs1()];
+        const uint64_t rs2       = _reg[inst.as.a_type.rs2()];
+        const uint64_t addr      = rs1;
+        const uint32_t alignment = 8;  // 8 for d
+        if (addr % alignment != 0) {
+          handle_trap(exception_code_t::e_load_address_misaligned, addr);
+          goto do_unknown_instruction;
+        }
+        auto value                = _memory.load64(addr);
+        _reg[inst.as.a_type.rd()] = value;
+        _memory.store64(addr, value & rs2);
+        _is_reserved         = false;
+        _reservation_address = 0;
+        _pc += 4;
+      } break;
+      case 0b1000: {  // amoor
+        const uint64_t rs1       = _reg[inst.as.a_type.rs1()];
+        const uint64_t rs2       = _reg[inst.as.a_type.rs2()];
+        const uint64_t addr      = rs1;
+        const uint32_t alignment = 8;  // 8 for d
+        if (addr % alignment != 0) {
+          handle_trap(exception_code_t::e_load_address_misaligned, addr);
+          goto do_unknown_instruction;
+        }
+        auto value                = _memory.load64(addr);
+        _reg[inst.as.a_type.rd()] = value;
+        _memory.store64(addr, value | rs2);
+        _is_reserved         = false;
+        _reservation_address = 0;
+        _pc += 4;
+      } break;
+      case 0b10000: {  // amomin
+        const uint64_t rs1       = _reg[inst.as.a_type.rs1()];
+        const uint64_t rs2       = _reg[inst.as.a_type.rs2()];
+        const uint64_t addr      = rs1;
+        const uint32_t alignment = 8;  // 8 for d
+        if (addr % alignment != 0) {
+          handle_trap(exception_code_t::e_load_address_misaligned, addr);
+          goto do_unknown_instruction;
+        }
+        auto value                = _memory.load64(addr);
+        _reg[inst.as.a_type.rd()] = value;
+        _memory.store64(addr, std::min(static_cast<int64_t>(value),
+                                       static_cast<int64_t>(rs2)));
+        _is_reserved         = false;
+        _reservation_address = 0;
+        _pc += 4;
+      } break;
+      case 0b10100: {  // amomax
+        const uint64_t rs1       = _reg[inst.as.a_type.rs1()];
+        const uint64_t rs2       = _reg[inst.as.a_type.rs2()];
+        const uint64_t addr      = rs1;
+        const uint32_t alignment = 8;  // 8 for d
+        if (addr % alignment != 0) {
+          handle_trap(exception_code_t::e_load_address_misaligned, addr);
+          goto do_unknown_instruction;
+        }
+        auto value                = _memory.load64(addr);
+        _reg[inst.as.a_type.rd()] = value;
+        _memory.store64(addr, std::max(static_cast<int64_t>(value),
+                                       static_cast<int64_t>(rs2)));
+        _is_reserved         = false;
+        _reservation_address = 0;
+        _pc += 4;
+      } break;
+      case 0b11000: {  // amominu
+        const uint64_t rs1       = _reg[inst.as.a_type.rs1()];
+        const uint64_t rs2       = _reg[inst.as.a_type.rs2()];
+        const uint64_t addr      = rs1;
+        const uint32_t alignment = 8;  // 8 for d
+        if (addr % alignment != 0) {
+          handle_trap(exception_code_t::e_load_address_misaligned, addr);
+          goto do_unknown_instruction;
+        }
+        auto value                = _memory.load64(addr);
+        _reg[inst.as.a_type.rd()] = value;
+        _memory.store64(addr, std::min(static_cast<uint64_t>(value),
+                                       static_cast<uint64_t>(rs2)));
+        _is_reserved         = false;
+        _reservation_address = 0;
+        _pc += 4;
+      } break;
+      case 0b11100: {  // amomaxu
+        const uint64_t rs1       = _reg[inst.as.a_type.rs1()];
+        const uint64_t rs2       = _reg[inst.as.a_type.rs2()];
+        const uint64_t addr      = rs1;
+        const uint32_t alignment = 8;  // 8 for d
+        if (addr % alignment != 0) {
+          handle_trap(exception_code_t::e_load_address_misaligned, addr);
+          goto do_unknown_instruction;
+        }
+        auto value                = _memory.load64(addr);
+        _reg[inst.as.a_type.rd()] = value;
+        _memory.store64(addr, std::max(static_cast<uint64_t>(value),
+                                       static_cast<uint64_t>(rs2)));
+        _is_reserved         = false;
+        _reservation_address = 0;
+        _pc += 4;
+      } break;
+
+      default:
+        goto do_unknown_instruction;
+    }
+  }
+    dispatch();
+
   do_unknown_instruction:
     std::stringstream ss;
     ss << "error: unknown_instruction at " << std::hex << _pc << '\n';
@@ -1229,6 +1621,8 @@ struct machine_t {
   uint64_t _reg[32] = {0};
   uint64_t _pc{0};
   uint64_t _mode{0b11};
+  uint64_t _reservation_address;
+  bool     _is_reserved = false;
 
   // hack
   std::map<uint64_t, std::function<void(machine_t &)>> _syscalls;
