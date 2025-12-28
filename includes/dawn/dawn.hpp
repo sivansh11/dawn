@@ -1799,7 +1799,7 @@ struct machine_t {
 
   // TODO: optimise csr
   std::map<uint16_t, uint64_t> _csr;
-};
+};  // namespace dawn
 
 }  // namespace dawn
 #endif
