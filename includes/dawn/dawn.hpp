@@ -307,6 +307,21 @@ struct instruction_t {
 };
 static_assert(sizeof(instruction_t) == 4, "instruction size should be 4 bytes");
 
+constexpr inline void mul_64x64_u(uint64_t a, uint64_t b, uint64_t result[2]) {
+  const uint64_t mask_32    = 0xffffffffull;
+  uint64_t       a_h        = a >> 32;
+  uint64_t       a_l        = a & mask_32;
+  uint64_t       b_h        = b >> 32;
+  uint64_t       b_l        = b & mask_32;
+  uint64_t       p0         = a_l * b_l;
+  uint64_t       p1         = a_l * b_h;
+  uint64_t       p2         = a_h * b_l;
+  uint64_t       p3         = a_h * b_h;
+  uint64_t carry_to_high_32 = (p0 >> 32) + (p1 & mask_32) + (p2 & mask_32);
+  result[0]                 = (p0 & mask_32) | (carry_to_high_32 << 32);
+  result[1] = p3 + (p1 >> 32) + (p2 >> 32) + (carry_to_high_32 >> 32);
+}
+
 struct machine_t {
   machine_t(size_t ram_size, uint64_t offset) : _memory(ram_size, offset) {}
 
@@ -426,17 +441,20 @@ struct machine_t {
       register_instr(0b00110, 0b000, do_addiw);
       register_instr(0b00110, 0b001, do_slliw);
       register_instr(0b00110, 0b101, do_srliw_or_sraiw);
-      register_instr(0b01110, 0b000, do_addw_or_subw);
+      register_instr(0b01110, 0b000, do_addw_or_subw_or_mulw);
       register_instr(0b01110, 0b001, do_sllw);
-      register_instr(0b01110, 0b101, do_srlw_or_sraw);
-      register_instr(0b01100, 0b000, do_add_or_sub);
-      register_instr(0b01100, 0b001, do_sll);
-      register_instr(0b01100, 0b010, do_slt);
-      register_instr(0b01100, 0b011, do_sltu);
-      register_instr(0b01100, 0b100, do_xor);
-      register_instr(0b01100, 0b101, do_srl_or_sra);
-      register_instr(0b01100, 0b110, do_or);
-      register_instr(0b01100, 0b111, do_and);
+      register_instr(0b01110, 0b100, do_divw);
+      register_instr(0b01110, 0b101, do_srlw_or_sraw_or_divuw);
+      register_instr(0b01110, 0b110, do_remw);
+      register_instr(0b01110, 0b111, do_remuw);
+      register_instr(0b01100, 0b000, do_add_or_sub_or_mul);
+      register_instr(0b01100, 0b001, do_sll_or_mulh);
+      register_instr(0b01100, 0b010, do_slt_or_mulhsu);
+      register_instr(0b01100, 0b011, do_sltu_or_mulhu);
+      register_instr(0b01100, 0b100, do_xor_or_div);
+      register_instr(0b01100, 0b101, do_srl_or_sra_or_divu);
+      register_instr(0b01100, 0b110, do_or_or_rem);
+      register_instr(0b01100, 0b111, do_and_or_remu);
       register_instr(0b00011, 0b000, do_fence);
       register_instr(0b11100, 0b000, do_system);  // ecall ebreak mret wfi
       register_instr(0b11100, 0b001, do_csrrw);
@@ -795,7 +813,7 @@ struct machine_t {
   }
     dispatch();
 
-  do_addw_or_subw: {
+  do_addw_or_subw_or_mulw: {
     switch (inst.as.r_type.funct7()) {
       case 0b0000000: {  // addw
         _reg[inst.as.r_type.rd()] = static_cast<int32_t>(
@@ -807,6 +825,12 @@ struct machine_t {
         _reg[inst.as.r_type.rd()] = static_cast<int32_t>(
             (static_cast<uint32_t>(_reg[inst.as.r_type.rs1()]) -
              static_cast<uint32_t>(_reg[inst.as.r_type.rs2()])));
+        _pc += 4;
+      } break;
+      case 0b0000001: {  // mulw
+        _reg[inst.as.r_type.rd()] = static_cast<int64_t>(
+            static_cast<int32_t>(_reg[inst.as.r_type.rs1()]) *
+            static_cast<int32_t>(_reg[inst.as.r_type.rs2()]));
         _pc += 4;
       } break;
 
@@ -823,7 +847,24 @@ struct machine_t {
     _pc += 4;
   }
     dispatch();
-  do_srlw_or_sraw: {
+
+  do_divw: {
+    int32_t rs1 = static_cast<int32_t>(_reg[inst.as.r_type.rs1()]);
+    int32_t rs2 = static_cast<int32_t>(_reg[inst.as.r_type.rs2()]);
+    if (rs1 == INT32_MIN && rs2 == -1) {
+      _reg[inst.as.r_type.rd()] = INT32_MIN;
+    } else if (rs2 == 0) {
+      _reg[inst.as.r_type.rd()] = ~0ull;
+    } else {
+      _reg[inst.as.r_type.rd()] = static_cast<uint64_t>(rs1 / rs2);
+    }
+    _reg[inst.as.r_type.rd()] =
+        static_cast<int64_t>(static_cast<int32_t>(_reg[inst.as.r_type.rd()]));
+    _pc += 4;
+  }
+    dispatch();
+
+  do_srlw_or_sraw_or_divuw: {
     switch (inst.as.r_type.funct7()) {
       case 0b0000000: {  // srlw
         _reg[inst.as.r_type.rd()] = static_cast<int32_t>(
@@ -837,6 +878,18 @@ struct machine_t {
             (_reg[inst.as.r_type.rs2()] & 0b11111));
         _pc += 4;
       } break;
+      case 0b0000001: {  // divuw
+        uint32_t rs1 = static_cast<uint32_t>(_reg[inst.as.r_type.rs1()]);
+        uint32_t rs2 = static_cast<uint32_t>(_reg[inst.as.r_type.rs2()]);
+        if (rs2 == 0) {
+          _reg[inst.as.r_type.rd()] = ~0u;
+        } else {
+          _reg[inst.as.r_type.rd()] = rs1 / rs2;
+        }
+        _reg[inst.as.r_type.rd()] = static_cast<int64_t>(static_cast<int32_t>(
+            static_cast<uint32_t>(_reg[inst.as.r_type.rd()])));
+        _pc += 4;
+      } break;
 
       default:
         goto do_unknown_instruction;
@@ -844,7 +897,37 @@ struct machine_t {
   }
     dispatch();
 
-  do_add_or_sub: {
+  do_remw: {
+    int32_t rs1 = static_cast<int32_t>(_reg[inst.as.r_type.rs1()]);
+    int32_t rs2 = static_cast<int32_t>(_reg[inst.as.r_type.rs2()]);
+    if (rs1 == INT32_MIN && rs2 == -1) {
+      _reg[inst.as.r_type.rd()] = 0;
+    } else if (rs2 == 0) {
+      _reg[inst.as.r_type.rd()] = rs1;
+    } else {
+      _reg[inst.as.r_type.rd()] = static_cast<uint64_t>(rs1 % rs2);
+    }
+    _reg[inst.as.r_type.rd()] =
+        static_cast<int64_t>(static_cast<int32_t>(_reg[inst.as.r_type.rd()]));
+    _pc += 4;
+  }
+    dispatch();
+
+  do_remuw: {
+    uint32_t rs1 = static_cast<uint32_t>(_reg[inst.as.r_type.rs1()]);
+    uint32_t rs2 = static_cast<uint32_t>(_reg[inst.as.r_type.rs2()]);
+    if (rs2 == 0) {
+      _reg[inst.as.r_type.rd()] = rs1;
+    } else {
+      _reg[inst.as.r_type.rd()] = rs1 % rs2;
+    }
+    _reg[inst.as.r_type.rd()] = static_cast<int64_t>(
+        static_cast<int32_t>(static_cast<uint32_t>(_reg[inst.as.r_type.rd()])));
+    _pc += 4;
+  }
+    dispatch();
+
+  do_add_or_sub_or_mul: {
     switch (inst.as.r_type.funct7()) {
       case 0b0000000: {  // add
         _reg[inst.as.r_type.rd()] =
@@ -856,6 +939,12 @@ struct machine_t {
             _reg[inst.as.r_type.rs1()] - _reg[inst.as.r_type.rs2()];
         _pc += 4;
       } break;
+      case 0b0000001: {  // mul
+        uint64_t rs1              = _reg[inst.as.r_type.rs1()];
+        uint64_t rs2              = _reg[inst.as.r_type.rs2()];
+        _reg[inst.as.r_type.rd()] = rs1 * rs2;
+        _pc += 4;
+      } break;
 
       default:
         goto do_unknown_instruction;
@@ -863,36 +952,105 @@ struct machine_t {
   }
     dispatch();
 
-  do_sll: {
-    _reg[inst.as.r_type.rd()] = _reg[inst.as.r_type.rs1()]
-                                << (_reg[inst.as.r_type.rs2()] & 0b111111);
-    _pc += 4;
+  do_sll_or_mulh: {
+    switch (inst.as.r_type.funct7()) {
+      case 0b0000000: {  // sll
+        _reg[inst.as.r_type.rd()] = _reg[inst.as.r_type.rs1()]
+                                    << (_reg[inst.as.r_type.rs2()] & 0b111111);
+        _pc += 4;
+      } break;
+      case 0b0000001: {  // mulh
+        int64_t  rs1 = static_cast<int64_t>(_reg[inst.as.r_type.rs1()]);
+        int64_t  rs2 = static_cast<int64_t>(_reg[inst.as.r_type.rs2()]);
+        uint64_t result[2];
+        mul_64x64_u(rs1, rs2, result);
+        uint64_t result_hi = result[1];
+        if (rs1 < 0) result_hi -= rs2;
+        if (rs2 < 0) result_hi -= rs1;
+        _reg[inst.as.r_type.rd()] = result_hi;
+        _pc += 4;
+      } break;
+
+      default:
+        goto do_unknown_instruction;
+    }
   }
     dispatch();
 
-  do_slt: {
-    _reg[inst.as.r_type.rd()] =
-        static_cast<int64_t>(_reg[inst.as.r_type.rs1()]) <
-        static_cast<int64_t>(_reg[inst.as.r_type.rs2()]);
-    _pc += 4;
+  do_slt_or_mulhsu: {
+    switch (inst.as.r_type.funct7()) {
+      case 0b0000000: {  // slt
+        _reg[inst.as.r_type.rd()] =
+            static_cast<int64_t>(_reg[inst.as.r_type.rs1()]) <
+            static_cast<int64_t>(_reg[inst.as.r_type.rs2()]);
+        _pc += 4;
+      } break;
+      case 0b0000001: {  // mulhsu
+        int64_t  rs1 = static_cast<int64_t>(_reg[inst.as.r_type.rs1()]);
+        uint64_t rs2 = _reg[inst.as.r_type.rs2()];
+        uint64_t result[2];
+        mul_64x64_u(rs1, rs2, result);
+        uint64_t result_hi = result[1];
+        if (rs1 < 0) result_hi -= rs2;
+        _reg[inst.as.r_type.rd()] = result_hi;
+        _pc += 4;
+      } break;
+
+      default:
+        goto do_unknown_instruction;
+    }
   }
     dispatch();
 
-  do_sltu: {
-    _reg[inst.as.r_type.rd()] =
-        _reg[inst.as.r_type.rs1()] < _reg[inst.as.r_type.rs2()];
-    _pc += 4;
+  do_sltu_or_mulhu: {
+    switch (inst.as.r_type.funct7()) {
+      case 0b0000000: {  // sltu
+        _reg[inst.as.r_type.rd()] =
+            _reg[inst.as.r_type.rs1()] < _reg[inst.as.r_type.rs2()];
+        _pc += 4;
+      } break;
+      case 0b0000001: {  // mulhu
+        uint64_t rs1 = _reg[inst.as.r_type.rs1()];
+        uint64_t rs2 = _reg[inst.as.r_type.rs2()];
+        uint64_t result[2];
+        mul_64x64_u(rs1, rs2, result);
+        _reg[inst.as.r_type.rd()] = result[1];
+        _pc += 4;
+      } break;
+
+      default:
+        goto do_unknown_instruction;
+    }
   }
     dispatch();
 
-  do_xor: {
-    _reg[inst.as.r_type.rd()] =
-        _reg[inst.as.r_type.rs1()] ^ _reg[inst.as.r_type.rs2()];
-    _pc += 4;
+  do_xor_or_div: {
+    switch (inst.as.r_type.funct7()) {
+      case 0b0000000: {  // xor
+        _reg[inst.as.r_type.rd()] =
+            _reg[inst.as.r_type.rs1()] ^ _reg[inst.as.r_type.rs2()];
+        _pc += 4;
+      } break;
+      case 0b0000001: {  // div
+        int64_t rs1 = static_cast<int64_t>(_reg[inst.as.r_type.rs1()]);
+        int64_t rs2 = static_cast<int64_t>(_reg[inst.as.r_type.rs2()]);
+        if (rs1 == INT64_MIN && rs2 == -1) {
+          _reg[inst.as.r_type.rd()] = INT64_MIN;
+        } else if (rs2 == 0) {
+          _reg[inst.as.r_type.rd()] = ~0ull;
+        } else {
+          _reg[inst.as.r_type.rd()] = static_cast<uint64_t>(rs1 / rs2);
+        }
+        _pc += 4;
+      } break;
+
+      default:
+        goto do_unknown_instruction;
+    }
   }
     dispatch();
 
-  do_srl_or_sra: {
+  do_srl_or_sra_or_divu: {
     switch (inst.as.r_type.funct7()) {
       case 0b0000000: {  // srl
         _reg[inst.as.r_type.rd()] = _reg[inst.as.r_type.rs1()] >>
@@ -905,6 +1063,16 @@ struct machine_t {
             (_reg[inst.as.r_type.rs2()] & 0b111111);
         _pc += 4;
       } break;
+      case 0b0000001: {  // divu
+        uint64_t rs1 = _reg[inst.as.r_type.rs1()];
+        uint64_t rs2 = _reg[inst.as.r_type.rs2()];
+        if (rs2 == 0) {
+          _reg[inst.as.r_type.rd()] = ~0ull;
+        } else {
+          _reg[inst.as.r_type.rd()] = rs1 / rs2;
+        }
+        _pc += 4;
+      } break;
 
       default:
         goto do_unknown_instruction;
@@ -912,17 +1080,53 @@ struct machine_t {
   }
     dispatch();
 
-  do_or: {
-    _reg[inst.as.r_type.rd()] =
-        _reg[inst.as.r_type.rs1()] | _reg[inst.as.r_type.rs2()];
-    _pc += 4;
+  do_or_or_rem: {
+    switch (inst.as.r_type.funct7()) {
+      case 0b0000000: {  // or
+        _reg[inst.as.r_type.rd()] =
+            _reg[inst.as.r_type.rs1()] | _reg[inst.as.r_type.rs2()];
+        _pc += 4;
+      } break;
+      case 0b0000001: {  // rem
+        int64_t rs1 = static_cast<int64_t>(_reg[inst.as.r_type.rs1()]);
+        int64_t rs2 = static_cast<int64_t>(_reg[inst.as.r_type.rs2()]);
+        if (rs1 == INT64_MIN && rs2 == -1) {
+          _reg[inst.as.r_type.rd()] = 0;
+        } else if (rs2 == 0) {
+          _reg[inst.as.r_type.rd()] = rs1;
+        } else {
+          _reg[inst.as.r_type.rd()] = static_cast<uint64_t>(rs1 % rs2);
+        }
+        _pc += 4;
+      } break;
+
+      default:
+        goto do_unknown_instruction;
+    }
   }
     dispatch();
 
-  do_and: {
-    _reg[inst.as.r_type.rd()] =
-        _reg[inst.as.r_type.rs1()] & _reg[inst.as.r_type.rs2()];
-    _pc += 4;
+  do_and_or_remu: {
+    switch (inst.as.r_type.funct7()) {
+      case 0b0000000: {  // and
+        _reg[inst.as.r_type.rd()] =
+            _reg[inst.as.r_type.rs1()] & _reg[inst.as.r_type.rs2()];
+        _pc += 4;
+      } break;
+      case 0b0000001: {  // remu
+        uint64_t rs1 = _reg[inst.as.r_type.rs1()];
+        uint64_t rs2 = _reg[inst.as.r_type.rs2()];
+        if (rs2 == 0) {
+          _reg[inst.as.r_type.rd()] = rs1;
+        } else {
+          _reg[inst.as.r_type.rd()] = rs1 % rs2;
+        }
+        _pc += 4;
+      } break;
+
+      default:
+        goto do_unknown_instruction;
+    }
   }
     dispatch();
 
