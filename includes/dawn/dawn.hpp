@@ -512,7 +512,7 @@ struct machine_t {
     return true;
   }
 
-  inline void step(uint64_t n) {
+  inline uint64_t step(uint64_t n) {
     static void *dispatch_table[256] = {nullptr};
 
     // initialize
@@ -604,10 +604,10 @@ struct machine_t {
 #define dispatch()                                                         \
   do {                                                                     \
     if (_wfi) [[unlikely]]                                                 \
-      return;                                                              \
+      return n;                                                            \
     _reg[0] = 0;                                                           \
     if (n-- == 0) [[unlikely]]                                             \
-      return;                                                              \
+      return 0;                                                            \
     _inst                         = fetch32(_pc);                          \
     const uint32_t dispatch_index = extract_bit_range(_inst, 2, 7) |       \
                                     extract_bit_range(_inst, 12, 15) << 5; \
