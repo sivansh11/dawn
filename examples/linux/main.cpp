@@ -16,7 +16,7 @@ uint64_t _mmio_stop  = 0x20000000;
 
 static int is_eofd;
 
-int is_kbhit() {
+inline int is_kbhit() {
   if (is_eofd) return -1;
   int byteswaiting;
   ioctl(0, FIONREAD, &byteswaiting);
@@ -27,7 +27,7 @@ int is_kbhit() {
   return !!byteswaiting;
 }
 
-int read_kbbyte() {
+inline int read_kbbyte() {
   if (is_eofd) return 0xffffffff;
   char rxchar = 0;
   int  rread  = read(fileno(stdin), (char*)&rxchar, 1);
