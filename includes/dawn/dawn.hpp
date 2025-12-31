@@ -576,6 +576,8 @@ struct machine_t {
     // instructions
 #define dispatch()                                                         \
   do {                                                                     \
+    if (_wfi) [[unlikely]]                                                 \
+      return;                                                              \
     _reg[0] = 0;                                                           \
     if (n-- == 0) [[unlikely]]                                             \
       return;                                                              \
@@ -1316,6 +1318,12 @@ struct machine_t {
       }
         do_dispatch();  // goto next instruction no need to break
 
+      case 0b000100000101: {  // wfi
+        _wfi = true;
+        _pc += 4;
+      }
+        do_dispatch();
+
       default:
         goto do_unknown_instruction;
     }
@@ -1825,6 +1833,8 @@ struct machine_t {
   uint8_t     *_data;
   uint64_t     _offset{};
   uint8_t     *_final{};
+
+  bool _wfi = false;
 
   uint64_t _reg[32] = {0};
   uint64_t _pc{0};
