@@ -72,6 +72,17 @@ inline void _mmio_store(uint64_t addr, uint64_t value) {
   }
 }
 
+inline uint64_t get_time_now_us() {
+  auto      now_tp = std::chrono::system_clock::now();
+  long long microseconds_count =
+      std::chrono::duration_cast<std::chrono::microseconds>(
+          now_tp.time_since_epoch())
+          .count();
+  return microseconds_count;
+}
+
+inline void _wfi_callback() { timer = get_time_now_us() - boot_time; }
+
 #include "dawn/dawn.hpp"
 
 std::vector<uint8_t> read_file(const std::string& file_path) {
@@ -96,7 +107,8 @@ int main(int argc, char** argv) {
 
   const uint64_t  offset = 0;
   dawn::machine_t machine{128 * 1024 * 1024, offset};
-  auto            kernel = read_file(argv[1]);
+  machine._wfi_callback = _wfi_callback;
+  auto kernel           = read_file(argv[1]);
   std::cout << "kernel size: " << kernel.size() << '\n';
   std::cout << "kernel loaded at: " << offset << '\n';
   machine.memcpy_host_to_guest(offset, kernel.data(), kernel.size());
@@ -125,35 +137,20 @@ int main(int argc, char** argv) {
   term.c_lflag &= ~(ICANON | ECHO);  // Disable echo as well
   tcsetattr(0, TCSANOW, &term);
 
-  auto get_time_now_us = []() -> uint64_t {
-    auto      now_tp = std::chrono::system_clock::now();
-    long long microseconds_count =
-        std::chrono::duration_cast<std::chrono::microseconds>(
-            now_tp.time_since_epoch())
-            .count();
-    return microseconds_count;
-  };
-
   boot_time = get_time_now_us();
 
   uint64_t instruction_count = 0;
-
   while (1) {
-    instruction_count++;
+    const uint64_t num_instructions = 10;
+    if (!machine._wfi) machine.step(num_instructions);
+    timer = get_time_now_us() - boot_time;
     if (timercmp) {
-      if (instruction_count > 100) {
-        instruction_count = 0;
-        timer             = (get_time_now_us() - boot_time);
-      }
       if (timer > timercmp) {
-        machine._wfi = false;  // clear wfi
-        if (machine.handle_trap(
-                dawn::exception_code_t::e_machine_timer_interrupt, 0)) {
-          continue;
-        }
+        machine._wfi = false;
+        machine.handle_trap(dawn::exception_code_t::e_machine_timer_interrupt,
+                            0);
       }
     }
-    machine.step(1);
   }
 
   return -1;
