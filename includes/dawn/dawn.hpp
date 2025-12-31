@@ -1853,9 +1853,8 @@ struct machine_t {
     do_dispatch();
 
   do_unknown_instruction:
-    std::stringstream ss;
-    ss << "error: unknown_instruction at " << std::hex << _pc << '\n';
-    throw std::runtime_error(ss.str());
+    handle_trap(exception_code_t::e_illegal_instruction, _inst);
+    do_dispatch();
   }
 
   // memory
