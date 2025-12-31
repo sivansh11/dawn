@@ -139,7 +139,7 @@ int main(int argc, char** argv) {
     if (timercmp) {
       timer = (get_time_now_us() - boot_time);
       if (timer > timercmp) {
-        // machine._paused = false; // clear wfi
+        machine._wfi = false;  // clear wfi
         if (machine.handle_trap(
                 dawn::exception_code_t::e_machine_timer_interrupt, 0)) {
           continue;
