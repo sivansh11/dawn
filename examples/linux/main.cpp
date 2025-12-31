@@ -135,9 +135,15 @@ int main(int argc, char** argv) {
 
   boot_time = get_time_now_us();
 
+  uint64_t instruction_count = 0;
+
   while (1) {
+    instruction_count++;
     if (timercmp) {
-      timer = (get_time_now_us() - boot_time);
+      if (instruction_count > 100) {
+        instruction_count = 0;
+        timer             = (get_time_now_us() - boot_time);
+      }
       if (timer > timercmp) {
         machine._wfi = false;  // clear wfi
         if (machine.handle_trap(
@@ -146,7 +152,7 @@ int main(int argc, char** argv) {
         }
       }
     }
-    machine.step(100);
+    machine.step(1);
   }
 
   return -1;
