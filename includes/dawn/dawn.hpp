@@ -744,6 +744,10 @@ struct machine_t {
 
   do_lh: {
     uint64_t addr = _reg[inst.as.i_type.rs1()] + inst.as.i_type.imm_sext();
+    if (addr % 2 != 0) {
+      handle_trap(exception_code_t::e_load_address_misaligned, addr);
+      do_dispatch();
+    }
     // never e_load_access_fault in this implementation
     int16_t value             = load16i(addr);
     _reg[inst.as.i_type.rd()] = static_cast<int64_t>(value);
@@ -753,6 +757,10 @@ struct machine_t {
 
   do_lw: {
     uint64_t addr = _reg[inst.as.i_type.rs1()] + inst.as.i_type.imm_sext();
+    if (addr % 4 != 0) {
+      handle_trap(exception_code_t::e_load_address_misaligned, addr);
+      do_dispatch();
+    }
     // never e_load_access_fault in this implementation
     int32_t value             = load32i(addr);
     _reg[inst.as.i_type.rd()] = static_cast<int64_t>(value);
@@ -771,6 +779,10 @@ struct machine_t {
 
   do_lhu: {
     uint64_t addr = _reg[inst.as.i_type.rs1()] + inst.as.i_type.imm_sext();
+    if (addr % 2 != 0) {
+      handle_trap(exception_code_t::e_load_address_misaligned, addr);
+      do_dispatch();
+    }
     // never e_load_access_fault in this implementation
     uint16_t value            = load16(addr);
     _reg[inst.as.i_type.rd()] = value;
@@ -788,6 +800,10 @@ struct machine_t {
 
   do_sh: {
     uint64_t addr = _reg[inst.as.s_type.rs1()] + inst.as.s_type.imm_sext();
+    if (addr % 2 != 0) {
+      handle_trap(exception_code_t::e_store_address_misaligned, addr);
+      do_dispatch();
+    }
     // never e_store_access_fault in this implementation
     store16(addr, _reg[inst.as.s_type.rs2()]);
     _pc += 4;
@@ -796,6 +812,10 @@ struct machine_t {
 
   do_sw: {
     uint64_t addr = _reg[inst.as.s_type.rs1()] + inst.as.s_type.imm_sext();
+    if (addr % 4 != 0) {
+      handle_trap(exception_code_t::e_store_address_misaligned, addr);
+      do_dispatch();
+    }
     // never e_store_access_fault in this implementation
     store32(addr, _reg[inst.as.s_type.rs2()]);
     _pc += 4;
@@ -847,6 +867,10 @@ struct machine_t {
 
   do_lwu: {
     uint64_t addr = _reg[inst.as.i_type.rs1()] + inst.as.i_type.imm_sext();
+    if (addr % 4 != 0) {
+      handle_trap(exception_code_t::e_load_address_misaligned, addr);
+      do_dispatch();
+    }
     // never e_load_access_fault in this implementation
     uint32_t value            = load32(addr);
     _reg[inst.as.i_type.rd()] = value;
@@ -856,6 +880,10 @@ struct machine_t {
 
   do_ld: {
     uint64_t addr = _reg[inst.as.i_type.rs1()] + inst.as.i_type.imm_sext();
+    if (addr % 8 != 0) {
+      handle_trap(exception_code_t::e_load_address_misaligned, addr);
+      do_dispatch();
+    }
     // never e_load_access_fault in this implementation
     uint64_t value            = load64(addr);
     _reg[inst.as.i_type.rd()] = value;
@@ -865,6 +893,10 @@ struct machine_t {
 
   do_sd: {
     uint64_t addr = _reg[inst.as.s_type.rs1()] + inst.as.s_type.imm_sext();
+    if (addr % 8 != 0) {
+      handle_trap(exception_code_t::e_store_address_misaligned, addr);
+      do_dispatch();
+    }
     // never e_store_access_fault in this implementation
     store64(addr, _reg[inst.as.s_type.rs2()]);
     _pc += 4;
