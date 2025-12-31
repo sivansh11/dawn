@@ -266,7 +266,8 @@ constexpr inline void mul_64x64_u(uint64_t a, uint64_t b, uint64_t result[2]) {
   result[1] = p3 + (p1 >> 32) + (p2 >> 32) + (carry_to_high_32 >> 32);
 }
 
-// TODO: optional runtime memory bounds checking
+// TODO: accurate runtime memory bounds checking (account for size of
+// load/store)
 struct machine_t {
   machine_t(size_t ram_size, uint64_t offset)
       : _ram_size(ram_size), _offset(offset) {
@@ -277,11 +278,15 @@ struct machine_t {
   ~machine_t() { delete[] _data; }
 
   inline uint32_t fetch32(uint64_t addr) {
-    if ((addr < _offset) || addr >= (_offset + _ram_size)) {
+    // we dont to default check bounds for fetch since its highly sensitive to
+    // performance
+#ifdef DAWN_RUNTIME_MEMORY_BOUNDS_CHECK_FETCH
+    if ((addr < _offset) || addr >= (_offset + _ram_size)) [[unlikely]] {
       std::stringstream ss;
       ss << "out of bound access in " << std::hex << uint64_t(addr);
       throw std::runtime_error(ss.str());
     }
+#endif
     return *reinterpret_cast<uint32_t *>(_final + addr);
   }
 
@@ -289,77 +294,91 @@ struct machine_t {
     if (_mmio_start <= addr && addr < _mmio_stop) [[unlikely]] {
       return _mmio_load(addr);
     }
+#ifdef DAWN_RUNTIME_MEMORY_BOUNDS_CHECK
     if ((addr < _offset) || addr >= (_offset + _ram_size)) {
       std::stringstream ss;
       ss << "out of bound access in " << std::hex << uint64_t(addr);
       throw std::runtime_error(ss.str());
     }
+#endif
     return *reinterpret_cast<uint8_t *>(_final + addr);
   }
   inline uint16_t load16(uint64_t addr) {
     if (_mmio_start <= addr && addr < _mmio_stop) [[unlikely]] {
       return _mmio_load(addr);
     }
+#ifdef DAWN_RUNTIME_MEMORY_BOUNDS_CHECK
     if ((addr < _offset) || addr >= (_offset + _ram_size)) {
       std::stringstream ss;
       ss << "out of bound access in " << std::hex << uint64_t(addr);
       throw std::runtime_error(ss.str());
     }
+#endif
     return *reinterpret_cast<uint16_t *>(_final + addr);
   }
   inline uint32_t load32(uint64_t addr) {
     if (_mmio_start <= addr && addr < _mmio_stop) [[unlikely]] {
       return _mmio_load(addr);
     }
+#ifdef DAWN_RUNTIME_MEMORY_BOUNDS_CHECK
     if ((addr < _offset) || addr >= (_offset + _ram_size)) {
       std::stringstream ss;
       ss << "out of bound access in " << std::hex << uint64_t(addr);
       throw std::runtime_error(ss.str());
     }
+#endif
     return *reinterpret_cast<uint32_t *>(_final + addr);
   }
   inline uint64_t load64(uint64_t addr) {
     if (_mmio_start <= addr && addr < _mmio_stop) [[unlikely]] {
       return _mmio_load(addr);
     }
+#ifdef DAWN_RUNTIME_MEMORY_BOUNDS_CHECK
     if ((addr < _offset) || addr >= (_offset + _ram_size)) {
       std::stringstream ss;
       ss << "out of bound access in " << std::hex << uint64_t(addr);
       throw std::runtime_error(ss.str());
     }
+#endif
     return *reinterpret_cast<uint64_t *>(_final + addr);
   }
   inline int8_t load8i(uint64_t addr) {
     if (_mmio_start <= addr && addr < _mmio_stop) [[unlikely]] {
       return _mmio_load(addr);
     }
+#ifdef DAWN_RUNTIME_MEMORY_BOUNDS_CHECK
     if ((addr < _offset) || addr >= (_offset + _ram_size)) {
       std::stringstream ss;
       ss << "out of bound access in " << std::hex << uint64_t(addr);
       throw std::runtime_error(ss.str());
     }
+#endif
     return *reinterpret_cast<int8_t *>(_final + addr);
   }
   inline int16_t load16i(uint64_t addr) {
     if (_mmio_start <= addr && addr < _mmio_stop) [[unlikely]] {
       return _mmio_load(addr);
     }
+#ifdef DAWN_RUNTIME_MEMORY_BOUNDS_CHECK
     if ((addr < _offset) || addr >= (_offset + _ram_size)) {
       std::stringstream ss;
       ss << "out of bound access in " << std::hex << uint64_t(addr);
       throw std::runtime_error(ss.str());
     }
+#endif
     return *reinterpret_cast<int16_t *>(_final + addr);
   }
   inline int32_t load32i(uint64_t addr) {
     if (_mmio_start <= addr && addr < _mmio_stop) [[unlikely]] {
       return _mmio_load(addr);
     }
+#ifdef DAWN_RUNTIME_MEMORY_BOUNDS_CHECK
     if ((addr < _offset) || addr >= (_offset + _ram_size)) {
       std::stringstream ss;
       ss << "out of bound access in " << std::hex << uint64_t(addr);
       throw std::runtime_error(ss.str());
     }
+#endif
     return *reinterpret_cast<int32_t *>(_final + addr);
   }
 
@@ -368,11 +387,13 @@ struct machine_t {
       _mmio_store(addr, value);
       return;
     }
+#ifdef DAWN_RUNTIME_MEMORY_BOUNDS_CHECK
     if ((addr < _offset) || addr >= (_offset + _ram_size)) {
       std::stringstream ss;
       ss << "out of bound access in " << std::hex << uint64_t(addr);
       throw std::runtime_error(ss.str());
     }
+#endif
     *reinterpret_cast<uint8_t *>(_final + addr) = value;
   }
   inline void store16(uint64_t addr, uint16_t value) {
@@ -380,11 +401,13 @@ struct machine_t {
       _mmio_store(addr, value);
       return;
     }
+#ifdef DAWN_RUNTIME_MEMORY_BOUNDS_CHECK
     if ((addr < _offset) || addr >= (_offset + _ram_size)) {
       std::stringstream ss;
       ss << "out of bound access in " << std::hex << uint64_t(addr);
       throw std::runtime_error(ss.str());
     }
+#endif
     *reinterpret_cast<uint16_t *>(_final + addr) = value;
   }
   inline void store32(uint64_t addr, uint32_t value) {
@@ -392,11 +415,13 @@ struct machine_t {
       _mmio_store(addr, value);
       return;
     }
+#ifdef DAWN_RUNTIME_MEMORY_BOUNDS_CHECK
     if ((addr < _offset) || addr >= (_offset + _ram_size)) {
       std::stringstream ss;
       ss << "out of bound access in " << std::hex << uint64_t(addr);
       throw std::runtime_error(ss.str());
     }
+#endif
     *reinterpret_cast<uint32_t *>(_final + addr) = value;
   }
   inline void store64(uint64_t addr, uint64_t value) {
@@ -404,11 +429,13 @@ struct machine_t {
       _mmio_store(addr, value);
       return;
     }
+#ifdef DAWN_RUNTIME_MEMORY_BOUNDS_CHECK
     if ((addr < _offset) || addr >= (_offset + _ram_size)) {
       std::stringstream ss;
       ss << "out of bound access in " << std::hex << uint64_t(addr);
       throw std::runtime_error(ss.str());
     }
+#endif
     *reinterpret_cast<uint64_t *>(_final + addr) = value;
   }
 
