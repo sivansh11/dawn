@@ -1333,101 +1333,102 @@ struct machine_t {
 
   do_csrrw: {
     // TODO: can reading csr fail ?
-    uint16_t  addr = inst.as.i_type.imm();
-    uint64_t &csr  = _csr[addr];
+    uint16_t addr = inst.as.i_type.imm();
+    uint64_t csr  = _csr[addr];
 
     uint8_t rs1 = inst.as.i_type.rs1();
     if ((addr >> 10) == 0b11 && rs1 != 0) {
       handle_trap(exception_code_t::e_illegal_instruction, inst);
       do_dispatch();
     }
+
+    _csr[addr] = _reg[rs1];
     // write old value to rd
     _reg[inst.as.i_type.rd()] = csr;
-    csr                       = _reg[rs1];
     _pc += 4;
   }
     do_dispatch();
 
   do_csrrs: {
     // TODO: can reading csr fail ?
-    uint16_t  addr = inst.as.i_type.imm();
-    uint64_t &csr  = _csr[addr];
+    uint16_t addr = inst.as.i_type.imm();
+    uint64_t csr  = _csr[addr];
 
     uint8_t rs1 = inst.as.i_type.rs1();
     if ((addr >> 10) == 0b11 && rs1 != 0) {
       handle_trap(exception_code_t::e_illegal_instruction, inst);
       do_dispatch();
     }
+    _csr[addr] = csr | _reg[rs1];
     // write old value to rd
     _reg[inst.as.i_type.rd()] = csr;
-    csr                       = csr | _reg[rs1];
     _pc += 4;
   }
     do_dispatch();
 
   do_csrrc: {
     // TODO: can reading csr fail ?
-    uint16_t  addr = inst.as.i_type.imm();
-    uint64_t &csr  = _csr[addr];
+    uint16_t addr = inst.as.i_type.imm();
+    uint64_t csr  = _csr[addr];
 
     uint8_t rs1 = inst.as.i_type.rs1();
     if ((addr >> 10) == 0b11 && rs1 != 0) {
       handle_trap(exception_code_t::e_illegal_instruction, inst);
       do_dispatch();
     }
+    _csr[addr] = csr & ~_reg[rs1];
     // write old value to rd
     _reg[inst.as.i_type.rd()] = csr;
-    csr                       = csr & ~_reg[rs1];
     _pc += 4;
   }
     do_dispatch();
 
   do_csrrwi: {
     // TODO: can reading csr fail ?
-    uint16_t  addr = inst.as.i_type.imm();
-    uint64_t &csr  = _csr[addr];
+    uint16_t addr = inst.as.i_type.imm();
+    uint64_t csr  = _csr[addr];
 
     uint8_t rs1 = inst.as.i_type.rs1();
     if ((addr >> 10) == 0b11 && rs1 != 0) {
       handle_trap(exception_code_t::e_illegal_instruction, inst);
       do_dispatch();
     }
+    _csr[addr] = rs1;
     // write old value to rd
     _reg[inst.as.i_type.rd()] = csr;
-    csr                       = rs1;
     _pc += 4;
   }
     do_dispatch();
 
   do_csrrsi: {
     // TODO: can reading csr fail ?
-    uint16_t  addr = inst.as.i_type.imm();
-    uint64_t &csr  = _csr[addr];
+    uint16_t addr = inst.as.i_type.imm();
+    uint64_t csr  = _csr[addr];
 
     uint8_t rs1 = inst.as.i_type.rs1();
     if ((addr >> 10) == 0b11 && rs1 != 0) {
       handle_trap(exception_code_t::e_illegal_instruction, inst);
       do_dispatch();
     }
+    _csr[addr] = csr | rs1;
     // write old value to rd
-    _reg[inst.as.i_type.rd()] = csr | inst.as.i_type.rs1();
-    csr                       = rs1;
+    _reg[inst.as.i_type.rd()] = csr;
     _pc += 4;
   }
     do_dispatch();
   do_csrrci: {
     // TODO: can reading csr fail ?
-    uint16_t  addr = inst.as.i_type.imm();
-    uint64_t &csr  = _csr[addr];
+    uint16_t addr = inst.as.i_type.imm();
+    uint64_t csr  = _csr[addr];
 
     uint8_t rs1 = inst.as.i_type.rs1();
     if ((addr >> 10) == 0b11 && rs1 != 0) {
       handle_trap(exception_code_t::e_illegal_instruction, inst);
       do_dispatch();
     }
+    _csr[addr] = csr & ~rs1;
     // write old value to rd
-    _reg[inst.as.i_type.rd()] = csr & ~inst.as.i_type.rs1();
-    csr                       = rs1;
+    _reg[inst.as.i_type.rd()] = csr;
     _pc += 4;
   }
     do_dispatch();
