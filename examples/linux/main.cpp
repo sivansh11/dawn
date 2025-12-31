@@ -10,7 +10,7 @@
 
 #include <elfio/elfio.hpp>
 
-#define DAWN_ENABLE_LOGGING
+// #define DAWN_ENABLE_LOGGING
 uint64_t _mmio_start = 0x10000000;
 uint64_t _mmio_stop  = 0x20000000;
 
