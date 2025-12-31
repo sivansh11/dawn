@@ -450,7 +450,7 @@ struct machine_t {
   inline bool handle_trap(exception_code_t cause, uint64_t value) {
     // hack
     if (cause == exception_code_t::e_ecall_m_mode ||
-        cause == exception_code_t::e_ecall_u_mode) {
+        cause == exception_code_t::e_ecall_u_mode) [[unlikely]] {
       auto itr = _syscalls.find(_reg[17]);
       if (itr != _syscalls.end()) {
         itr->second(*this);
@@ -464,7 +464,7 @@ struct machine_t {
     uint64_t &mstatus    = _csr[MSTATUS];
     bool      global_mie = (mstatus & MSTATUS_MIE_MASK) != 0;
 
-    if (is_interrupt) {
+    if (is_interrupt) [[likely]] {
       // if interrupt is globally disabled or individually disabled return
       uint64_t interrupt_bit =
           1ULL << (static_cast<uint64_t>(cause) & ~MCAUSE_INTERRUPT_BIT);
@@ -667,7 +667,7 @@ struct machine_t {
   do_jalr: {
     uint64_t target  = _reg[inst.as.i_type.rs1()] + inst.as.i_type.imm_sext();
     uint64_t next_pc = target & ~1ull;
-    if (next_pc % 4 != 0) {
+    if (next_pc % 4 != 0) [[unlikely]] {
       handle_trap(exception_code_t::e_instruction_address_misaligned, next_pc);
       do_dispatch();
     }
@@ -679,7 +679,7 @@ struct machine_t {
   do_beq: {
     if (_reg[inst.as.b_type.rs1()] == _reg[inst.as.b_type.rs2()]) {
       uint64_t addr = _pc + inst.as.b_type.imm_sext();
-      if (addr % 4 != 0) {
+      if (addr % 4 != 0) [[unlikely]] {
         handle_trap(exception_code_t::e_instruction_address_misaligned, addr);
         do_dispatch();
       }
@@ -693,7 +693,7 @@ struct machine_t {
   do_bne: {
     if (_reg[inst.as.b_type.rs1()] != _reg[inst.as.b_type.rs2()]) {
       uint64_t addr = _pc + inst.as.b_type.imm_sext();
-      if (addr % 4 != 0) {
+      if (addr % 4 != 0) [[unlikely]] {
         handle_trap(exception_code_t::e_instruction_address_misaligned, addr);
         do_dispatch();
       }
@@ -708,7 +708,7 @@ struct machine_t {
     if (static_cast<int64_t>(_reg[inst.as.b_type.rs1()]) <
         static_cast<int64_t>(_reg[inst.as.b_type.rs2()])) {
       uint64_t addr = _pc + inst.as.b_type.imm_sext();
-      if (addr % 4 != 0) {
+      if (addr % 4 != 0) [[unlikely]] {
         handle_trap(exception_code_t::e_instruction_address_misaligned, addr);
         do_dispatch();
       }
@@ -723,7 +723,7 @@ struct machine_t {
     if (static_cast<int64_t>(_reg[inst.as.b_type.rs1()]) >=
         static_cast<int64_t>(_reg[inst.as.b_type.rs2()])) {
       uint64_t addr = _pc + inst.as.b_type.imm_sext();
-      if (addr % 4 != 0) {
+      if (addr % 4 != 0) [[unlikely]] {
         handle_trap(exception_code_t::e_instruction_address_misaligned, addr);
         do_dispatch();
       }
@@ -737,7 +737,7 @@ struct machine_t {
   do_bltu: {
     if (_reg[inst.as.b_type.rs1()] < _reg[inst.as.b_type.rs2()]) {
       uint64_t addr = _pc + inst.as.b_type.imm_sext();
-      if (addr % 4 != 0) {
+      if (addr % 4 != 0) [[unlikely]] {
         handle_trap(exception_code_t::e_instruction_address_misaligned, addr);
         do_dispatch();
       }
@@ -751,7 +751,7 @@ struct machine_t {
   do_bgeu: {
     if (_reg[inst.as.b_type.rs1()] >= _reg[inst.as.b_type.rs2()]) {
       uint64_t addr = _pc + inst.as.b_type.imm_sext();
-      if (addr % 4 != 0) {
+      if (addr % 4 != 0) [[unlikely]] {
         handle_trap(exception_code_t::e_instruction_address_misaligned, addr);
         do_dispatch();
       }
@@ -773,7 +773,7 @@ struct machine_t {
 
   do_lh: {
     uint64_t addr = _reg[inst.as.i_type.rs1()] + inst.as.i_type.imm_sext();
-    if (addr % 2 != 0) {
+    if (addr % 2 != 0) [[unlikely]] {
       handle_trap(exception_code_t::e_load_address_misaligned, addr);
       do_dispatch();
     }
@@ -786,7 +786,7 @@ struct machine_t {
 
   do_lw: {
     uint64_t addr = _reg[inst.as.i_type.rs1()] + inst.as.i_type.imm_sext();
-    if (addr % 4 != 0) {
+    if (addr % 4 != 0) [[unlikely]] {
       handle_trap(exception_code_t::e_load_address_misaligned, addr);
       do_dispatch();
     }
@@ -808,7 +808,7 @@ struct machine_t {
 
   do_lhu: {
     uint64_t addr = _reg[inst.as.i_type.rs1()] + inst.as.i_type.imm_sext();
-    if (addr % 2 != 0) {
+    if (addr % 2 != 0) [[unlikely]] {
       handle_trap(exception_code_t::e_load_address_misaligned, addr);
       do_dispatch();
     }
@@ -829,7 +829,7 @@ struct machine_t {
 
   do_sh: {
     uint64_t addr = _reg[inst.as.s_type.rs1()] + inst.as.s_type.imm_sext();
-    if (addr % 2 != 0) {
+    if (addr % 2 != 0) [[unlikely]] {
       handle_trap(exception_code_t::e_store_address_misaligned, addr);
       do_dispatch();
     }
@@ -841,7 +841,7 @@ struct machine_t {
 
   do_sw: {
     uint64_t addr = _reg[inst.as.s_type.rs1()] + inst.as.s_type.imm_sext();
-    if (addr % 4 != 0) {
+    if (addr % 4 != 0) [[unlikely]] {
       handle_trap(exception_code_t::e_store_address_misaligned, addr);
       do_dispatch();
     }
@@ -896,7 +896,7 @@ struct machine_t {
 
   do_lwu: {
     uint64_t addr = _reg[inst.as.i_type.rs1()] + inst.as.i_type.imm_sext();
-    if (addr % 4 != 0) {
+    if (addr % 4 != 0) [[unlikely]] {
       handle_trap(exception_code_t::e_load_address_misaligned, addr);
       do_dispatch();
     }
@@ -909,7 +909,7 @@ struct machine_t {
 
   do_ld: {
     uint64_t addr = _reg[inst.as.i_type.rs1()] + inst.as.i_type.imm_sext();
-    if (addr % 8 != 0) {
+    if (addr % 8 != 0) [[unlikely]] {
       handle_trap(exception_code_t::e_load_address_misaligned, addr);
       do_dispatch();
     }
@@ -922,7 +922,7 @@ struct machine_t {
 
   do_sd: {
     uint64_t addr = _reg[inst.as.s_type.rs1()] + inst.as.s_type.imm_sext();
-    if (addr % 8 != 0) {
+    if (addr % 8 != 0) [[unlikely]] {
       handle_trap(exception_code_t::e_store_address_misaligned, addr);
       do_dispatch();
     }
@@ -1037,7 +1037,7 @@ struct machine_t {
       _reg[inst.as.r_type.rd()] = INT32_MIN;
     } else if (rs2 == 0) {
       _reg[inst.as.r_type.rd()] = ~0ull;
-    } else {
+    } else [[likely]] {
       _reg[inst.as.r_type.rd()] = static_cast<uint64_t>(rs1 / rs2);
     }
     _reg[inst.as.r_type.rd()] =
@@ -1065,7 +1065,7 @@ struct machine_t {
         uint32_t rs2 = static_cast<uint32_t>(_reg[inst.as.r_type.rs2()]);
         if (rs2 == 0) {
           _reg[inst.as.r_type.rd()] = ~0u;
-        } else {
+        } else [[likely]] {
           _reg[inst.as.r_type.rd()] = rs1 / rs2;
         }
         _reg[inst.as.r_type.rd()] = static_cast<int64_t>(static_cast<int32_t>(
@@ -1086,7 +1086,7 @@ struct machine_t {
       _reg[inst.as.r_type.rd()] = 0;
     } else if (rs2 == 0) {
       _reg[inst.as.r_type.rd()] = rs1;
-    } else {
+    } else [[likely]] {
       _reg[inst.as.r_type.rd()] = static_cast<uint64_t>(rs1 % rs2);
     }
     _reg[inst.as.r_type.rd()] =
@@ -1100,7 +1100,7 @@ struct machine_t {
     uint32_t rs2 = static_cast<uint32_t>(_reg[inst.as.r_type.rs2()]);
     if (rs2 == 0) {
       _reg[inst.as.r_type.rd()] = rs1;
-    } else {
+    } else [[likely]] {
       _reg[inst.as.r_type.rd()] = rs1 % rs2;
     }
     _reg[inst.as.r_type.rd()] = static_cast<int64_t>(
@@ -1220,7 +1220,7 @@ struct machine_t {
           _reg[inst.as.r_type.rd()] = INT64_MIN;
         } else if (rs2 == 0) {
           _reg[inst.as.r_type.rd()] = ~0ull;
-        } else {
+        } else [[likely]] {
           _reg[inst.as.r_type.rd()] = static_cast<uint64_t>(rs1 / rs2);
         }
         _pc += 4;
@@ -1250,7 +1250,7 @@ struct machine_t {
         uint64_t rs2 = _reg[inst.as.r_type.rs2()];
         if (rs2 == 0) {
           _reg[inst.as.r_type.rd()] = ~0ull;
-        } else {
+        } else [[likely]] {
           _reg[inst.as.r_type.rd()] = rs1 / rs2;
         }
         _pc += 4;
@@ -1276,7 +1276,7 @@ struct machine_t {
           _reg[inst.as.r_type.rd()] = 0;
         } else if (rs2 == 0) {
           _reg[inst.as.r_type.rd()] = rs1;
-        } else {
+        } else [[likely]] {
           _reg[inst.as.r_type.rd()] = static_cast<uint64_t>(rs1 % rs2);
         }
         _pc += 4;
@@ -1300,7 +1300,7 @@ struct machine_t {
         uint64_t rs2 = _reg[inst.as.r_type.rs2()];
         if (rs2 == 0) {
           _reg[inst.as.r_type.rd()] = rs1;
-        } else {
+        } else [[likely]] {
           _reg[inst.as.r_type.rd()] = rs1 % rs2;
         }
         _pc += 4;
@@ -1382,7 +1382,7 @@ struct machine_t {
     uint64_t csr  = _csr[addr];
 
     uint8_t rs1 = inst.as.i_type.rs1();
-    if ((addr >> 10) == 0b11 && rs1 != 0) {
+    if ((addr >> 10) == 0b11 && rs1 != 0) [[unlikely]] {
       handle_trap(exception_code_t::e_illegal_instruction, inst);
       do_dispatch();
     }
@@ -1399,7 +1399,7 @@ struct machine_t {
     uint64_t csr  = _csr[addr];
 
     uint8_t rs1 = inst.as.i_type.rs1();
-    if ((addr >> 10) == 0b11 && rs1 != 0) {
+    if ((addr >> 10) == 0b11 && rs1 != 0) [[unlikely]] {
       handle_trap(exception_code_t::e_illegal_instruction, inst);
       do_dispatch();
     }
@@ -1416,7 +1416,7 @@ struct machine_t {
     uint64_t csr  = _csr[addr];
 
     uint8_t rs1 = inst.as.i_type.rs1();
-    if ((addr >> 10) == 0b11 && rs1 != 0) {
+    if ((addr >> 10) == 0b11 && rs1 != 0) [[unlikely]] {
       handle_trap(exception_code_t::e_illegal_instruction, inst);
       do_dispatch();
     }
@@ -1433,7 +1433,7 @@ struct machine_t {
     uint64_t csr  = _csr[addr];
 
     uint8_t rs1 = inst.as.i_type.rs1();
-    if ((addr >> 10) == 0b11 && rs1 != 0) {
+    if ((addr >> 10) == 0b11 && rs1 != 0) [[unlikely]] {
       handle_trap(exception_code_t::e_illegal_instruction, inst);
       do_dispatch();
     }
@@ -1449,7 +1449,7 @@ struct machine_t {
     uint64_t csr  = _csr[addr];
 
     uint8_t rs1 = inst.as.i_type.rs1();
-    if ((addr >> 10) == 0b11 && rs1 != 0) {
+    if ((addr >> 10) == 0b11 && rs1 != 0) [[unlikely]] {
       handle_trap(exception_code_t::e_illegal_instruction, inst);
       do_dispatch();
     }
@@ -1466,7 +1466,7 @@ struct machine_t {
         const uint64_t rs1       = _reg[inst.as.a_type.rs1()];
         const uint64_t addr      = rs1;
         const uint32_t alignment = 4;  // 4 for w
-        if (addr % alignment != 0) {
+        if (addr % alignment != 0) [[unlikely]] {
           handle_trap(exception_code_t::e_load_address_misaligned, addr);
           goto do_unknown_instruction;
         }
@@ -1482,7 +1482,7 @@ struct machine_t {
         const uint64_t rs2       = _reg[inst.as.a_type.rs2()];
         const uint64_t addr      = rs1;
         const uint32_t alignment = 4;  // 4 for w
-        if (addr % alignment != 0) {
+        if (addr % alignment != 0) [[unlikely]] {
           handle_trap(exception_code_t::e_store_address_misaligned, addr);
           goto do_unknown_instruction;
         }
@@ -1502,7 +1502,7 @@ struct machine_t {
         const uint64_t rs2       = _reg[inst.as.a_type.rs2()];
         const uint64_t addr      = rs1;
         const uint32_t alignment = 4;  // 4 for w
-        if (addr % alignment != 0) {
+        if (addr % alignment != 0) [[unlikely]] {
           handle_trap(exception_code_t::e_load_address_misaligned, addr);
           goto do_unknown_instruction;
         }
@@ -1519,7 +1519,7 @@ struct machine_t {
         const uint64_t rs2       = _reg[inst.as.a_type.rs2()];
         const uint64_t addr      = rs1;
         const uint32_t alignment = 4;  // 4 for w
-        if (addr % alignment != 0) {
+        if (addr % alignment != 0) [[unlikely]] {
           handle_trap(exception_code_t::e_load_address_misaligned, addr);
           goto do_unknown_instruction;
         }
@@ -1536,7 +1536,7 @@ struct machine_t {
         const uint64_t rs2       = _reg[inst.as.a_type.rs2()];
         const uint64_t addr      = rs1;
         const uint32_t alignment = 4;  // 4 for w
-        if (addr % alignment != 0) {
+        if (addr % alignment != 0) [[unlikely]] {
           handle_trap(exception_code_t::e_load_address_misaligned, addr);
           goto do_unknown_instruction;
         }
@@ -1552,7 +1552,7 @@ struct machine_t {
         const uint64_t rs2       = _reg[inst.as.a_type.rs2()];
         const uint64_t addr      = rs1;
         const uint32_t alignment = 4;  // 4 for w
-        if (addr % alignment != 0) {
+        if (addr % alignment != 0) [[unlikely]] {
           handle_trap(exception_code_t::e_load_address_misaligned, addr);
           goto do_unknown_instruction;
         }
@@ -1568,7 +1568,7 @@ struct machine_t {
         const uint64_t rs2       = _reg[inst.as.a_type.rs2()];
         const uint64_t addr      = rs1;
         const uint32_t alignment = 4;  // 4 for w
-        if (addr % alignment != 0) {
+        if (addr % alignment != 0) [[unlikely]] {
           handle_trap(exception_code_t::e_load_address_misaligned, addr);
           goto do_unknown_instruction;
         }
@@ -1584,7 +1584,7 @@ struct machine_t {
         const uint64_t rs2       = _reg[inst.as.a_type.rs2()];
         const uint64_t addr      = rs1;
         const uint32_t alignment = 4;  // 4 for w
-        if (addr % alignment != 0) {
+        if (addr % alignment != 0) [[unlikely]] {
           handle_trap(exception_code_t::e_load_address_misaligned, addr);
           goto do_unknown_instruction;
         }
@@ -1602,7 +1602,7 @@ struct machine_t {
         const uint64_t rs2       = _reg[inst.as.a_type.rs2()];
         const uint64_t addr      = rs1;
         const uint32_t alignment = 4;  // 4 for w
-        if (addr % alignment != 0) {
+        if (addr % alignment != 0) [[unlikely]] {
           handle_trap(exception_code_t::e_load_address_misaligned, addr);
           goto do_unknown_instruction;
         }
@@ -1620,7 +1620,7 @@ struct machine_t {
         const uint64_t rs2       = _reg[inst.as.a_type.rs2()];
         const uint64_t addr      = rs1;
         const uint32_t alignment = 4;  // 4 for w
-        if (addr % alignment != 0) {
+        if (addr % alignment != 0) [[unlikely]] {
           handle_trap(exception_code_t::e_load_address_misaligned, addr);
           goto do_unknown_instruction;
         }
@@ -1637,7 +1637,7 @@ struct machine_t {
         const uint64_t rs2       = _reg[inst.as.a_type.rs2()];
         const uint64_t addr      = rs1;
         const uint32_t alignment = 4;  // 4 for w
-        if (addr % alignment != 0) {
+        if (addr % alignment != 0) [[unlikely]] {
           handle_trap(exception_code_t::e_load_address_misaligned, addr);
           goto do_unknown_instruction;
         }
@@ -1662,7 +1662,7 @@ struct machine_t {
         const uint64_t rs1       = _reg[inst.as.a_type.rs1()];
         const uint64_t addr      = rs1;
         const uint32_t alignment = 8;  // 8 for d
-        if (addr % alignment != 0) {
+        if (addr % alignment != 0) [[unlikely]] {
           handle_trap(exception_code_t::e_load_address_misaligned, addr);
           goto do_unknown_instruction;
         }
@@ -1678,7 +1678,7 @@ struct machine_t {
         const uint64_t rs2       = _reg[inst.as.a_type.rs2()];
         const uint64_t addr      = rs1;
         const uint32_t alignment = 8;  // 8 for d
-        if (addr % alignment != 0) {
+        if (addr % alignment != 0) [[unlikely]] {
           handle_trap(exception_code_t::e_store_address_misaligned, addr);
           goto do_unknown_instruction;
         }
@@ -1698,7 +1698,7 @@ struct machine_t {
         const uint64_t rs2       = _reg[inst.as.a_type.rs2()];
         const uint64_t addr      = rs1;
         const uint32_t alignment = 8;  // 8 for d
-        if (addr % alignment != 0) {
+        if (addr % alignment != 0) [[unlikely]] {
           handle_trap(exception_code_t::e_load_address_misaligned, addr);
           goto do_unknown_instruction;
         }
@@ -1715,7 +1715,7 @@ struct machine_t {
         const uint64_t rs2       = _reg[inst.as.a_type.rs2()];
         const uint64_t addr      = rs1;
         const uint32_t alignment = 8;  // 8 for d
-        if (addr % alignment != 0) {
+        if (addr % alignment != 0) [[unlikely]] {
           handle_trap(exception_code_t::e_load_address_misaligned, addr);
           goto do_unknown_instruction;
         }
@@ -1732,7 +1732,7 @@ struct machine_t {
         const uint64_t rs2       = _reg[inst.as.a_type.rs2()];
         const uint64_t addr      = rs1;
         const uint32_t alignment = 8;  // 8 for d
-        if (addr % alignment != 0) {
+        if (addr % alignment != 0) [[unlikely]] {
           handle_trap(exception_code_t::e_load_address_misaligned, addr);
           goto do_unknown_instruction;
         }
@@ -1748,7 +1748,7 @@ struct machine_t {
         const uint64_t rs2       = _reg[inst.as.a_type.rs2()];
         const uint64_t addr      = rs1;
         const uint32_t alignment = 8;  // 8 for d
-        if (addr % alignment != 0) {
+        if (addr % alignment != 0) [[unlikely]] {
           handle_trap(exception_code_t::e_load_address_misaligned, addr);
           goto do_unknown_instruction;
         }
@@ -1764,7 +1764,7 @@ struct machine_t {
         const uint64_t rs2       = _reg[inst.as.a_type.rs2()];
         const uint64_t addr      = rs1;
         const uint32_t alignment = 8;  // 8 for d
-        if (addr % alignment != 0) {
+        if (addr % alignment != 0) [[unlikely]] {
           handle_trap(exception_code_t::e_load_address_misaligned, addr);
           goto do_unknown_instruction;
         }
@@ -1780,7 +1780,7 @@ struct machine_t {
         const uint64_t rs2       = _reg[inst.as.a_type.rs2()];
         const uint64_t addr      = rs1;
         const uint32_t alignment = 8;  // 8 for d
-        if (addr % alignment != 0) {
+        if (addr % alignment != 0) [[unlikely]] {
           handle_trap(exception_code_t::e_load_address_misaligned, addr);
           goto do_unknown_instruction;
         }
@@ -1797,7 +1797,7 @@ struct machine_t {
         const uint64_t rs2       = _reg[inst.as.a_type.rs2()];
         const uint64_t addr      = rs1;
         const uint32_t alignment = 8;  // 8 for d
-        if (addr % alignment != 0) {
+        if (addr % alignment != 0) [[unlikely]] {
           handle_trap(exception_code_t::e_load_address_misaligned, addr);
           goto do_unknown_instruction;
         }
@@ -1814,7 +1814,7 @@ struct machine_t {
         const uint64_t rs2       = _reg[inst.as.a_type.rs2()];
         const uint64_t addr      = rs1;
         const uint32_t alignment = 8;  // 8 for d
-        if (addr % alignment != 0) {
+        if (addr % alignment != 0) [[unlikely]] {
           handle_trap(exception_code_t::e_load_address_misaligned, addr);
           goto do_unknown_instruction;
         }
@@ -1831,7 +1831,7 @@ struct machine_t {
         const uint64_t rs2       = _reg[inst.as.a_type.rs2()];
         const uint64_t addr      = rs1;
         const uint32_t alignment = 8;  // 8 for d
-        if (addr % alignment != 0) {
+        if (addr % alignment != 0) [[unlikely]] {
           handle_trap(exception_code_t::e_load_address_misaligned, addr);
           goto do_unknown_instruction;
         }
