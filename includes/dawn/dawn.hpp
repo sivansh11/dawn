@@ -1347,6 +1347,8 @@ struct machine_t {
 
       case 0b000100000101: {  // wfi
         _wfi = true;
+        if (_wfi_callback) [[likely]]
+          _wfi_callback();
         _pc += 4;
       }
         do_dispatch();
@@ -1863,6 +1865,8 @@ struct machine_t {
   uint8_t     *_final{};
 
   bool _wfi = false;
+  typedef void (*wfi_callback_t)();
+  wfi_callback_t _wfi_callback = 0;
 
   uint64_t _reg[32] = {0};
   uint64_t _pc{0};
