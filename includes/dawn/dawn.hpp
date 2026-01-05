@@ -430,6 +430,7 @@ struct machine_t {
   }
 
   // TODO: test with and without inline
+  // TODO: test with a macro
   inline bool handle_trap(exception_code_t cause, uint64_t value) {
     // hack
     if (cause == exception_code_t::e_ecall_m_mode ||
@@ -636,6 +637,7 @@ struct machine_t {
   }
     do_dispatch();
 
+    // TODO: verify pc is in memory bounds before do_dispatch
   do_jal: {
     uint64_t addr = _pc + inst.as.j_type.imm_sext();
     if (addr % 4 != 0) [[unlikely]] {
@@ -647,6 +649,7 @@ struct machine_t {
   }
     do_dispatch();
 
+    // TODO: verify pc is in memory bounds before do_dispatch
   do_jalr: {
     uint64_t target  = _reg[inst.as.i_type.rs1()] + inst.as.i_type.imm_sext();
     uint64_t next_pc = target & ~1ull;
@@ -659,6 +662,7 @@ struct machine_t {
   }
     do_dispatch();
 
+    // TODO: verify pc is in memory bounds before do_dispatch
   do_beq: {
     if (_reg[inst.as.b_type.rs1()] == _reg[inst.as.b_type.rs2()]) {
       uint64_t addr = _pc + inst.as.b_type.imm_sext();
@@ -673,6 +677,7 @@ struct machine_t {
   }
     do_dispatch();
 
+    // TODO: verify pc is in memory bounds before do_dispatch
   do_bne: {
     if (_reg[inst.as.b_type.rs1()] != _reg[inst.as.b_type.rs2()]) {
       uint64_t addr = _pc + inst.as.b_type.imm_sext();
@@ -687,6 +692,7 @@ struct machine_t {
   }
     do_dispatch();
 
+    // TODO: verify pc is in memory bounds before do_dispatch
   do_blt: {
     if (static_cast<int64_t>(_reg[inst.as.b_type.rs1()]) <
         static_cast<int64_t>(_reg[inst.as.b_type.rs2()])) {
@@ -702,6 +708,7 @@ struct machine_t {
   }
     do_dispatch();
 
+    // TODO: verify pc is in memory bounds before do_dispatch
   do_bge: {
     if (static_cast<int64_t>(_reg[inst.as.b_type.rs1()]) >=
         static_cast<int64_t>(_reg[inst.as.b_type.rs2()])) {
@@ -717,6 +724,7 @@ struct machine_t {
   }
     do_dispatch();
 
+    // TODO: verify pc is in memory bounds before do_dispatch
   do_bltu: {
     if (_reg[inst.as.b_type.rs1()] < _reg[inst.as.b_type.rs2()]) {
       uint64_t addr = _pc + inst.as.b_type.imm_sext();
@@ -731,6 +739,7 @@ struct machine_t {
   }
     do_dispatch();
 
+    // TODO: verify pc is in memory bounds before do_dispatch
   do_bgeu: {
     if (_reg[inst.as.b_type.rs1()] >= _reg[inst.as.b_type.rs2()]) {
       uint64_t addr = _pc + inst.as.b_type.imm_sext();
