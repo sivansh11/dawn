@@ -425,6 +425,9 @@ struct machine_t {
   inline void memcpy_host_to_guest(uint64_t dst, const void *src, size_t size) {
     std::memcpy(_final + dst, src, size);
   }
+  inline void memcpy_guest_to_host(void *dst, uint64_t src, size_t size) {
+    std::memcpy(dst, _final + src, size);
+  }
   inline void memset(uint64_t addr, int value, size_t size) {
     std::memset(_final + addr, value, size);
   }
