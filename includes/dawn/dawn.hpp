@@ -104,7 +104,7 @@ struct i_type_t {
   constexpr int32_t  imm_sext() const { return sext<12>(imm()); }
   constexpr uint32_t shamt() const { return extract_bit_range(imm(), 0, 6); }
   constexpr uint32_t shamt_w() const { return extract_bit_range(imm(), 0, 5); }
-  constexpr          operator uint64_t() const {
+                     operator uint64_t() const {
     return *reinterpret_cast<const uint32_t *>(this);
   }
 };
@@ -123,7 +123,7 @@ struct s_type_t {
   constexpr uint32_t rs2() const { return _rs2; }
   constexpr uint32_t imm() const { return (_imm2 << 5) | _imm1; }
   constexpr int32_t  imm_sext() const { return sext<12>(imm()); }
-  constexpr          operator uint64_t() const {
+                     operator uint64_t() const {
     return *reinterpret_cast<const uint32_t *>(this);
   }
 };
@@ -137,7 +137,7 @@ struct u_type_t {
   constexpr uint32_t rd() const { return _rd; }
   constexpr uint32_t imm() const { return _imm; }
   constexpr int32_t  imm_sext() const { return sext<20>(imm()); }
-  constexpr          operator uint64_t() const {
+                     operator uint64_t() const {
     return *reinterpret_cast<const uint32_t *>(this);
   }
 };
@@ -156,7 +156,7 @@ struct r_type_t {
   constexpr uint32_t rs1() const { return _rs1; }
   constexpr uint32_t rs2() const { return _rs2; }
   constexpr uint32_t funct7() const { return _funct7; }
-  constexpr          operator uint64_t() const {
+                     operator uint64_t() const {
     return *reinterpret_cast<const uint32_t *>(this);
   }
 };
@@ -179,7 +179,7 @@ struct a_type_t {
   constexpr uint32_t rl() const { return _rl; }
   constexpr uint32_t aq() const { return _aq; }
   constexpr uint32_t funct5() const { return _funct5; }
-  constexpr          operator uint64_t() const {
+                     operator uint64_t() const {
     return *reinterpret_cast<const uint32_t *>(this);
   }
 };
@@ -206,7 +206,7 @@ struct b_type_t {
     return _imm4 << 12 | _imm1 << 11 | _imm3 << 5 | _imm2 << 1;
   }
   constexpr int32_t imm_sext() const { return sext<13>(imm()); }
-  constexpr         operator uint64_t() const {
+                    operator uint64_t() const {
     return *reinterpret_cast<const uint32_t *>(this);
   }
 };
@@ -229,7 +229,7 @@ struct j_type_t {
     return _imm4 << 20 | _imm1 << 12 | _imm2 << 11 | _imm3 << 1;
   }
   constexpr int64_t imm_sext() const { return sext<21>(imm()); }
-  constexpr         operator uint64_t() const {
+                    operator uint64_t() const {
     return *reinterpret_cast<const uint32_t *>(this);
   }
 };
@@ -245,7 +245,7 @@ struct instruction_t {
     j_type_t j_type;
     a_type_t a_type;
   } as;
-  constexpr operator uint64_t() const {
+  operator uint64_t() const {
     return *reinterpret_cast<const uint32_t *>(this);
   }
 };
