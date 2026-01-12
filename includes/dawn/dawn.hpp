@@ -71,6 +71,8 @@ constexpr uint64_t MEDELEG = 0x302;
 constexpr uint64_t MIDELEG = 0x303;
 constexpr uint64_t MIE     = 0x304;
 
+constexpr uint64_t MIP = 0x344;
+
 constexpr uint64_t MSTATUS            = 0x300;
 constexpr uint64_t MSTATUS_MIE_SHIFT  = 3;
 constexpr uint64_t MSTATUS_MIE_MASK   = 1u << MSTATUS_MIE_SHIFT;
