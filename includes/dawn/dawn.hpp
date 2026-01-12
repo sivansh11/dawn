@@ -72,6 +72,17 @@ constexpr uint64_t MIDELEG = 0x303;
 constexpr uint64_t MIE     = 0x304;
 
 constexpr uint64_t MIP = 0x344;
+constexpr uint64_t MIP_MEIP_MASK =
+    1u << (static_cast<uint64_t>(
+               exception_code_t::e_machine_external_interrupt) &
+           ((1ull << 63) - 1));
+constexpr uint64_t MIP_MSIP_MASK =
+    1u << (static_cast<uint64_t>(
+               exception_code_t::e_machine_software_interrupt) &
+           ((1ull << 63) - 1));
+constexpr uint64_t MIP_MTIP_MASK =
+    1u << (static_cast<uint64_t>(exception_code_t::e_machine_timer_interrupt) &
+           ((1ull << 63) - 1));
 
 constexpr uint64_t MSTATUS            = 0x300;
 constexpr uint64_t MSTATUS_MIE_SHIFT  = 3;
@@ -534,16 +545,6 @@ struct machine_t {
     uint64_t &mstatus    = _csr[MSTATUS];
     bool      global_mie = (mstatus & MSTATUS_MIE_MASK) != 0;
 
-    if (is_interrupt) [[likely]] {
-      // if interrupt is globally disabled or individually disabled return
-      uint64_t interrupt_bit =
-          1ULL << (static_cast<uint64_t>(cause) & ~MCAUSE_INTERRUPT_BIT);
-      bool individual_enabled = (_csr[MIE] & interrupt_bit) != 0;
-      if (!global_mie || !individual_enabled) {
-        return false;
-      }
-    }
-
     _csr[MEPC]   = _pc;
     _csr[MCAUSE] = static_cast<uint64_t>(cause);
     _csr[MTVAL]  = value;
@@ -659,12 +660,6 @@ struct machine_t {
       register_instr(0b01011, 0b011, do_atomic_d);
     }
 
-    // no need to check every loop, checking once is enough since jump/branch
-    // handle misaligned addresses
-    if (_pc % 4 != 0) [[unlikely]] {
-      handle_trap(exception_code_t::e_instruction_address_misaligned, _pc);
-    }
-
     uint32_t      _inst;
     instruction_t inst;
 
@@ -706,6 +701,32 @@ struct machine_t {
 #else
 #define do_dispatch() dispatch()
 #endif
+
+    // check pending interrupts
+    uint64_t pending_interrupts = _csr[MIP] & _csr[MIE];
+    if (pending_interrupts) {
+      _wfi = false;
+      if (_mode < 0b11 || _csr[MSTATUS] & MSTATUS_MIE_MASK) {
+        if (pending_interrupts & MIP_MEIP_MASK) {
+          handle_trap(exception_code_t::e_machine_external_interrupt, 0);
+          do_dispatch();
+        } else if (pending_interrupts & MIP_MSIP_MASK) {
+          handle_trap(exception_code_t::e_machine_software_interrupt, 0);
+          do_dispatch();
+        } else if (pending_interrupts & MIP_MTIP_MASK) {
+          handle_trap(exception_code_t::e_machine_timer_interrupt, 0);
+          do_dispatch();
+        }
+        throw std::runtime_error("interrupt pending, but not handled");
+      }
+    }
+
+    // no need to check every loop, checking once is enough since jump/branch
+    // handle misaligned addresses
+    if (_pc % 4 != 0) [[unlikely]] {
+      handle_trap(exception_code_t::e_instruction_address_misaligned, _pc);
+      do_dispatch();
+    }
 
     do_dispatch();
 
