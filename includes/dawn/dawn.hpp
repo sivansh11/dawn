@@ -12,13 +12,19 @@
 #include <map>
 #include <sstream>
 #include <stdexcept>
-
-extern uint64_t _mmio_load(uint64_t addr);
-extern void     _mmio_store(uint64_t addr, uint64_t value);
-extern uint64_t _mmio_start;
-extern uint64_t _mmio_stop;
+#include <vector>
 
 namespace dawn {
+
+typedef uint64_t (*load64)(uint64_t);
+typedef void (*store64)(uint64_t, uint64_t);
+
+struct mmio_handler_t {
+  const uint64_t _start;
+  const uint64_t _stop;
+  const load64   _load64;
+  const store64  _store64;
+};
 
 // [start, end)
 constexpr inline uint32_t extract_bit_range(uint32_t value, uint8_t start,
@@ -269,8 +275,9 @@ constexpr inline void mul_64x64_u(uint64_t a, uint64_t b, uint64_t result[2]) {
 // TODO: accurate runtime memory bounds checking (account for size of
 // load/store)
 struct machine_t {
-  machine_t(size_t ram_size, uint64_t offset)
-      : _ram_size(ram_size), _offset(offset) {
+  machine_t(size_t ram_size, uint64_t offset,
+            const std::vector<mmio_handler_t> mmios)
+      : _ram_size(ram_size), _offset(offset), _mmios(mmios) {
     _data  = new uint8_t[ram_size];
     _final = reinterpret_cast<uint8_t *>(reinterpret_cast<uintptr_t>(_data) -
                                          _offset);
@@ -281,10 +288,16 @@ struct machine_t {
 
 #define load8(res, addr)                                                  \
   do {                                                                    \
-    if (_mmio_start <= addr && addr < _mmio_stop) [[unlikely]] {          \
-      res = _mmio_load(addr);                                             \
-      break;                                                              \
+    bool is_mmio = false;                                                 \
+    for (auto &mmio : _mmios) {                                           \
+      if (mmio._start <= addr && addr < mmio._stop) [[unlikely]] {        \
+        res     = mmio._load64(addr);                                     \
+        is_mmio = true;                                                   \
+        break;                                                            \
+      }                                                                   \
     }                                                                     \
+    if (is_mmio) [[unlikely]]                                             \
+      break;                                                              \
     if ((addr < _offset) || addr >= (_offset + _ram_size)) [[unlikely]] { \
       handle_trap(exception_code_t::e_load_access_fault, addr);           \
       do_dispatch();                                                      \
@@ -294,10 +307,16 @@ struct machine_t {
 
 #define load16(res, addr)                                                 \
   do {                                                                    \
-    if (_mmio_start <= addr && addr < _mmio_stop) [[unlikely]] {          \
-      res = _mmio_load(addr);                                             \
-      break;                                                              \
+    bool is_mmio = false;                                                 \
+    for (auto &mmio : _mmios) {                                           \
+      if (mmio._start <= addr && addr < mmio._stop) [[unlikely]] {        \
+        res     = mmio._load64(addr);                                     \
+        is_mmio = true;                                                   \
+        break;                                                            \
+      }                                                                   \
     }                                                                     \
+    if (is_mmio) [[unlikely]]                                             \
+      break;                                                              \
     if ((addr < _offset) || addr >= (_offset + _ram_size)) [[unlikely]] { \
       handle_trap(exception_code_t::e_load_access_fault, addr);           \
       do_dispatch();                                                      \
@@ -307,10 +326,16 @@ struct machine_t {
 
 #define load32(res, addr)                                                 \
   do {                                                                    \
-    if (_mmio_start <= addr && addr < _mmio_stop) [[unlikely]] {          \
-      res = _mmio_load(addr);                                             \
-      break;                                                              \
+    bool is_mmio = false;                                                 \
+    for (auto &mmio : _mmios) {                                           \
+      if (mmio._start <= addr && addr < mmio._stop) [[unlikely]] {        \
+        res     = mmio._load64(addr);                                     \
+        is_mmio = true;                                                   \
+        break;                                                            \
+      }                                                                   \
     }                                                                     \
+    if (is_mmio) [[unlikely]]                                             \
+      break;                                                              \
     if ((addr < _offset) || addr >= (_offset + _ram_size)) [[unlikely]] { \
       handle_trap(exception_code_t::e_load_access_fault, addr);           \
       do_dispatch();                                                      \
@@ -320,10 +345,16 @@ struct machine_t {
 
 #define load64(res, addr)                                                 \
   do {                                                                    \
-    if (_mmio_start <= addr && addr < _mmio_stop) [[unlikely]] {          \
-      res = _mmio_load(addr);                                             \
-      break;                                                              \
+    bool is_mmio = false;                                                 \
+    for (auto &mmio : _mmios) {                                           \
+      if (mmio._start <= addr && addr < mmio._stop) [[unlikely]] {        \
+        res     = mmio._load64(addr);                                     \
+        is_mmio = true;                                                   \
+        break;                                                            \
+      }                                                                   \
     }                                                                     \
+    if (is_mmio) [[unlikely]]                                             \
+      break;                                                              \
     if ((addr < _offset) || addr >= (_offset + _ram_size)) [[unlikely]] { \
       handle_trap(exception_code_t::e_load_access_fault, addr);           \
       do_dispatch();                                                      \
@@ -333,10 +364,16 @@ struct machine_t {
 
 #define load8i(res, addr)                                                 \
   do {                                                                    \
-    if (_mmio_start <= addr && addr < _mmio_stop) [[unlikely]] {          \
-      res = _mmio_load(addr);                                             \
-      break;                                                              \
+    bool is_mmio = false;                                                 \
+    for (auto &mmio : _mmios) {                                           \
+      if (mmio._start <= addr && addr < mmio._stop) [[unlikely]] {        \
+        res     = mmio._load64(addr);                                     \
+        is_mmio = true;                                                   \
+        break;                                                            \
+      }                                                                   \
     }                                                                     \
+    if (is_mmio) [[unlikely]]                                             \
+      break;                                                              \
     if ((addr < _offset) || addr >= (_offset + _ram_size)) [[unlikely]] { \
       handle_trap(exception_code_t::e_load_access_fault, addr);           \
       do_dispatch();                                                      \
@@ -346,10 +383,16 @@ struct machine_t {
 
 #define load16i(res, addr)                                                \
   do {                                                                    \
-    if (_mmio_start <= addr && addr < _mmio_stop) [[unlikely]] {          \
-      res = _mmio_load(addr);                                             \
-      break;                                                              \
+    bool is_mmio = false;                                                 \
+    for (auto &mmio : _mmios) {                                           \
+      if (mmio._start <= addr && addr < mmio._stop) [[unlikely]] {        \
+        res     = mmio._load64(addr);                                     \
+        is_mmio = true;                                                   \
+        break;                                                            \
+      }                                                                   \
     }                                                                     \
+    if (is_mmio) [[unlikely]]                                             \
+      break;                                                              \
     if ((addr < _offset) || addr >= (_offset + _ram_size)) [[unlikely]] { \
       handle_trap(exception_code_t::e_load_access_fault, addr);           \
       do_dispatch();                                                      \
@@ -359,10 +402,16 @@ struct machine_t {
 
 #define load32i(res, addr)                                                \
   do {                                                                    \
-    if (_mmio_start <= addr && addr < _mmio_stop) [[unlikely]] {          \
-      res = _mmio_load(addr);                                             \
-      break;                                                              \
+    bool is_mmio = false;                                                 \
+    for (auto &mmio : _mmios) {                                           \
+      if (mmio._start <= addr && addr < mmio._stop) [[unlikely]] {        \
+        res     = mmio._load64(addr);                                     \
+        is_mmio = true;                                                   \
+        break;                                                            \
+      }                                                                   \
     }                                                                     \
+    if (is_mmio) [[unlikely]]                                             \
+      break;                                                              \
     if ((addr < _offset) || addr >= (_offset + _ram_size)) [[unlikely]] { \
       handle_trap(exception_code_t::e_load_access_fault, addr);           \
       do_dispatch();                                                      \
@@ -372,10 +421,16 @@ struct machine_t {
 
 #define store8(addr, value)                                               \
   do {                                                                    \
-    if (_mmio_start <= addr && addr < _mmio_stop) [[unlikely]] {          \
-      _mmio_store(addr, value);                                           \
-      break;                                                              \
+    bool is_mmio = false;                                                 \
+    for (auto &mmio : _mmios) {                                           \
+      if (mmio._start <= addr && addr < mmio._stop) [[unlikely]] {        \
+        mmio._store64(addr, value);                                       \
+        is_mmio = true;                                                   \
+        break;                                                            \
+      }                                                                   \
     }                                                                     \
+    if (is_mmio) [[unlikely]]                                             \
+      break;                                                              \
     if ((addr < _offset) || addr >= (_offset + _ram_size)) [[unlikely]] { \
       handle_trap(exception_code_t::e_store_access_fault, addr);          \
       do_dispatch();                                                      \
@@ -385,10 +440,16 @@ struct machine_t {
 
 #define store16(addr, value)                                              \
   do {                                                                    \
-    if (_mmio_start <= addr && addr < _mmio_stop) [[unlikely]] {          \
-      _mmio_store(addr, value);                                           \
-      break;                                                              \
+    bool is_mmio = false;                                                 \
+    for (auto &mmio : _mmios) {                                           \
+      if (mmio._start <= addr && addr < mmio._stop) [[unlikely]] {        \
+        mmio._store64(addr, value);                                       \
+        is_mmio = true;                                                   \
+        break;                                                            \
+      }                                                                   \
     }                                                                     \
+    if (is_mmio) [[unlikely]]                                             \
+      break;                                                              \
     if ((addr < _offset) || addr >= (_offset + _ram_size)) [[unlikely]] { \
       handle_trap(exception_code_t::e_store_access_fault, addr);          \
       do_dispatch();                                                      \
@@ -398,10 +459,16 @@ struct machine_t {
 
 #define store32(addr, value)                                              \
   do {                                                                    \
-    if (_mmio_start <= addr && addr < _mmio_stop) [[unlikely]] {          \
-      _mmio_store(addr, value);                                           \
-      break;                                                              \
+    bool is_mmio = false;                                                 \
+    for (auto &mmio : _mmios) {                                           \
+      if (mmio._start <= addr && addr < mmio._stop) [[unlikely]] {        \
+        mmio._store64(addr, value);                                       \
+        is_mmio = true;                                                   \
+        break;                                                            \
+      }                                                                   \
     }                                                                     \
+    if (is_mmio) [[unlikely]]                                             \
+      break;                                                              \
     if ((addr < _offset) || addr >= (_offset + _ram_size)) [[unlikely]] { \
       handle_trap(exception_code_t::e_store_access_fault, addr);          \
       do_dispatch();                                                      \
@@ -411,10 +478,16 @@ struct machine_t {
 
 #define store64(addr, value)                                                   \
   do {                                                                         \
-    if (_mmio_start <= addr && addr < _mmio_stop) [[unlikely]] {               \
-      _mmio_store(addr, value);                                                \
-      break;                                                                   \
+    bool is_mmio = false;                                                      \
+    for (auto &mmio : _mmios) {                                                \
+      if (mmio._start <= addr && addr < mmio._stop) [[unlikely]] {             \
+        mmio._store64(addr, value);                                            \
+        is_mmio = true;                                                        \
+        break;                                                                 \
+      }                                                                        \
     }                                                                          \
+    if (is_mmio) [[unlikely]]                                                  \
+      break;                                                                   \
     if ((addr < _offset) || addr >= (_offset + _ram_size)) [[unlikely]] {      \
       handle_trap(exception_code_t::e_store_access_fault, addr);               \
       do_dispatch();                                                           \
@@ -1867,6 +1940,8 @@ struct machine_t {
   uint8_t     *_data;
   uint64_t     _offset{};
   uint8_t     *_final{};
+
+  const std::vector<mmio_handler_t> _mmios;
 
   bool _wfi = false;
   typedef void (*wfi_callback_t)();

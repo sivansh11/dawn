@@ -4,13 +4,6 @@
 
 #include <elfio/elfio.hpp>
 
-uint64_t _mmio_start = 0x1000;  // doesnt really matter
-uint64_t _mmio_stop  = 0x2000;  // doesnt really matter
-
-inline uint64_t _mmio_load(uint64_t addr) { return 0; }
-
-inline void _mmio_store(uint64_t addr, uint64_t val) {}
-
 #include "dawn/dawn.hpp"
 
 dawn::machine_t* load_elf(const std::filesystem::path& path) {
@@ -31,7 +24,8 @@ dawn::machine_t* load_elf(const std::filesystem::path& path) {
     guest_max  = std::max(guest_max, virtual_address + memory_size);
   }
 
-  dawn::machine_t* machine = new dawn::machine_t{16 * 1024 * 1024, guest_base};
+  dawn::machine_t* machine =
+      new dawn::machine_t{16 * 1024 * 1024, guest_base, {}};
 
   for (uint32_t i = 0; i < reader.segments.size(); i++) {
     const ELFIO::segment* segment = reader.segments[i];

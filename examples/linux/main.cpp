@@ -103,8 +103,11 @@ int main(int argc, char** argv) {
     return -1;
   }
 
-  const uint64_t  offset = 0;
-  dawn::machine_t machine{128 * 1024 * 1024, offset};
+  const uint64_t offset = 0;
+
+  dawn::mmio_handler_t mmio{_mmio_start, _mmio_stop, _mmio_load, _mmio_store};
+
+  dawn::machine_t machine{128 * 1024 * 1024, offset, {mmio}};
   machine._wfi_callback = _wfi_callback;
   auto kernel           = read_file(argv[1]);
   std::cout << "kernel size: " << kernel.size() << '\n';
