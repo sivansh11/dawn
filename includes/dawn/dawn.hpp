@@ -58,6 +58,7 @@ enum class exception_code_t : uint64_t {
   e_ecall_s_mode                   = 9,
   e_ecall_m_mode                   = 11,
 
+  e_machine_software_interrupt = 3 | (1ull << 63),
   e_machine_timer_interrupt    = 7 | (1ull << 63),
   e_machine_external_interrupt = 11 | (1ull << 63),
 };
