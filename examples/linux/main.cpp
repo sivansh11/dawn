@@ -10,6 +10,8 @@
 
 // #define DAWN_ENABLE_LOGGING
 #define DAWN_RUNTIME_MEMORY_BOUNDS_CHECK
+#include "dawn/dawn.hpp"
+
 uint64_t _mmio_start = 0x10000000;
 uint64_t _mmio_stop  = 0x20000000;
 
@@ -80,8 +82,6 @@ inline uint64_t get_time_now_us() {
 }
 
 inline void _wfi_callback() { timer = get_time_now_us() - boot_time; }
-
-#include "dawn/dawn.hpp"
 
 std::vector<uint8_t> read_file(const std::string& file_path) {
   std::ifstream file(file_path, std::ios::binary | std::ios::ate);
