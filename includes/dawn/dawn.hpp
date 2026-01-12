@@ -431,6 +431,7 @@ struct machine_t {
   inline void memset(uint64_t addr, int value, size_t size) {
     std::memset(_final + addr, value, size);
   }
+  inline uint8_t *at(uint64_t addr) { return _final + addr; }
 
   // TODO: test with and without inline
   // TODO: test with a macro
