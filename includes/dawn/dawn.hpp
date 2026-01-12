@@ -285,6 +285,11 @@ struct machine_t {
   }
   ~machine_t() { delete[] _data; }
 
+  // TODO: a more involved csr read
+  inline uint64_t read_csr(uint16_t csrno) { return _csr[csrno]; }
+  // TODO: a more involved csr write
+  inline void write_csr(uint16_t csrno, uint64_t value) { _csr[csrno] = value; }
+
 #define fetch32(res, addr) res = *reinterpret_cast<uint32_t *>(_final + addr)
 
 #define load8(res, addr)                                                  \
