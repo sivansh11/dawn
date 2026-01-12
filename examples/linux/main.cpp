@@ -8,8 +8,6 @@
 #include <sys/ioctl.h>
 #include <asm-generic/ioctls.h>
 
-#include <elfio/elfio.hpp>
-
 // #define DAWN_ENABLE_LOGGING
 #define DAWN_RUNTIME_MEMORY_BOUNDS_CHECK
 uint64_t _mmio_start = 0x10000000;
