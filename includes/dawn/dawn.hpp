@@ -20,10 +20,10 @@ typedef uint64_t (*load64)(uint64_t);
 typedef void (*store64)(uint64_t, uint64_t);
 
 struct mmio_handler_t {
-  const uint64_t _start;
-  const uint64_t _stop;
-  const load64   _load64;
-  const store64  _store64;
+  uint64_t _start;
+  uint64_t _stop;
+  load64   _load64;
+  store64  _store64;
 };
 
 // [start, end)
@@ -308,11 +308,16 @@ struct machine_t {
 
 #define load8(res, addr)                                                  \
   do {                                                                    \
+    if (_mru_mmio._start <= addr && addr < _mru_mmio._stop) {             \
+      res = _mru_mmio._load64(addr);                                      \
+      break;                                                              \
+    }                                                                     \
     bool is_mmio = false;                                                 \
     for (auto &mmio : _mmios) {                                           \
       if (mmio._start <= addr && addr < mmio._stop) [[unlikely]] {        \
-        res     = mmio._load64(addr);                                     \
-        is_mmio = true;                                                   \
+        _mru_mmio = mmio;                                                 \
+        res       = mmio._load64(addr);                                   \
+        is_mmio   = true;                                                 \
         break;                                                            \
       }                                                                   \
     }                                                                     \
@@ -327,11 +332,16 @@ struct machine_t {
 
 #define load16(res, addr)                                                 \
   do {                                                                    \
+    if (_mru_mmio._start <= addr && addr < _mru_mmio._stop) {             \
+      res = _mru_mmio._load64(addr);                                      \
+      break;                                                              \
+    }                                                                     \
     bool is_mmio = false;                                                 \
     for (auto &mmio : _mmios) {                                           \
       if (mmio._start <= addr && addr < mmio._stop) [[unlikely]] {        \
-        res     = mmio._load64(addr);                                     \
-        is_mmio = true;                                                   \
+        _mru_mmio = mmio;                                                 \
+        res       = mmio._load64(addr);                                   \
+        is_mmio   = true;                                                 \
         break;                                                            \
       }                                                                   \
     }                                                                     \
@@ -346,11 +356,16 @@ struct machine_t {
 
 #define load32(res, addr)                                                 \
   do {                                                                    \
+    if (_mru_mmio._start <= addr && addr < _mru_mmio._stop) {             \
+      res = _mru_mmio._load64(addr);                                      \
+      break;                                                              \
+    }                                                                     \
     bool is_mmio = false;                                                 \
     for (auto &mmio : _mmios) {                                           \
       if (mmio._start <= addr && addr < mmio._stop) [[unlikely]] {        \
-        res     = mmio._load64(addr);                                     \
-        is_mmio = true;                                                   \
+        _mru_mmio = mmio;                                                 \
+        res       = mmio._load64(addr);                                   \
+        is_mmio   = true;                                                 \
         break;                                                            \
       }                                                                   \
     }                                                                     \
@@ -365,11 +380,16 @@ struct machine_t {
 
 #define load64(res, addr)                                                 \
   do {                                                                    \
+    if (_mru_mmio._start <= addr && addr < _mru_mmio._stop) {             \
+      res = _mru_mmio._load64(addr);                                      \
+      break;                                                              \
+    }                                                                     \
     bool is_mmio = false;                                                 \
     for (auto &mmio : _mmios) {                                           \
       if (mmio._start <= addr && addr < mmio._stop) [[unlikely]] {        \
-        res     = mmio._load64(addr);                                     \
-        is_mmio = true;                                                   \
+        _mru_mmio = mmio;                                                 \
+        res       = mmio._load64(addr);                                   \
+        is_mmio   = true;                                                 \
         break;                                                            \
       }                                                                   \
     }                                                                     \
@@ -384,11 +404,16 @@ struct machine_t {
 
 #define load8i(res, addr)                                                 \
   do {                                                                    \
+    if (_mru_mmio._start <= addr && addr < _mru_mmio._stop) {             \
+      res = _mru_mmio._load64(addr);                                      \
+      break;                                                              \
+    }                                                                     \
     bool is_mmio = false;                                                 \
     for (auto &mmio : _mmios) {                                           \
       if (mmio._start <= addr && addr < mmio._stop) [[unlikely]] {        \
-        res     = mmio._load64(addr);                                     \
-        is_mmio = true;                                                   \
+        _mru_mmio = mmio;                                                 \
+        res       = mmio._load64(addr);                                   \
+        is_mmio   = true;                                                 \
         break;                                                            \
       }                                                                   \
     }                                                                     \
@@ -403,11 +428,16 @@ struct machine_t {
 
 #define load16i(res, addr)                                                \
   do {                                                                    \
+    if (_mru_mmio._start <= addr && addr < _mru_mmio._stop) {             \
+      res = _mru_mmio._load64(addr);                                      \
+      break;                                                              \
+    }                                                                     \
     bool is_mmio = false;                                                 \
     for (auto &mmio : _mmios) {                                           \
       if (mmio._start <= addr && addr < mmio._stop) [[unlikely]] {        \
-        res     = mmio._load64(addr);                                     \
-        is_mmio = true;                                                   \
+        _mru_mmio = mmio;                                                 \
+        res       = mmio._load64(addr);                                   \
+        is_mmio   = true;                                                 \
         break;                                                            \
       }                                                                   \
     }                                                                     \
@@ -422,11 +452,16 @@ struct machine_t {
 
 #define load32i(res, addr)                                                \
   do {                                                                    \
+    if (_mru_mmio._start <= addr && addr < _mru_mmio._stop) {             \
+      res = _mru_mmio._load64(addr);                                      \
+      break;                                                              \
+    }                                                                     \
     bool is_mmio = false;                                                 \
     for (auto &mmio : _mmios) {                                           \
       if (mmio._start <= addr && addr < mmio._stop) [[unlikely]] {        \
-        res     = mmio._load64(addr);                                     \
-        is_mmio = true;                                                   \
+        _mru_mmio = mmio;                                                 \
+        res       = mmio._load64(addr);                                   \
+        is_mmio   = true;                                                 \
         break;                                                            \
       }                                                                   \
     }                                                                     \
@@ -441,9 +476,14 @@ struct machine_t {
 
 #define store8(addr, value)                                               \
   do {                                                                    \
+    if (_mru_mmio._start <= addr && addr < _mru_mmio._stop) {             \
+      _mru_mmio._store64(addr, value);                                    \
+      break;                                                              \
+    }                                                                     \
     bool is_mmio = false;                                                 \
     for (auto &mmio : _mmios) {                                           \
       if (mmio._start <= addr && addr < mmio._stop) [[unlikely]] {        \
+        _mru_mmio = mmio;                                                 \
         mmio._store64(addr, value);                                       \
         is_mmio = true;                                                   \
         break;                                                            \
@@ -460,9 +500,14 @@ struct machine_t {
 
 #define store16(addr, value)                                              \
   do {                                                                    \
+    if (_mru_mmio._start <= addr && addr < _mru_mmio._stop) {             \
+      _mru_mmio._store64(addr, value);                                    \
+      break;                                                              \
+    }                                                                     \
     bool is_mmio = false;                                                 \
     for (auto &mmio : _mmios) {                                           \
       if (mmio._start <= addr && addr < mmio._stop) [[unlikely]] {        \
+        _mru_mmio = mmio;                                                 \
         mmio._store64(addr, value);                                       \
         is_mmio = true;                                                   \
         break;                                                            \
@@ -479,9 +524,14 @@ struct machine_t {
 
 #define store32(addr, value)                                              \
   do {                                                                    \
+    if (_mru_mmio._start <= addr && addr < _mru_mmio._stop) {             \
+      _mru_mmio._store64(addr, value);                                    \
+      break;                                                              \
+    }                                                                     \
     bool is_mmio = false;                                                 \
     for (auto &mmio : _mmios) {                                           \
       if (mmio._start <= addr && addr < mmio._stop) [[unlikely]] {        \
+        _mru_mmio = mmio;                                                 \
         mmio._store64(addr, value);                                       \
         is_mmio = true;                                                   \
         break;                                                            \
@@ -498,9 +548,14 @@ struct machine_t {
 
 #define store64(addr, value)                                                   \
   do {                                                                         \
+    if (_mru_mmio._start <= addr && addr < _mru_mmio._stop) {                  \
+      _mru_mmio._store64(addr, value);                                         \
+      break;                                                                   \
+    }                                                                          \
     bool is_mmio = false;                                                      \
     for (auto &mmio : _mmios) {                                                \
       if (mmio._start <= addr && addr < mmio._stop) [[unlikely]] {             \
+        _mru_mmio = mmio;                                                      \
         mmio._store64(addr, value);                                            \
         is_mmio = true;                                                        \
         break;                                                                 \
@@ -1972,6 +2027,7 @@ struct machine_t {
   uint8_t     *_final{};
 
   const std::vector<mmio_handler_t> _mmios;
+  mmio_handler_t                    _mru_mmio = {};
 
   bool _wfi = false;
   typedef void (*wfi_callback_t)();
