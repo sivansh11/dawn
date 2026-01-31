@@ -18,8 +18,8 @@ namespace dawn {
 
 struct mmio_handler_t;
 
-typedef uint64_t (*load64)(mmio_handler_t *handler, uint64_t);
-typedef void (*store64)(mmio_handler_t *handler, uint64_t, uint64_t);
+typedef uint64_t (*load64)(const mmio_handler_t *handler, uint64_t);
+typedef void (*store64)(const mmio_handler_t *handler, uint64_t, uint64_t);
 
 struct mmio_handler_t {
   uint64_t _start;
@@ -308,17 +308,17 @@ struct machine_t {
 
 #define fetch32(res, addr) res = *reinterpret_cast<uint32_t *>(_final + addr)
 
-#define load8(res, addr)                                                  \
+#define _dawn_load(res, addr)                                             \
   do {                                                                    \
     if (_mru_mmio._start <= addr && addr < _mru_mmio._stop) {             \
-      res = _mru_mmio._load64(addr);                                      \
+      res = _mru_mmio._load64(&_mru_mmio, addr);                          \
       break;                                                              \
     }                                                                     \
     bool is_mmio = false;                                                 \
     for (auto &mmio : _mmios) {                                           \
       if (mmio._start <= addr && addr < mmio._stop) [[unlikely]] {        \
         _mru_mmio = mmio;                                                 \
-        res       = mmio._load64(addr);                                   \
+        res       = mmio._load64(&mmio, addr);                            \
         is_mmio   = true;                                                 \
         break;                                                            \
       }                                                                   \
@@ -329,164 +329,28 @@ struct machine_t {
       handle_trap(exception_code_t::e_load_access_fault, addr);           \
       do_dispatch();                                                      \
     }                                                                     \
-    res = *reinterpret_cast<uint8_t *>(_final + addr);                    \
+    res = *reinterpret_cast<decltype(res) *>(_final + addr);              \
   } while (false)
 
-#define load16(res, addr)                                                 \
+#define load8(res, addr)   _dawn_load(res, addr)
+#define load16(res, addr)  _dawn_load(res, addr)
+#define load32(res, addr)  _dawn_load(res, addr)
+#define load64(res, addr)  _dawn_load(res, addr)
+#define load8i(res, addr)  _dawn_load(res, addr)
+#define load16i(res, addr) _dawn_load(res, addr)
+#define load32i(res, addr) _dawn_load(res, addr)
+
+#define _dawn_store(type, addr, value)                                    \
   do {                                                                    \
     if (_mru_mmio._start <= addr && addr < _mru_mmio._stop) {             \
-      res = _mru_mmio._load64(addr);                                      \
+      _mru_mmio._store64(&_mru_mmio, addr, value);                        \
       break;                                                              \
     }                                                                     \
     bool is_mmio = false;                                                 \
     for (auto &mmio : _mmios) {                                           \
       if (mmio._start <= addr && addr < mmio._stop) [[unlikely]] {        \
         _mru_mmio = mmio;                                                 \
-        res       = mmio._load64(addr);                                   \
-        is_mmio   = true;                                                 \
-        break;                                                            \
-      }                                                                   \
-    }                                                                     \
-    if (is_mmio) [[unlikely]]                                             \
-      break;                                                              \
-    if ((addr < _offset) || addr >= (_offset + _ram_size)) [[unlikely]] { \
-      handle_trap(exception_code_t::e_load_access_fault, addr);           \
-      do_dispatch();                                                      \
-    }                                                                     \
-    res = *reinterpret_cast<uint16_t *>(_final + addr);                   \
-  } while (false)
-
-#define load32(res, addr)                                                 \
-  do {                                                                    \
-    if (_mru_mmio._start <= addr && addr < _mru_mmio._stop) {             \
-      res = _mru_mmio._load64(addr);                                      \
-      break;                                                              \
-    }                                                                     \
-    bool is_mmio = false;                                                 \
-    for (auto &mmio : _mmios) {                                           \
-      if (mmio._start <= addr && addr < mmio._stop) [[unlikely]] {        \
-        _mru_mmio = mmio;                                                 \
-        res       = mmio._load64(addr);                                   \
-        is_mmio   = true;                                                 \
-        break;                                                            \
-      }                                                                   \
-    }                                                                     \
-    if (is_mmio) [[unlikely]]                                             \
-      break;                                                              \
-    if ((addr < _offset) || addr >= (_offset + _ram_size)) [[unlikely]] { \
-      handle_trap(exception_code_t::e_load_access_fault, addr);           \
-      do_dispatch();                                                      \
-    }                                                                     \
-    res = *reinterpret_cast<uint32_t *>(_final + addr);                   \
-  } while (false)
-
-#define load64(res, addr)                                                 \
-  do {                                                                    \
-    if (_mru_mmio._start <= addr && addr < _mru_mmio._stop) {             \
-      res = _mru_mmio._load64(addr);                                      \
-      break;                                                              \
-    }                                                                     \
-    bool is_mmio = false;                                                 \
-    for (auto &mmio : _mmios) {                                           \
-      if (mmio._start <= addr && addr < mmio._stop) [[unlikely]] {        \
-        _mru_mmio = mmio;                                                 \
-        res       = mmio._load64(addr);                                   \
-        is_mmio   = true;                                                 \
-        break;                                                            \
-      }                                                                   \
-    }                                                                     \
-    if (is_mmio) [[unlikely]]                                             \
-      break;                                                              \
-    if ((addr < _offset) || addr >= (_offset + _ram_size)) [[unlikely]] { \
-      handle_trap(exception_code_t::e_load_access_fault, addr);           \
-      do_dispatch();                                                      \
-    }                                                                     \
-    res = *reinterpret_cast<uint64_t *>(_final + addr);                   \
-  } while (false)
-
-#define load8i(res, addr)                                                 \
-  do {                                                                    \
-    if (_mru_mmio._start <= addr && addr < _mru_mmio._stop) {             \
-      res = _mru_mmio._load64(addr);                                      \
-      break;                                                              \
-    }                                                                     \
-    bool is_mmio = false;                                                 \
-    for (auto &mmio : _mmios) {                                           \
-      if (mmio._start <= addr && addr < mmio._stop) [[unlikely]] {        \
-        _mru_mmio = mmio;                                                 \
-        res       = mmio._load64(addr);                                   \
-        is_mmio   = true;                                                 \
-        break;                                                            \
-      }                                                                   \
-    }                                                                     \
-    if (is_mmio) [[unlikely]]                                             \
-      break;                                                              \
-    if ((addr < _offset) || addr >= (_offset + _ram_size)) [[unlikely]] { \
-      handle_trap(exception_code_t::e_load_access_fault, addr);           \
-      do_dispatch();                                                      \
-    }                                                                     \
-    res = *reinterpret_cast<int8_t *>(_final + addr);                     \
-  } while (false)
-
-#define load16i(res, addr)                                                \
-  do {                                                                    \
-    if (_mru_mmio._start <= addr && addr < _mru_mmio._stop) {             \
-      res = _mru_mmio._load64(addr);                                      \
-      break;                                                              \
-    }                                                                     \
-    bool is_mmio = false;                                                 \
-    for (auto &mmio : _mmios) {                                           \
-      if (mmio._start <= addr && addr < mmio._stop) [[unlikely]] {        \
-        _mru_mmio = mmio;                                                 \
-        res       = mmio._load64(addr);                                   \
-        is_mmio   = true;                                                 \
-        break;                                                            \
-      }                                                                   \
-    }                                                                     \
-    if (is_mmio) [[unlikely]]                                             \
-      break;                                                              \
-    if ((addr < _offset) || addr >= (_offset + _ram_size)) [[unlikely]] { \
-      handle_trap(exception_code_t::e_load_access_fault, addr);           \
-      do_dispatch();                                                      \
-    }                                                                     \
-    res = *reinterpret_cast<int16_t *>(_final + addr);                    \
-  } while (false)
-
-#define load32i(res, addr)                                                \
-  do {                                                                    \
-    if (_mru_mmio._start <= addr && addr < _mru_mmio._stop) {             \
-      res = _mru_mmio._load64(addr);                                      \
-      break;                                                              \
-    }                                                                     \
-    bool is_mmio = false;                                                 \
-    for (auto &mmio : _mmios) {                                           \
-      if (mmio._start <= addr && addr < mmio._stop) [[unlikely]] {        \
-        _mru_mmio = mmio;                                                 \
-        res       = mmio._load64(addr);                                   \
-        is_mmio   = true;                                                 \
-        break;                                                            \
-      }                                                                   \
-    }                                                                     \
-    if (is_mmio) [[unlikely]]                                             \
-      break;                                                              \
-    if ((addr < _offset) || addr >= (_offset + _ram_size)) [[unlikely]] { \
-      handle_trap(exception_code_t::e_load_access_fault, addr);           \
-      do_dispatch();                                                      \
-    }                                                                     \
-    res = *reinterpret_cast<int32_t *>(_final + addr);                    \
-  } while (false)
-
-#define store8(addr, value)                                               \
-  do {                                                                    \
-    if (_mru_mmio._start <= addr && addr < _mru_mmio._stop) {             \
-      _mru_mmio._store64(addr, value);                                    \
-      break;                                                              \
-    }                                                                     \
-    bool is_mmio = false;                                                 \
-    for (auto &mmio : _mmios) {                                           \
-      if (mmio._start <= addr && addr < mmio._stop) [[unlikely]] {        \
-        _mru_mmio = mmio;                                                 \
-        mmio._store64(addr, value);                                       \
+        mmio._store64(&mmio, addr, value);                                \
         is_mmio = true;                                                   \
         break;                                                            \
       }                                                                   \
@@ -497,80 +361,13 @@ struct machine_t {
       handle_trap(exception_code_t::e_store_access_fault, addr);          \
       do_dispatch();                                                      \
     }                                                                     \
-    *reinterpret_cast<uint8_t *>(_final + addr) = value & 0xff;           \
+    *reinterpret_cast<type *>(_final + addr) = value;                     \
   } while (false)
 
-#define store16(addr, value)                                              \
-  do {                                                                    \
-    if (_mru_mmio._start <= addr && addr < _mru_mmio._stop) {             \
-      _mru_mmio._store64(addr, value);                                    \
-      break;                                                              \
-    }                                                                     \
-    bool is_mmio = false;                                                 \
-    for (auto &mmio : _mmios) {                                           \
-      if (mmio._start <= addr && addr < mmio._stop) [[unlikely]] {        \
-        _mru_mmio = mmio;                                                 \
-        mmio._store64(addr, value);                                       \
-        is_mmio = true;                                                   \
-        break;                                                            \
-      }                                                                   \
-    }                                                                     \
-    if (is_mmio) [[unlikely]]                                             \
-      break;                                                              \
-    if ((addr < _offset) || addr >= (_offset + _ram_size)) [[unlikely]] { \
-      handle_trap(exception_code_t::e_store_access_fault, addr);          \
-      do_dispatch();                                                      \
-    }                                                                     \
-    *reinterpret_cast<uint16_t *>(_final + addr) = value & 0xffff;        \
-  } while (false)
-
-#define store32(addr, value)                                              \
-  do {                                                                    \
-    if (_mru_mmio._start <= addr && addr < _mru_mmio._stop) {             \
-      _mru_mmio._store64(addr, value);                                    \
-      break;                                                              \
-    }                                                                     \
-    bool is_mmio = false;                                                 \
-    for (auto &mmio : _mmios) {                                           \
-      if (mmio._start <= addr && addr < mmio._stop) [[unlikely]] {        \
-        _mru_mmio = mmio;                                                 \
-        mmio._store64(addr, value);                                       \
-        is_mmio = true;                                                   \
-        break;                                                            \
-      }                                                                   \
-    }                                                                     \
-    if (is_mmio) [[unlikely]]                                             \
-      break;                                                              \
-    if ((addr < _offset) || addr >= (_offset + _ram_size)) [[unlikely]] { \
-      handle_trap(exception_code_t::e_store_access_fault, addr);          \
-      do_dispatch();                                                      \
-    }                                                                     \
-    *reinterpret_cast<uint32_t *>(_final + addr) = value & 0xffffffff;    \
-  } while (false)
-
-#define store64(addr, value)                                                   \
-  do {                                                                         \
-    if (_mru_mmio._start <= addr && addr < _mru_mmio._stop) {                  \
-      _mru_mmio._store64(addr, value);                                         \
-      break;                                                                   \
-    }                                                                          \
-    bool is_mmio = false;                                                      \
-    for (auto &mmio : _mmios) {                                                \
-      if (mmio._start <= addr && addr < mmio._stop) [[unlikely]] {             \
-        _mru_mmio = mmio;                                                      \
-        mmio._store64(addr, value);                                            \
-        is_mmio = true;                                                        \
-        break;                                                                 \
-      }                                                                        \
-    }                                                                          \
-    if (is_mmio) [[unlikely]]                                                  \
-      break;                                                                   \
-    if ((addr < _offset) || addr >= (_offset + _ram_size)) [[unlikely]] {      \
-      handle_trap(exception_code_t::e_store_access_fault, addr);               \
-      do_dispatch();                                                           \
-    }                                                                          \
-    *reinterpret_cast<uint64_t *>(_final + addr) = value & 0xffffffffffffffff; \
-  } while (false)
+#define store8(addr, value)  _dawn_store(uint8_t, addr, value)
+#define store16(addr, value) _dawn_store(uint16_t, addr, value)
+#define store32(addr, value) _dawn_store(uint32_t, addr, value)
+#define store64(addr, value) _dawn_store(uint64_t, addr, value)
 
   inline void memcpy_host_to_guest(uint64_t dst, const void *src, size_t size) {
     std::memcpy(_final + dst, src, size);
