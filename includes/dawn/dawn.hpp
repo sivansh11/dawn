@@ -16,8 +16,10 @@
 
 namespace dawn {
 
-typedef uint64_t (*load64)(uint64_t);
-typedef void (*store64)(uint64_t, uint64_t);
+struct mmio_handler_t;
+
+typedef uint64_t (*load64)(mmio_handler_t *handler, uint64_t);
+typedef void (*store64)(mmio_handler_t *handler, uint64_t, uint64_t);
 
 struct mmio_handler_t {
   uint64_t _start;
