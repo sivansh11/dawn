@@ -1,0 +1,2 @@
+examples/linux/rootfs.cpio filter=lfs diff=lfs merge=lfs -text
+examples/linux/Image filter=lfs diff=lfs merge=lfs -text
