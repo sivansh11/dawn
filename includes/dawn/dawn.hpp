@@ -1419,7 +1419,7 @@ struct machine_t {
         const uint32_t alignment = 4;  // 4 for w
         if (addr % alignment != 0) [[unlikely]] {
           handle_trap(exception_code_t::e_load_address_misaligned, addr);
-          goto do_unknown_instruction;
+          do_dispatch();
         }
         uint32_t value;
         load32(value, addr);  // may fault
@@ -1435,7 +1435,7 @@ struct machine_t {
         const uint32_t alignment = 4;  // 4 for w
         if (addr % alignment != 0) [[unlikely]] {
           handle_trap(exception_code_t::e_store_address_misaligned, addr);
-          goto do_unknown_instruction;
+          do_dispatch();
         }
         if (_is_reserved && _reservation_address == addr) {
           store32(addr, static_cast<uint32_t>(rs2));
@@ -1454,7 +1454,7 @@ struct machine_t {
         const uint32_t alignment = 4;  // 4 for w
         if (addr % alignment != 0) [[unlikely]] {
           handle_trap(exception_code_t::e_load_address_misaligned, addr);
-          goto do_unknown_instruction;
+          do_dispatch();
         }
         uint32_t value;
         load32(value, addr);  // may fault
@@ -1471,7 +1471,7 @@ struct machine_t {
         const uint32_t alignment = 4;  // 4 for w
         if (addr % alignment != 0) [[unlikely]] {
           handle_trap(exception_code_t::e_load_address_misaligned, addr);
-          goto do_unknown_instruction;
+          do_dispatch();
         }
         uint32_t value;
         load32(value, addr);  // may fault
@@ -1488,7 +1488,7 @@ struct machine_t {
         const uint32_t alignment = 4;  // 4 for w
         if (addr % alignment != 0) [[unlikely]] {
           handle_trap(exception_code_t::e_load_address_misaligned, addr);
-          goto do_unknown_instruction;
+          do_dispatch();
         }
         uint32_t value;
         load32(value, addr);  // may fault
@@ -1505,7 +1505,7 @@ struct machine_t {
         const uint32_t alignment = 4;  // 4 for w
         if (addr % alignment != 0) [[unlikely]] {
           handle_trap(exception_code_t::e_load_address_misaligned, addr);
-          goto do_unknown_instruction;
+          do_dispatch();
         }
         uint32_t value;
         load32(value, addr);  // may fault
@@ -1522,7 +1522,7 @@ struct machine_t {
         const uint32_t alignment = 4;  // 4 for w
         if (addr % alignment != 0) [[unlikely]] {
           handle_trap(exception_code_t::e_load_address_misaligned, addr);
-          goto do_unknown_instruction;
+          do_dispatch();
         }
         uint32_t value;
         load32(value, addr);  // may fault
@@ -1539,7 +1539,7 @@ struct machine_t {
         const uint32_t alignment = 4;  // 4 for w
         if (addr % alignment != 0) [[unlikely]] {
           handle_trap(exception_code_t::e_load_address_misaligned, addr);
-          goto do_unknown_instruction;
+          do_dispatch();
         }
         uint32_t value;
         load32(value, addr);  // may fault
@@ -1558,7 +1558,7 @@ struct machine_t {
         const uint32_t alignment = 4;  // 4 for w
         if (addr % alignment != 0) [[unlikely]] {
           handle_trap(exception_code_t::e_load_address_misaligned, addr);
-          goto do_unknown_instruction;
+          do_dispatch();
         }
         uint32_t value;
         load32(value, addr);  // may fault
@@ -1577,7 +1577,7 @@ struct machine_t {
         const uint32_t alignment = 4;  // 4 for w
         if (addr % alignment != 0) [[unlikely]] {
           handle_trap(exception_code_t::e_load_address_misaligned, addr);
-          goto do_unknown_instruction;
+          do_dispatch();
         }
         uint32_t value;
         load32(value, addr);  // may fault
@@ -1595,7 +1595,7 @@ struct machine_t {
         const uint32_t alignment = 4;  // 4 for w
         if (addr % alignment != 0) [[unlikely]] {
           handle_trap(exception_code_t::e_load_address_misaligned, addr);
-          goto do_unknown_instruction;
+          do_dispatch();
         }
         uint32_t value;
         load32(value, addr);  // may fault
@@ -1621,7 +1621,7 @@ struct machine_t {
         const uint32_t alignment = 8;  // 8 for d
         if (addr % alignment != 0) [[unlikely]] {
           handle_trap(exception_code_t::e_load_address_misaligned, addr);
-          goto do_unknown_instruction;
+          do_dispatch();
         }
         uint64_t value;
         load64(value, addr);  // may fault
@@ -1637,7 +1637,7 @@ struct machine_t {
         const uint32_t alignment = 8;  // 8 for d
         if (addr % alignment != 0) [[unlikely]] {
           handle_trap(exception_code_t::e_store_address_misaligned, addr);
-          goto do_unknown_instruction;
+          do_dispatch();
         }
         if (_is_reserved && _reservation_address == addr) {
           // no e_store_access_fault in this implementation
@@ -1657,7 +1657,7 @@ struct machine_t {
         const uint32_t alignment = 8;  // 8 for d
         if (addr % alignment != 0) [[unlikely]] {
           handle_trap(exception_code_t::e_load_address_misaligned, addr);
-          goto do_unknown_instruction;
+          do_dispatch();
         }
         uint64_t value;
         load64(value, addr);  // may fault
@@ -1674,7 +1674,7 @@ struct machine_t {
         const uint32_t alignment = 8;  // 8 for d
         if (addr % alignment != 0) [[unlikely]] {
           handle_trap(exception_code_t::e_load_address_misaligned, addr);
-          goto do_unknown_instruction;
+          do_dispatch();
         }
         uint64_t value;
         load64(value, addr);  // may fault
@@ -1691,7 +1691,7 @@ struct machine_t {
         const uint32_t alignment = 8;  // 8 for d
         if (addr % alignment != 0) [[unlikely]] {
           handle_trap(exception_code_t::e_load_address_misaligned, addr);
-          goto do_unknown_instruction;
+          do_dispatch();
         }
         uint64_t value;
         load64(value, addr);  // may fault
@@ -1708,7 +1708,7 @@ struct machine_t {
         const uint32_t alignment = 8;  // 8 for d
         if (addr % alignment != 0) [[unlikely]] {
           handle_trap(exception_code_t::e_load_address_misaligned, addr);
-          goto do_unknown_instruction;
+          do_dispatch();
         }
         uint64_t value;
         load64(value, addr);  // may fault
@@ -1725,7 +1725,7 @@ struct machine_t {
         const uint32_t alignment = 8;  // 8 for d
         if (addr % alignment != 0) [[unlikely]] {
           handle_trap(exception_code_t::e_load_address_misaligned, addr);
-          goto do_unknown_instruction;
+          do_dispatch();
         }
         uint64_t value;
         load64(value, addr);  // may fault
@@ -1742,7 +1742,7 @@ struct machine_t {
         const uint32_t alignment = 8;  // 8 for d
         if (addr % alignment != 0) [[unlikely]] {
           handle_trap(exception_code_t::e_load_address_misaligned, addr);
-          goto do_unknown_instruction;
+          do_dispatch();
         }
         uint64_t value;
         load64(value, addr);  // may fault
@@ -1760,7 +1760,7 @@ struct machine_t {
         const uint32_t alignment = 8;  // 8 for d
         if (addr % alignment != 0) [[unlikely]] {
           handle_trap(exception_code_t::e_load_address_misaligned, addr);
-          goto do_unknown_instruction;
+          do_dispatch();
         }
         uint64_t value;
         load64(value, addr);  // may fault
@@ -1778,7 +1778,7 @@ struct machine_t {
         const uint32_t alignment = 8;  // 8 for d
         if (addr % alignment != 0) [[unlikely]] {
           handle_trap(exception_code_t::e_load_address_misaligned, addr);
-          goto do_unknown_instruction;
+          do_dispatch();
         }
         uint64_t value;
         load64(value, addr);  // may fault
@@ -1796,7 +1796,7 @@ struct machine_t {
         const uint32_t alignment = 8;  // 8 for d
         if (addr % alignment != 0) [[unlikely]] {
           handle_trap(exception_code_t::e_load_address_misaligned, addr);
-          goto do_unknown_instruction;
+          do_dispatch();
         }
         uint64_t value;
         load64(value, addr);  // may fault
