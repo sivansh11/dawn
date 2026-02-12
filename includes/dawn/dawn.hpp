@@ -442,7 +442,7 @@ struct machine_t {
     static bool initialized = false;
     if (!initialized) [[unlikely]] {
       initialized = true;
-      for (auto &entry : dispatch_table) entry = &&do_unknown_instruction;
+      for (auto &entry : dispatch_table) entry = &&_do_unknown_instruction;
 
 #define register_range(op, label)                                             \
   do {                                                                        \
@@ -453,63 +453,63 @@ struct machine_t {
     dispatch_table[op | func3 << 5] = &&label; \
   } while (false)
 
-      register_range(0b01101, do_lui);
-      register_range(0b00101, do_auipc);
-      register_range(0b11011, do_jal);
-      register_range(0b11001, do_jalr);
-      register_instr(0b11000, 0b000, do_beq);
-      register_instr(0b11000, 0b001, do_bne);
-      register_instr(0b11000, 0b100, do_blt);
-      register_instr(0b11000, 0b101, do_bge);
-      register_instr(0b11000, 0b110, do_bltu);
-      register_instr(0b11000, 0b111, do_bgeu);
-      register_instr(0b00000, 0b000, do_lb);
-      register_instr(0b00000, 0b001, do_lh);
-      register_instr(0b00000, 0b010, do_lw);
-      register_instr(0b00000, 0b100, do_lbu);
-      register_instr(0b00000, 0b101, do_lhu);
-      register_instr(0b01000, 0b000, do_sb);
-      register_instr(0b01000, 0b001, do_sh);
-      register_instr(0b01000, 0b010, do_sw);
-      register_instr(0b00100, 0b000, do_addi);
-      register_instr(0b00100, 0b010, do_slti);
-      register_instr(0b00100, 0b011, do_sltiu);
-      register_instr(0b00100, 0b100, do_xori);
-      register_instr(0b00100, 0b110, do_ori);
-      register_instr(0b00100, 0b111, do_andi);
-      register_instr(0b00000, 0b110, do_lwu);
-      register_instr(0b00000, 0b011, do_ld);
-      register_instr(0b01000, 0b011, do_sd);
-      register_instr(0b00100, 0b001, do_slli);
-      register_instr(0b00100, 0b101, do_srli_or_srai);
-      register_instr(0b00110, 0b000, do_addiw);
-      register_instr(0b00110, 0b001, do_slliw);
-      register_instr(0b00110, 0b101, do_srliw_or_sraiw);
-      register_instr(0b01110, 0b000, do_addw_or_subw_or_mulw);
-      register_instr(0b01110, 0b001, do_sllw);
-      register_instr(0b01110, 0b100, do_divw);
-      register_instr(0b01110, 0b101, do_srlw_or_sraw_or_divuw);
-      register_instr(0b01110, 0b110, do_remw);
-      register_instr(0b01110, 0b111, do_remuw);
-      register_instr(0b01100, 0b000, do_add_or_sub_or_mul);
-      register_instr(0b01100, 0b001, do_sll_or_mulh);
-      register_instr(0b01100, 0b010, do_slt_or_mulhsu);
-      register_instr(0b01100, 0b011, do_sltu_or_mulhu);
-      register_instr(0b01100, 0b100, do_xor_or_div);
-      register_instr(0b01100, 0b101, do_srl_or_sra_or_divu);
-      register_instr(0b01100, 0b110, do_or_or_rem);
-      register_instr(0b01100, 0b111, do_and_or_remu);
-      register_instr(0b00011, 0b000, do_fence);
-      register_instr(0b00011, 0b001, do_fence);
-      register_instr(0b11100, 0b000, do_system);  // ecall ebreak mret wfi
-      register_instr(0b11100, 0b001, do_csrrw);
-      register_instr(0b11100, 0b010, do_csrrs);
-      register_instr(0b11100, 0b011, do_csrrc);
-      register_instr(0b11100, 0b101, do_csrrwi);
-      register_instr(0b11100, 0b110, do_csrrsi);
-      register_instr(0b11100, 0b111, do_csrrci);
-      register_instr(0b01011, 0b010, do_atomic_w);
-      register_instr(0b01011, 0b011, do_atomic_d);
+      register_range(0b01101, _do_lui);
+      register_range(0b00101, _do_auipc);
+      register_range(0b11011, _do_jal);
+      register_range(0b11001, _do_jalr);
+      register_instr(0b11000, 0b000, _do_beq);
+      register_instr(0b11000, 0b001, _do_bne);
+      register_instr(0b11000, 0b100, _do_blt);
+      register_instr(0b11000, 0b101, _do_bge);
+      register_instr(0b11000, 0b110, _do_bltu);
+      register_instr(0b11000, 0b111, _do_bgeu);
+      register_instr(0b00000, 0b000, _do_lb);
+      register_instr(0b00000, 0b001, _do_lh);
+      register_instr(0b00000, 0b010, _do_lw);
+      register_instr(0b00000, 0b100, _do_lbu);
+      register_instr(0b00000, 0b101, _do_lhu);
+      register_instr(0b01000, 0b000, _do_sb);
+      register_instr(0b01000, 0b001, _do_sh);
+      register_instr(0b01000, 0b010, _do_sw);
+      register_instr(0b00100, 0b000, _do_addi);
+      register_instr(0b00100, 0b010, _do_slti);
+      register_instr(0b00100, 0b011, _do_sltiu);
+      register_instr(0b00100, 0b100, _do_xori);
+      register_instr(0b00100, 0b110, _do_ori);
+      register_instr(0b00100, 0b111, _do_andi);
+      register_instr(0b00000, 0b110, _do_lwu);
+      register_instr(0b00000, 0b011, _do_ld);
+      register_instr(0b01000, 0b011, _do_sd);
+      register_instr(0b00100, 0b001, _do_slli);
+      register_instr(0b00100, 0b101, _do_srli_or_srai);
+      register_instr(0b00110, 0b000, _do_addiw);
+      register_instr(0b00110, 0b001, _do_slliw);
+      register_instr(0b00110, 0b101, _do_srliw_or_sraiw);
+      register_instr(0b01110, 0b000, _do_addw_or_subw_or_mulw);
+      register_instr(0b01110, 0b001, _do_sllw);
+      register_instr(0b01110, 0b100, _do_divw);
+      register_instr(0b01110, 0b101, _do_srlw_or_sraw_or_divuw);
+      register_instr(0b01110, 0b110, _do_remw);
+      register_instr(0b01110, 0b111, _do_remuw);
+      register_instr(0b01100, 0b000, _do_add_or_sub_or_mul);
+      register_instr(0b01100, 0b001, _do_sll_or_mulh);
+      register_instr(0b01100, 0b010, _do_slt_or_mulhsu);
+      register_instr(0b01100, 0b011, _do_sltu_or_mulhu);
+      register_instr(0b01100, 0b100, _do_xor_or_div);
+      register_instr(0b01100, 0b101, _do_srl_or_sra_or_divu);
+      register_instr(0b01100, 0b110, _do_or_or_rem);
+      register_instr(0b01100, 0b111, _do_and_or_remu);
+      register_instr(0b00011, 0b000, _do_fence);
+      register_instr(0b00011, 0b001, _do_fence);
+      register_instr(0b11100, 0b000, _do_system);  // ecall ebreak mret wfi
+      register_instr(0b11100, 0b001, _do_csrrw);
+      register_instr(0b11100, 0b010, _do_csrrs);
+      register_instr(0b11100, 0b011, _do_csrrc);
+      register_instr(0b11100, 0b101, _do_csrrwi);
+      register_instr(0b11100, 0b110, _do_csrrsi);
+      register_instr(0b11100, 0b111, _do_csrrci);
+      register_instr(0b01011, 0b010, _do_atomic_w);
+      register_instr(0b01011, 0b011, _do_atomic_d);
     }
 
     uint32_t      _inst;
@@ -588,14 +588,14 @@ struct machine_t {
 
     do_dispatch();
 
-  do_lui: {
+  _do_lui: {
     _reg[inst.as.u_type.rd()] =
         static_cast<int64_t>(static_cast<int32_t>(inst.as.u_type.imm() << 12));
     _pc += 4;
   }
     do_dispatch();
 
-  do_auipc: {
+  _do_auipc: {
     _reg[inst.as.u_type.rd()] =
         _pc + static_cast<int32_t>(inst.as.u_type.imm() << 12);
     _pc += 4;
@@ -603,7 +603,7 @@ struct machine_t {
     do_dispatch();
 
     // TODO: verify pc is in memory bounds before do_dispatch
-  do_jal: {
+  _do_jal: {
     uint64_t addr = _pc + inst.as.j_type.imm_sext();
     if (addr % 4 != 0) [[unlikely]] {
       do_trap(exception_code_t::e_instruction_address_misaligned, addr);
@@ -614,7 +614,7 @@ struct machine_t {
     do_dispatch();
 
     // TODO: verify pc is in memory bounds before do_dispatch
-  do_jalr: {
+  _do_jalr: {
     uint64_t target  = _reg[inst.as.i_type.rs1()] + inst.as.i_type.imm_sext();
     uint64_t next_pc = target & ~1ull;
     if (next_pc % 4 != 0) [[unlikely]] {
@@ -626,7 +626,7 @@ struct machine_t {
     do_dispatch();
 
     // TODO: verify pc is in memory bounds before do_dispatch
-  do_beq: {
+  _do_beq: {
     if (_reg[inst.as.b_type.rs1()] == _reg[inst.as.b_type.rs2()]) {
       uint64_t addr = _pc + inst.as.b_type.imm_sext();
       if (addr % 4 != 0) [[unlikely]] {
@@ -640,7 +640,7 @@ struct machine_t {
     do_dispatch();
 
     // TODO: verify pc is in memory bounds before do_dispatch
-  do_bne: {
+  _do_bne: {
     if (_reg[inst.as.b_type.rs1()] != _reg[inst.as.b_type.rs2()]) {
       uint64_t addr = _pc + inst.as.b_type.imm_sext();
       if (addr % 4 != 0) [[unlikely]] {
@@ -654,7 +654,7 @@ struct machine_t {
     do_dispatch();
 
     // TODO: verify pc is in memory bounds before do_dispatch
-  do_blt: {
+  _do_blt: {
     if (static_cast<int64_t>(_reg[inst.as.b_type.rs1()]) <
         static_cast<int64_t>(_reg[inst.as.b_type.rs2()])) {
       uint64_t addr = _pc + inst.as.b_type.imm_sext();
@@ -669,7 +669,7 @@ struct machine_t {
     do_dispatch();
 
     // TODO: verify pc is in memory bounds before do_dispatch
-  do_bge: {
+  _do_bge: {
     if (static_cast<int64_t>(_reg[inst.as.b_type.rs1()]) >=
         static_cast<int64_t>(_reg[inst.as.b_type.rs2()])) {
       uint64_t addr = _pc + inst.as.b_type.imm_sext();
@@ -684,7 +684,7 @@ struct machine_t {
     do_dispatch();
 
     // TODO: verify pc is in memory bounds before do_dispatch
-  do_bltu: {
+  _do_bltu: {
     if (_reg[inst.as.b_type.rs1()] < _reg[inst.as.b_type.rs2()]) {
       uint64_t addr = _pc + inst.as.b_type.imm_sext();
       if (addr % 4 != 0) [[unlikely]] {
@@ -698,7 +698,7 @@ struct machine_t {
     do_dispatch();
 
     // TODO: verify pc is in memory bounds before do_dispatch
-  do_bgeu: {
+  _do_bgeu: {
     if (_reg[inst.as.b_type.rs1()] >= _reg[inst.as.b_type.rs2()]) {
       uint64_t addr = _pc + inst.as.b_type.imm_sext();
       if (addr % 4 != 0) [[unlikely]] {
@@ -711,7 +711,7 @@ struct machine_t {
   }
     do_dispatch();
 
-  do_lb: {
+  _do_lb: {
     uint64_t addr = _reg[inst.as.i_type.rs1()] + inst.as.i_type.imm_sext();
     int8_t   value;
     load8i(value, addr);  // may fault
@@ -720,7 +720,7 @@ struct machine_t {
   }
     do_dispatch();
 
-  do_lh: {
+  _do_lh: {
     uint64_t addr = _reg[inst.as.i_type.rs1()] + inst.as.i_type.imm_sext();
     if (addr % 2 != 0) [[unlikely]] {
       do_trap(exception_code_t::e_load_address_misaligned, addr);
@@ -732,7 +732,7 @@ struct machine_t {
   }
     do_dispatch();
 
-  do_lw: {
+  _do_lw: {
     uint64_t addr = _reg[inst.as.i_type.rs1()] + inst.as.i_type.imm_sext();
     if (addr % 4 != 0) [[unlikely]] {
       do_trap(exception_code_t::e_load_address_misaligned, addr);
@@ -744,7 +744,7 @@ struct machine_t {
   }
     do_dispatch();
 
-  do_lbu: {
+  _do_lbu: {
     uint64_t addr = _reg[inst.as.i_type.rs1()] + inst.as.i_type.imm_sext();
     uint8_t  value;
     load8(value, addr);  // may fault
@@ -753,7 +753,7 @@ struct machine_t {
   }
     do_dispatch();
 
-  do_lhu: {
+  _do_lhu: {
     uint64_t addr = _reg[inst.as.i_type.rs1()] + inst.as.i_type.imm_sext();
     if (addr % 2 != 0) [[unlikely]] {
       do_trap(exception_code_t::e_load_address_misaligned, addr);
@@ -765,14 +765,14 @@ struct machine_t {
   }
     do_dispatch();
 
-  do_sb: {
+  _do_sb: {
     uint64_t addr = _reg[inst.as.s_type.rs1()] + inst.as.s_type.imm_sext();
     store8(addr, _reg[inst.as.s_type.rs2()]);  // may fault
     _pc += 4;
   }
     do_dispatch();
 
-  do_sh: {
+  _do_sh: {
     uint64_t addr = _reg[inst.as.s_type.rs1()] + inst.as.s_type.imm_sext();
     if (addr % 2 != 0) [[unlikely]] {
       do_trap(exception_code_t::e_store_address_misaligned, addr);
@@ -782,7 +782,7 @@ struct machine_t {
   }
     do_dispatch();
 
-  do_sw: {
+  _do_sw: {
     uint64_t addr = _reg[inst.as.s_type.rs1()] + inst.as.s_type.imm_sext();
     if (addr % 4 != 0) [[unlikely]] {
       do_trap(exception_code_t::e_store_address_misaligned, addr);
@@ -792,14 +792,14 @@ struct machine_t {
   }
     do_dispatch();
 
-  do_addi: {
+  _do_addi: {
     _reg[inst.as.i_type.rd()] =
         _reg[inst.as.i_type.rs1()] + inst.as.i_type.imm_sext();
     _pc += 4;
   }
     do_dispatch();
 
-  do_slti: {
+  _do_slti: {
     _reg[inst.as.i_type.rd()] =
         static_cast<int64_t>(_reg[inst.as.i_type.rs1()]) <
         inst.as.i_type.imm_sext();
@@ -807,35 +807,35 @@ struct machine_t {
   }
     do_dispatch();
 
-  do_sltiu: {
+  _do_sltiu: {
     _reg[inst.as.i_type.rd()] =
         _reg[inst.as.i_type.rs1()] < inst.as.i_type.imm_sext();
     _pc += 4;
   }
     do_dispatch();
 
-  do_xori: {
+  _do_xori: {
     _reg[inst.as.i_type.rd()] =
         _reg[inst.as.i_type.rs1()] ^ inst.as.i_type.imm_sext();
     _pc += 4;
   }
     do_dispatch();
 
-  do_ori: {
+  _do_ori: {
     _reg[inst.as.i_type.rd()] =
         _reg[inst.as.i_type.rs1()] | inst.as.i_type.imm_sext();
     _pc += 4;
   }
     do_dispatch();
 
-  do_andi: {
+  _do_andi: {
     _reg[inst.as.i_type.rd()] =
         _reg[inst.as.i_type.rs1()] & inst.as.i_type.imm_sext();
     _pc += 4;
   }
     do_dispatch();
 
-  do_lwu: {
+  _do_lwu: {
     uint64_t addr = _reg[inst.as.i_type.rs1()] + inst.as.i_type.imm_sext();
     if (addr % 4 != 0) [[unlikely]] {
       do_trap(exception_code_t::e_load_address_misaligned, addr);
@@ -847,7 +847,7 @@ struct machine_t {
   }
     do_dispatch();
 
-  do_ld: {
+  _do_ld: {
     uint64_t addr = _reg[inst.as.i_type.rs1()] + inst.as.i_type.imm_sext();
     if (addr % 8 != 0) [[unlikely]] {
       do_trap(exception_code_t::e_load_address_misaligned, addr);
@@ -859,7 +859,7 @@ struct machine_t {
   }
     do_dispatch();
 
-  do_sd: {
+  _do_sd: {
     uint64_t addr = _reg[inst.as.s_type.rs1()] + inst.as.s_type.imm_sext();
     if (addr % 8 != 0) [[unlikely]] {
       do_trap(exception_code_t::e_store_address_misaligned, addr);
@@ -869,14 +869,14 @@ struct machine_t {
   }
     do_dispatch();
 
-  do_slli: {
+  _do_slli: {
     _reg[inst.as.i_type.rd()] = _reg[inst.as.i_type.rs1()]
                                 << (inst.as.i_type.imm() & 0x3f);
     _pc += 4;
   }
     do_dispatch();
 
-  do_srli_or_srai: {
+  _do_srli_or_srai: {
     switch (inst.as.i_type.imm() >> 6) {
       case 0b000000: {  // srli
         _reg[inst.as.i_type.rd()] =
@@ -891,19 +891,19 @@ struct machine_t {
       } break;
 
       default:
-        goto do_unknown_instruction;
+        goto _do_unknown_instruction;
     }
   }
     do_dispatch();
 
-  do_addiw: {
+  _do_addiw: {
     _reg[inst.as.i_type.rd()] = static_cast<int32_t>(static_cast<uint32_t>(
         _reg[inst.as.i_type.rs1()] + inst.as.i_type.imm_sext()));
     _pc += 4;
   }
     do_dispatch();
 
-  do_slliw: {
+  _do_slliw: {
     _reg[inst.as.i_type.rd()] = static_cast<int32_t>(static_cast<uint32_t>(
         _reg[inst.as.i_type.rs1()]
         << static_cast<uint32_t>(inst.as.i_type.shamt_w())));
@@ -911,7 +911,7 @@ struct machine_t {
   }
     do_dispatch();
 
-  do_srliw_or_sraiw: {
+  _do_srliw_or_sraiw: {
     switch (inst.as.i_type.imm() >> 5) {
       case 0b0000000: {  // srliw
         _reg[inst.as.i_type.rd()] = static_cast<int32_t>(
@@ -927,12 +927,12 @@ struct machine_t {
       } break;
 
       default:
-        goto do_unknown_instruction;
+        goto _do_unknown_instruction;
     }
   }
     do_dispatch();
 
-  do_addw_or_subw_or_mulw: {
+  _do_addw_or_subw_or_mulw: {
     switch (inst.as.r_type.funct7()) {
       case 0b0000000: {  // addw
         _reg[inst.as.r_type.rd()] = static_cast<int32_t>(
@@ -954,12 +954,12 @@ struct machine_t {
       } break;
 
       default:
-        goto do_unknown_instruction;
+        goto _do_unknown_instruction;
     }
   }
     do_dispatch();
 
-  do_sllw: {
+  _do_sllw: {
     _reg[inst.as.r_type.rd()] =
         static_cast<int32_t>(static_cast<int32_t>(_reg[inst.as.r_type.rs1()])
                              << (_reg[inst.as.r_type.rs2()] & 0b11111));
@@ -967,7 +967,7 @@ struct machine_t {
   }
     do_dispatch();
 
-  do_divw: {
+  _do_divw: {
     int32_t rs1 = static_cast<int32_t>(_reg[inst.as.r_type.rs1()]);
     int32_t rs2 = static_cast<int32_t>(_reg[inst.as.r_type.rs2()]);
     if (rs1 == INT32_MIN && rs2 == -1) {
@@ -983,7 +983,7 @@ struct machine_t {
   }
     do_dispatch();
 
-  do_srlw_or_sraw_or_divuw: {
+  _do_srlw_or_sraw_or_divuw: {
     switch (inst.as.r_type.funct7()) {
       case 0b0000000: {  // srlw
         _reg[inst.as.r_type.rd()] = static_cast<int32_t>(
@@ -1011,12 +1011,12 @@ struct machine_t {
       } break;
 
       default:
-        goto do_unknown_instruction;
+        goto _do_unknown_instruction;
     }
   }
     do_dispatch();
 
-  do_remw: {
+  _do_remw: {
     int32_t rs1 = static_cast<int32_t>(_reg[inst.as.r_type.rs1()]);
     int32_t rs2 = static_cast<int32_t>(_reg[inst.as.r_type.rs2()]);
     if (rs1 == INT32_MIN && rs2 == -1) {
@@ -1032,7 +1032,7 @@ struct machine_t {
   }
     do_dispatch();
 
-  do_remuw: {
+  _do_remuw: {
     uint32_t rs1 = static_cast<uint32_t>(_reg[inst.as.r_type.rs1()]);
     uint32_t rs2 = static_cast<uint32_t>(_reg[inst.as.r_type.rs2()]);
     if (rs2 == 0) {
@@ -1046,7 +1046,7 @@ struct machine_t {
   }
     do_dispatch();
 
-  do_add_or_sub_or_mul: {
+  _do_add_or_sub_or_mul: {
     switch (inst.as.r_type.funct7()) {
       case 0b0000000: {  // add
         _reg[inst.as.r_type.rd()] =
@@ -1066,12 +1066,12 @@ struct machine_t {
       } break;
 
       default:
-        goto do_unknown_instruction;
+        goto _do_unknown_instruction;
     }
   }
     do_dispatch();
 
-  do_sll_or_mulh: {
+  _do_sll_or_mulh: {
     switch (inst.as.r_type.funct7()) {
       case 0b0000000: {  // sll
         _reg[inst.as.r_type.rd()] = _reg[inst.as.r_type.rs1()]
@@ -1091,12 +1091,12 @@ struct machine_t {
       } break;
 
       default:
-        goto do_unknown_instruction;
+        goto _do_unknown_instruction;
     }
   }
     do_dispatch();
 
-  do_slt_or_mulhsu: {
+  _do_slt_or_mulhsu: {
     switch (inst.as.r_type.funct7()) {
       case 0b0000000: {  // slt
         _reg[inst.as.r_type.rd()] =
@@ -1116,12 +1116,12 @@ struct machine_t {
       } break;
 
       default:
-        goto do_unknown_instruction;
+        goto _do_unknown_instruction;
     }
   }
     do_dispatch();
 
-  do_sltu_or_mulhu: {
+  _do_sltu_or_mulhu: {
     switch (inst.as.r_type.funct7()) {
       case 0b0000000: {  // sltu
         _reg[inst.as.r_type.rd()] =
@@ -1138,12 +1138,12 @@ struct machine_t {
       } break;
 
       default:
-        goto do_unknown_instruction;
+        goto _do_unknown_instruction;
     }
   }
     do_dispatch();
 
-  do_xor_or_div: {
+  _do_xor_or_div: {
     switch (inst.as.r_type.funct7()) {
       case 0b0000000: {  // xor
         _reg[inst.as.r_type.rd()] =
@@ -1164,12 +1164,12 @@ struct machine_t {
       } break;
 
       default:
-        goto do_unknown_instruction;
+        goto _do_unknown_instruction;
     }
   }
     do_dispatch();
 
-  do_srl_or_sra_or_divu: {
+  _do_srl_or_sra_or_divu: {
     switch (inst.as.r_type.funct7()) {
       case 0b0000000: {  // srl
         _reg[inst.as.r_type.rd()] = _reg[inst.as.r_type.rs1()] >>
@@ -1194,12 +1194,12 @@ struct machine_t {
       } break;
 
       default:
-        goto do_unknown_instruction;
+        goto _do_unknown_instruction;
     }
   }
     do_dispatch();
 
-  do_or_or_rem: {
+  _do_or_or_rem: {
     switch (inst.as.r_type.funct7()) {
       case 0b0000000: {  // or
         _reg[inst.as.r_type.rd()] =
@@ -1220,12 +1220,12 @@ struct machine_t {
       } break;
 
       default:
-        goto do_unknown_instruction;
+        goto _do_unknown_instruction;
     }
   }
     do_dispatch();
 
-  do_and_or_remu: {
+  _do_and_or_remu: {
     switch (inst.as.r_type.funct7()) {
       case 0b0000000: {  // and
         _reg[inst.as.r_type.rd()] =
@@ -1244,18 +1244,18 @@ struct machine_t {
       } break;
 
       default:
-        goto do_unknown_instruction;
+        goto _do_unknown_instruction;
     }
   }
     do_dispatch();
 
-  do_fence: {
+  _do_fence: {
     // fence not required ?
     _pc += 4;
   }
     do_dispatch();
 
-  do_system: {
+  _do_system: {
     switch (inst.as.i_type.imm()) {
       case 0b000000000000: {  // ecall
         if (_mode == 0b11) {
@@ -1290,13 +1290,13 @@ struct machine_t {
         do_dispatch();
 
       default:
-        goto do_unknown_instruction;
+        goto _do_unknown_instruction;
     }
   }
     do_dispatch();  // technically not needed, just putting for the sake of
                     // continuity
 
-  do_csrrw: {
+  _do_csrrw: {
     // TODO: can reading csr fail ?
     uint16_t addr = inst.as.i_type.imm();
     uint64_t csr  = _csr[addr];
@@ -1313,7 +1313,7 @@ struct machine_t {
   }
     do_dispatch();
 
-  do_csrrs: {
+  _do_csrrs: {
     // TODO: can reading csr fail ?
     uint16_t addr = inst.as.i_type.imm();
     uint64_t csr  = _csr[addr];
@@ -1329,7 +1329,7 @@ struct machine_t {
   }
     do_dispatch();
 
-  do_csrrc: {
+  _do_csrrc: {
     // TODO: can reading csr fail ?
     uint16_t addr = inst.as.i_type.imm();
     uint64_t csr  = _csr[addr];
@@ -1345,7 +1345,7 @@ struct machine_t {
   }
     do_dispatch();
 
-  do_csrrwi: {
+  _do_csrrwi: {
     // TODO: can reading csr fail ?
     uint16_t addr = inst.as.i_type.imm();
     uint64_t csr  = _csr[addr];
@@ -1361,7 +1361,7 @@ struct machine_t {
   }
     do_dispatch();
 
-  do_csrrsi: {
+  _do_csrrsi: {
     // TODO: can reading csr fail ?
     uint16_t addr = inst.as.i_type.imm();
     uint64_t csr  = _csr[addr];
@@ -1376,7 +1376,7 @@ struct machine_t {
     _pc += 4;
   }
     do_dispatch();
-  do_csrrci: {
+  _do_csrrci: {
     // TODO: can reading csr fail ?
     uint16_t addr = inst.as.i_type.imm();
     uint64_t csr  = _csr[addr];
@@ -1392,7 +1392,7 @@ struct machine_t {
   }
     do_dispatch();
 
-  do_atomic_w: {
+  _do_atomic_w: {
     switch (inst.as.a_type.funct5()) {
       case 0b00010: {  // lr
         const uint64_t rs1       = _reg[inst.as.a_type.rs1()];
@@ -1578,12 +1578,12 @@ struct machine_t {
       } break;
 
       default:
-        goto do_unknown_instruction;
+        goto _do_unknown_instruction;
     }
   }
     do_dispatch();
 
-  do_atomic_d: {
+  _do_atomic_d: {
     switch (inst.as.a_type.funct5()) {
       case 0b00010: {  // lr
         const uint64_t rs1       = _reg[inst.as.a_type.rs1()];
@@ -1768,12 +1768,12 @@ struct machine_t {
       } break;
 
       default:
-        goto do_unknown_instruction;
+        goto _do_unknown_instruction;
     }
   }
     do_dispatch();
 
-  do_unknown_instruction:
+  _do_unknown_instruction:
     do_trap(exception_code_t::e_illegal_instruction, _inst);
 
   _do_trap:
