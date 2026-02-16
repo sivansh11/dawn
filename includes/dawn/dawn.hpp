@@ -534,14 +534,13 @@ struct machine_t {
 
 #ifdef DAWN_ENABLE_LOGGING
     auto logger = [&]() {
-      _log << std::hex                       //
-           << "pc: " << _pc << '\n'          //
-           << "\tra: " << _reg[1] << '\n'    //
-           << "\tsp: " << _reg[2] << '\n'    //
-           << "\tx9: " << _reg[9] << '\n'    //
-           << "\tx14: " << _reg[14] << '\n'  //
-           << "\tx15: " << _reg[15] << '\n';
-
+      _log << "pc: " << std::hex << _pc;
+      for (uint32_t i = 0; i < 32; i++) {
+        if (_reg[i] != 0) {
+          _log << "    x" << std::dec << i << ": " << std::hex << _reg[i];
+        }
+      }
+      _log << '\n';
       _log.flush();
     };
 
@@ -712,9 +711,17 @@ struct machine_t {
     do_dispatch();
 
   _do_lb: {
+#ifdef DAWN_ENABLE_LOGGING
+    _log << "    lb x" << std::dec << inst.as.i_type.rd() << ","
+         << inst.as.i_type.imm_sext() << "(x" << inst.as.i_type.rs1() << ")\n";
+#endif
     uint64_t addr = _reg[inst.as.i_type.rs1()] + inst.as.i_type.imm_sext();
     int8_t   value;
     load8i(value, addr);  // may fault
+#ifdef DAWN_ENABLE_LOGGING
+    _log << "x" << std::dec << inst.as.i_type.rd() << " <-- " << int64_t(value)
+         << " <-- " << std::hex << addr << '\n';
+#endif
     _reg[inst.as.i_type.rd()] = static_cast<int64_t>(value);
     _pc += 4;
   }
