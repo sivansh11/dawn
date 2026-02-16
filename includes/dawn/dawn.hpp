@@ -9,9 +9,11 @@
 #include <functional>
 #include <fstream>
 #include <iostream>
+#include <limits>
 #include <map>
 #include <sstream>
 #include <stdexcept>
+#include <unordered_map>
 #include <vector>
 
 namespace dawn {
@@ -289,94 +291,391 @@ constexpr inline void mul_64x64_u(uint64_t a, uint64_t b, uint64_t result[2]) {
   result[1] = p3 + (p1 >> 32) + (p2 >> 32) + (carry_to_high_32 >> 32);
 }
 
+#define do_trap(__cause, __value) \
+  do {                            \
+    trap_cause = __cause;         \
+    trap_value = __value;         \
+    goto _do_trap;                \
+  } while (false)
+
+static const uint64_t invalid_page_number =
+    std::numeric_limits<uint64_t>::max();
+
+struct page_t {
+  uint64_t page_number = invalid_page_number;
+  uint8_t *frame_ptr   = nullptr;
+};
+
+typedef uint8_t *(*allocate_callback_t)(void *, uint64_t);
+typedef void (*deallocate_callback_t)(void *, uint8_t *);
+
+struct memory_t {
+  static const uint64_t bits_per_page = 12;
+  // TODO: add permission handling
+  // TODO (low priority): maybe >= 3 is wrong, it should be > 3
+  static_assert(bits_per_page >= 3,
+                "bits_per_page need to be bigger than 3 to allow for "
+                "permission handling");
+  static const uint64_t       bytes_per_page    = 1 << bits_per_page;
+  static const uint64_t       direct_cache_size = 32;
+  const uint64_t              memory_limit_bytes;
+  const allocate_callback_t   allocate_callback;
+  const deallocate_callback_t deallocate_callback;
+  void                       *allocator_state;
+
+  constexpr uint64_t page_number(uint64_t addr) const {
+    return addr >> bits_per_page;
+  }
+  constexpr uint64_t page_offset(uint64_t addr) const {
+    return addr & (bytes_per_page - 1);
+  }
+  constexpr uint64_t cache_index(uint64_t page_number) const {
+    return page_number % direct_cache_size;
+  }
+  constexpr uint8_t *allocate_frame() {
+    if (allocated_bytes + bytes_per_page > memory_limit_bytes) return nullptr;
+    uint8_t *frame = allocate_callback(allocator_state, bytes_per_page);
+    if (frame) allocated_bytes += bytes_per_page;
+    return frame;
+  }
+
+  memory_t(uint64_t memory_limit_bytes, void *allocator_state,
+           allocate_callback_t   allocate_callback,
+           deallocate_callback_t deallocate_callback)
+      : memory_limit_bytes(memory_limit_bytes),
+        allocator_state(allocator_state),
+        allocate_callback(allocate_callback),
+        deallocate_callback(deallocate_callback) {}
+
+  uint64_t allocated_bytes                       = 0;
+  page_t   mru_page                              = {};
+  page_t   direct_cache[direct_cache_size]       = {};
+  page_t   fetch_mru_page                        = {};
+  page_t   fetch_direct_cache[direct_cache_size] = {};
+  // TODO: try some faster map implementations
+  std::unordered_map<uint64_t, page_t> page_table;
+};
+
+// TODO (general): consider only aggressive inlining hot paths, slow paths can
+// be a function call, this way instruction cache will be under less pressure.
+// TODO: mmio should be checked in page_table miss before allocating a new page,
+// I will have to rewrite the whole mmio load/store system (mmio will need to be
+// mapped to pages as well
+
+#define __get_page_frame_fetch(__memory, __addr, __frame_ptr)                  \
+  do {                                                                         \
+    uint64_t __page_number = __memory.page_number(__addr);                     \
+    /* mru */                                                                  \
+    if (__memory.fetch_mru_page.page_number == __page_number) [[likely]] {     \
+      __frame_ptr = __memory.fetch_mru_page.frame_ptr;                         \
+      break;                                                                   \
+    }                                                                          \
+    uint64_t __cache_index = __memory.cache_index(__page_number);              \
+    /* cache */                                                                \
+    if (__memory.fetch_direct_cache[__cache_index].page_number ==              \
+        __page_number) [[likely]] {                                            \
+      __memory.fetch_mru_page = __memory.fetch_direct_cache[__cache_index];    \
+      __frame_ptr             = __memory.fetch_mru_page.frame_ptr;             \
+      break;                                                                   \
+    }                                                                          \
+    auto __itr = __memory.page_table.find(__page_number);                      \
+    /* page_table */                                                           \
+    if (__itr != __memory.page_table.end()) [[likely]] {                       \
+      __memory.fetch_mru_page                    = __itr->second;              \
+      __memory.fetch_direct_cache[__cache_index] = __itr->second;              \
+      __frame_ptr = __memory.fetch_mru_page.frame_ptr;                         \
+      break;                                                                   \
+    }                                                                          \
+    /* allocate new page */                                                    \
+    uint8_t *__new_frame = __memory.allocate_frame();                          \
+    if (!__new_frame) [[unlikely]] {                                           \
+      __frame_ptr = nullptr;                                                   \
+      break;                                                                   \
+    }                                                                          \
+    page_t __new_page{.page_number = __page_number, .frame_ptr = __new_frame}; \
+    __memory.page_table[__page_number]         = __new_page;                   \
+    __memory.fetch_direct_cache[__cache_index] = __new_page;                   \
+    __memory.fetch_mru_page                    = __new_page;                   \
+    __frame_ptr                                = __new_frame;                  \
+  } while (false)
+
+#define __get_page_frame(__memory, __addr, __frame_ptr)                        \
+  do {                                                                         \
+    uint64_t __page_number = __memory.page_number(__addr);                     \
+    /* mru */                                                                  \
+    if (__memory.mru_page.page_number == __page_number) [[likely]] {           \
+      __frame_ptr = __memory.mru_page.frame_ptr;                               \
+      break;                                                                   \
+    }                                                                          \
+    uint64_t __cache_index = __memory.cache_index(__page_number);              \
+    /* cache */                                                                \
+    if (__memory.direct_cache[__cache_index].page_number == __page_number)     \
+        [[likely]] {                                                           \
+      __memory.mru_page = __memory.direct_cache[__cache_index];                \
+      __frame_ptr       = __memory.mru_page.frame_ptr;                         \
+      break;                                                                   \
+    }                                                                          \
+    auto __itr = __memory.page_table.find(__page_number);                      \
+    /* page_table */                                                           \
+    if (__itr != __memory.page_table.end()) [[likely]] {                       \
+      __memory.direct_cache[__cache_index] = __itr->second;                    \
+      __memory.mru_page                    = __itr->second;                    \
+      __frame_ptr                          = __memory.mru_page.frame_ptr;      \
+      break;                                                                   \
+    }                                                                          \
+    /* allocate new page */                                                    \
+    uint8_t *__new_frame = __memory.allocate_frame();                          \
+    if (!__new_frame) [[unlikely]] {                                           \
+      __frame_ptr = nullptr;                                                   \
+      break;                                                                   \
+    }                                                                          \
+    page_t __new_page{.page_number = __page_number, .frame_ptr = __new_frame}; \
+    __memory.page_table[__page_number]   = __new_page;                         \
+    __memory.direct_cache[__cache_index] = __new_page;                         \
+    __memory.mru_page                    = __new_page;                         \
+    __frame_ptr                          = __new_frame;                        \
+  } while (false)
+
+#define __load(__type, __memory, __addr, __value)                               \
+  do {                                                                          \
+    if (_mru_mmio.start <= __addr && __addr < _mru_mmio.stop) [[unlikely]] {    \
+      __value = _mru_mmio.load(&_mru_mmio, __addr);                             \
+      break;                                                                    \
+    }                                                                           \
+    bool __is_mmio = false;                                                     \
+    for (auto &__mmio : _mmios) {                                               \
+      if (__mmio.start <= __addr && __addr < __mmio.stop) [[unlikely]] {        \
+        _mru_mmio = __mmio;                                                     \
+        __value   = __mmio.load(&__mmio, __addr);                               \
+        __is_mmio = true;                                                       \
+        break;                                                                  \
+      }                                                                         \
+    }                                                                           \
+    if (__is_mmio) [[unlikely]]                                                 \
+      break;                                                                    \
+    constexpr uint64_t __type_size   = sizeof(__type);                          \
+    uint64_t           __page_number = __memory.page_number(__addr);            \
+    uint64_t           __offset      = __memory.page_offset(__addr);            \
+    uint8_t           *__frame_ptr;                                             \
+    uint8_t           *__value_ptr = reinterpret_cast<uint8_t *>(&__value);     \
+    if (__offset + __type_size > __memory.bytes_per_page) [[unlikely]] {        \
+      /* straddling access */                                                   \
+      __value                 = 0;                                              \
+      uint64_t __remaining    = __type_size;                                    \
+      uint64_t __current_addr = __addr;                                         \
+      while (__remaining > 0) {                                                 \
+        __get_page_frame(__memory, __current_addr, __frame_ptr);                \
+        if (!__frame_ptr)                                                       \
+          do_trap(exception_code_t::e_load_access_fault, __addr);               \
+        uint64_t __current_offset = __memory.page_offset(__current_addr);       \
+        uint64_t __chunk_size     = __memory.bytes_per_page - __current_offset; \
+        if (__chunk_size > __remaining) __chunk_size = __remaining;             \
+        std::memcpy(__value_ptr + (__type_size - __remaining),                  \
+                    __frame_ptr + __current_offset, __chunk_size);              \
+        __current_addr += __chunk_size;                                         \
+        __remaining -= __chunk_size;                                            \
+      }                                                                         \
+    } else {                                                                    \
+      /* single page access */                                                  \
+      __get_page_frame(__memory, __addr, __frame_ptr);                          \
+      if (!__frame_ptr)                                                         \
+        do_trap(exception_code_t::e_load_access_fault, __addr);                 \
+      std::memcpy(__value_ptr, __frame_ptr + __offset, __type_size);            \
+    }                                                                           \
+  } while (false)
+
+#define __fetch(__type, __memory, __addr, __value)                              \
+  do {                                                                          \
+    constexpr uint64_t __type_size   = sizeof(__type);                          \
+    uint64_t           __page_number = __memory.page_number(__addr);            \
+    uint64_t           __offset      = __memory.page_offset(__addr);            \
+    uint8_t           *__frame_ptr;                                             \
+    uint8_t           *__value_ptr = reinterpret_cast<uint8_t *>(&__value);     \
+    if (__offset + __type_size > __memory.bytes_per_page) [[unlikely]] {        \
+      /* straddling access */                                                   \
+      __value                 = 0;                                              \
+      uint64_t __remaining    = __type_size;                                    \
+      uint64_t __current_addr = __addr;                                         \
+      while (__remaining > 0) {                                                 \
+        __get_page_frame_fetch(__memory, __current_addr, __frame_ptr);          \
+        if (!__frame_ptr)                                                       \
+          do_trap(exception_code_t::e_load_access_fault, __addr);               \
+        uint64_t __current_offset = __memory.page_offset(__current_addr);       \
+        uint64_t __chunk_size     = __memory.bytes_per_page - __current_offset; \
+        if (__chunk_size > __remaining) __chunk_size = __remaining;             \
+        std::memcpy(__value_ptr + (__type_size - __remaining),                  \
+                    __frame_ptr + __current_offset, __chunk_size);              \
+        __current_addr += __chunk_size;                                         \
+        __remaining -= __chunk_size;                                            \
+      }                                                                         \
+    } else {                                                                    \
+      /* single page access */                                                  \
+      __get_page_frame_fetch(__memory, __addr, __frame_ptr);                    \
+      if (!__frame_ptr)                                                         \
+        do_trap(exception_code_t::e_load_access_fault, __addr);                 \
+      std::memcpy(__value_ptr, __frame_ptr + __offset, __type_size);            \
+    }                                                                           \
+  } while (false)
+
+#define __store(__type, __memory, __addr, __value)                               \
+  do {                                                                           \
+    if (_mru_mmio.start <= __addr && __addr < _mru_mmio.stop) {                  \
+      _mru_mmio.store(&_mru_mmio, __addr, __value);                              \
+      break;                                                                     \
+    }                                                                            \
+    bool __is_mmio = false;                                                      \
+    for (auto &__mmio : _mmios) {                                                \
+      if (__mmio.start <= __addr && __addr < __mmio.stop) [[unlikely]] {         \
+        _mru_mmio = __mmio;                                                      \
+        __mmio.store(&__mmio, __addr, __value);                                  \
+        __is_mmio = true;                                                        \
+        break;                                                                   \
+      }                                                                          \
+    }                                                                            \
+    if (__is_mmio) [[unlikely]]                                                  \
+      break;                                                                     \
+    constexpr uint64_t __type_size   = sizeof(__type);                           \
+    uint64_t           __page_number = __memory.page_number(__addr);             \
+    uint64_t           __offset      = __memory.page_offset(__addr);             \
+    uint8_t           *__frame_ptr;                                              \
+    const __type       _value      = __value;                                    \
+    const uint8_t     *__value_ptr = reinterpret_cast<const uint8_t *>(&_value); \
+    if (__offset + __type_size > __memory.bytes_per_page) [[unlikely]] {         \
+      /* straddling access */                                                    \
+      {                                                                          \
+        uint64_t __probe_addr    = __addr;                                       \
+        uint64_t __bytes_checked = 0;                                            \
+        while (__bytes_checked < __type_size) {                                  \
+          __get_page_frame(__memory, __probe_addr, __frame_ptr);                 \
+          if (!__frame_ptr) [[unlikely]]                                         \
+            do_trap(exception_code_t::e_store_access_fault, __addr);             \
+          uint64_t __offset = __memory.page_offset(__probe_addr);                \
+          uint64_t __chunk  = __memory.bytes_per_page - __offset;                \
+          __bytes_checked += __chunk;                                            \
+          __probe_addr += __chunk;                                               \
+        }                                                                        \
+      }                                                                          \
+      uint64_t __remaining    = __type_size;                                     \
+      uint64_t __current_addr = __addr;                                          \
+      while (__remaining > 0) {                                                  \
+        __get_page_frame(__memory, __current_addr, __frame_ptr);                 \
+        if (!__frame_ptr)                                                        \
+          do_trap(exception_code_t::e_store_access_fault, __addr);               \
+        uint64_t __current_offset = __memory.page_offset(__current_addr);        \
+        uint64_t __chunk_size     = __memory.bytes_per_page - __current_offset;  \
+        if (__chunk_size > __remaining) __chunk_size = __remaining;              \
+        std::memcpy(__frame_ptr + __current_offset,                              \
+                    __value_ptr + (__type_size - __remaining), __chunk_size);    \
+        __current_addr += __chunk_size;                                          \
+        __remaining -= __chunk_size;                                             \
+      }                                                                          \
+    } else {                                                                     \
+      /* single page access */                                                   \
+      __get_page_frame(__memory, __addr, __frame_ptr);                           \
+      if (!__frame_ptr)                                                          \
+        do_trap(exception_code_t::e_store_access_fault, __addr);                 \
+      std::memcpy(__frame_ptr + __offset, __value_ptr, __type_size);             \
+    }                                                                            \
+  } while (false)
+
+// TODO: flip value and addr locations in macro
+#define __load8(__memory, __value, __addr) \
+  __load(uint8_t, __memory, __addr, __value)
+#define __load16(__memory, __value, __addr) \
+  __load(uint16_t, __memory, __addr, __value)
+#define __load32(__memory, __value, __addr) \
+  __load(uint32_t, __memory, __addr, __value)
+#define __load64(__memory, __value, __addr) \
+  __load(uint64_t, __memory, __addr, __value)
+#define __load8i(__memory, __value, __addr) \
+  __load(int8_t, __memory, __addr, __value)
+#define __load16i(__memory, __value, __addr) \
+  __load(int16_t, __memory, __addr, __value)
+#define __load32i(__memory, __value, __addr) \
+  __load(int32_t, __memory, __addr, __value)
+
+#define __fetch16(__memory, __value, __addr) \
+  __fetch(uint16_t, __memory, __addr, __value)
+#define __fetch32(__memory, __value, __addr) \
+  __fetch(uint32_t, __memory, __addr, __value)
+
+#define __store8(__memory, __addr, __value) \
+  __store(uint8_t, __memory, __addr, __value)
+#define __store16(__memory, __addr, __value) \
+  __store(uint16_t, __memory, __addr, __value)
+#define __store32(__memory, __addr, __value) \
+  __store(uint32_t, __memory, __addr, __value)
+#define __store64(__memory, __addr, __value) \
+  __store(uint64_t, __memory, __addr, __value)
+
 // TODO: accurate runtime memory bounds checking (account for size of
 // load/store)
 struct machine_t {
-  machine_t(size_t ram_size, uint64_t offset,
-            const std::vector<mmio_handler_t> mmios)
-      : _ram_size(ram_size), _offset(offset), _mmios(mmios) {
-    _data  = new uint8_t[ram_size];
-    _final = reinterpret_cast<uint8_t *>(reinterpret_cast<uintptr_t>(_data) -
-                                         _offset);
-  }
-  ~machine_t() { delete[] _data; }
+  machine_t(size_t ram_size, const std::vector<mmio_handler_t> mmios,
+            void *allocator_state, allocate_callback_t allocate_callback,
+            deallocate_callback_t deallocate_callback)
+      : _memory(ram_size, allocator_state, allocate_callback,
+                deallocate_callback),
+        _mmios(mmios) {}
+  ~machine_t() {}
 
   // TODO: a more involved csr read
   inline uint64_t read_csr(uint16_t csrno) { return _csr[csrno]; }
   // TODO: a more involved csr write
   inline void write_csr(uint16_t csrno, uint64_t value) { _csr[csrno] = value; }
 
-#define fetch32(res, addr) res = *reinterpret_cast<uint32_t *>(_final + addr)
-
-#define __load(__res, __addr)                                                 \
-  do {                                                                        \
-    if (_mru_mmio.start <= __addr && __addr < _mru_mmio.stop) {               \
-      __res = _mru_mmio.load(&_mru_mmio, __addr);                             \
-      break;                                                                  \
-    }                                                                         \
-    bool is_mmio = false;                                                     \
-    for (auto &mmio : _mmios) {                                               \
-      if (mmio.start <= __addr && __addr < mmio.stop) [[unlikely]] {          \
-        _mru_mmio = mmio;                                                     \
-        __res     = mmio.load(&mmio, __addr);                                 \
-        is_mmio   = true;                                                     \
-        break;                                                                \
-      }                                                                       \
-    }                                                                         \
-    if (is_mmio) [[unlikely]]                                                 \
-      break;                                                                  \
-    if ((__addr < _offset) || __addr >= (_offset + _ram_size)) [[unlikely]] { \
-      do_trap(exception_code_t::e_load_access_fault, __addr);                 \
-    }                                                                         \
-    __res = *reinterpret_cast<decltype(__res) *>(_final + __addr);            \
-  } while (false)
-
-#define __load8(__res, __addr)   __load(__res, __addr)
-#define __load16(__res, __addr)  __load(__res, __addr)
-#define __load32(__res, __addr)  __load(__res, __addr)
-#define __load64(__res, __addr)  __load(__res, __addr)
-#define __load8i(__res, __addr)  __load(__res, __addr)
-#define __load16i(__res, __addr) __load(__res, __addr)
-#define __load32i(__res, __addr) __load(__res, __addr)
-
-#define __store(__type, __addr, __value)                                      \
-  do {                                                                        \
-    if (_mru_mmio.start <= __addr && __addr < _mru_mmio.stop) {               \
-      _mru_mmio.store(&_mru_mmio, __addr, __value);                           \
-      break;                                                                  \
-    }                                                                         \
-    bool is_mmio = false;                                                     \
-    for (auto &mmio : _mmios) {                                               \
-      if (mmio.start <= __addr && __addr < mmio.stop) [[unlikely]] {          \
-        _mru_mmio = mmio;                                                     \
-        mmio.store(&mmio, __addr, __value);                                   \
-        is_mmio = true;                                                       \
-        break;                                                                \
-      }                                                                       \
-    }                                                                         \
-    if (is_mmio) [[unlikely]]                                                 \
-      break;                                                                  \
-    if ((__addr < _offset) || __addr >= (_offset + _ram_size)) [[unlikely]] { \
-      do_trap(exception_code_t::e_store_access_fault, __addr);                \
-    }                                                                         \
-    *reinterpret_cast<__type *>(_final + __addr) = __value;                   \
-  } while (false)
-
-#define __store8(__addr, __value)  __store(uint8_t, __addr, __value)
-#define __store16(__addr, __value) __store(uint16_t, __addr, __value)
-#define __store32(__addr, __value) __store(uint32_t, __addr, __value)
-#define __store64(__addr, __value) __store(uint64_t, __addr, __value)
-
-  inline void memcpy_host_to_guest(uint64_t dst, const void *src, size_t size) {
-    std::memcpy(_final + dst, src, size);
+  inline bool memcpy_host_to_guest(uint64_t dst_addr, const void *src_ptr,
+                                   size_t size) {
+    uint64_t       remaining    = size;
+    uint64_t       current_addr = dst_addr;
+    const uint8_t *src          = reinterpret_cast<const uint8_t *>(src_ptr);
+    while (remaining > 0) {
+      uint8_t *frame_ptr;
+      __get_page_frame(_memory, current_addr, frame_ptr);
+      if (!frame_ptr) return false;
+      uint64_t offset     = _memory.page_offset(current_addr);
+      uint64_t chunk_size = _memory.bytes_per_page - offset;
+      if (chunk_size > remaining) chunk_size = remaining;
+      std::memcpy(frame_ptr + offset, src + (size - remaining), chunk_size);
+      current_addr += chunk_size;
+      remaining -= chunk_size;
+    }
+    return true;
   }
-  inline void memcpy_guest_to_host(void *dst, uint64_t src, size_t size) {
-    std::memcpy(dst, _final + src, size);
+  inline bool memcpy_guest_to_host(void *dst_ptr, uint64_t src_addr,
+                                   size_t size) {
+    uint64_t remaining    = size;
+    uint64_t current_addr = src_addr;
+    uint8_t *dst          = reinterpret_cast<uint8_t *>(dst_ptr);
+    while (remaining > 0) {
+      uint8_t *frame_ptr;
+      __get_page_frame(_memory, current_addr, frame_ptr);
+      if (!frame_ptr) return false;
+      uint64_t offset     = _memory.page_offset(current_addr);
+      uint64_t chunk_size = _memory.bytes_per_page - offset;
+      if (chunk_size > remaining) chunk_size = remaining;
+      std::memcpy(dst + (size - remaining), frame_ptr + offset, chunk_size);
+      current_addr += chunk_size;
+      remaining -= chunk_size;
+    }
+    return true;
   }
-  inline void memset(uint64_t addr, int value, size_t size) {
-    std::memset(_final + addr, value, size);
+  inline bool memset(uint64_t addr, int value, size_t size) {
+    uint64_t remaining    = size;
+    uint64_t current_addr = addr;
+    while (remaining > 0) {
+      uint8_t *frame_ptr;
+      __get_page_frame(_memory, current_addr, frame_ptr);
+      if (!frame_ptr) return false;
+      uint64_t offset     = _memory.page_offset(current_addr);
+      uint64_t chunk_size = _memory.bytes_per_page - offset;
+      if (chunk_size > remaining) chunk_size = remaining;
+      std::memset(frame_ptr + offset, value, chunk_size);
+      current_addr += chunk_size;
+      remaining -= chunk_size;
+    }
+    return true;
   }
-  inline uint8_t *at(uint64_t addr) { return _final + addr; }
 
   // TODO: test with and without inline
   // TODO: test with a macro
@@ -525,7 +824,7 @@ struct machine_t {
     _reg[0] = 0;                                                           \
     if (n-- == 0) [[unlikely]]                                             \
       return 0;                                                            \
-    fetch32(_inst, _pc);                                                   \
+    __fetch32(_memory, _inst, _pc);                                        \
     const uint32_t dispatch_index = extract_bit_range(_inst, 2, 7) |       \
                                     extract_bit_range(_inst, 12, 15) << 5; \
     reinterpret_cast<uint32_t &>(inst) = _inst;                            \
@@ -554,13 +853,6 @@ struct machine_t {
 
     exception_code_t trap_cause;
     uint64_t         trap_value;
-
-#define do_trap(__cause, __value) \
-  do {                            \
-    trap_cause = __cause;         \
-    trap_value = __value;         \
-    goto _do_trap;                \
-  } while (false)
 
     // check pending interrupts
     uint64_t pending_interrupts = _csr[MIP] & _csr[MIE];
@@ -716,8 +1008,14 @@ struct machine_t {
 #endif
     uint64_t addr = _reg[inst.as.i_type.rs1()] + inst.as.i_type.imm_sext();
     int8_t   value;
-    __load8i(value, addr);  // may fault
+    __load8i(_memory, value, addr);  // may fault
 #ifdef DAWN_ENABLE_LOGGING
+    // uint8_t *frame_ptr;
+    // __get_page_frame(_memory, addr, frame_ptr);
+    // if (!frame_ptr) throw std::runtime_error("failed to get frame ptr");
+    // uint64_t offset = _memory.page_offset(addr);
+    // _log << std::hex << "addr: " << (void *)(frame_ptr + offset);
+    // _log << "\t";
     _log << "x" << std::dec << inst.as.i_type.rd() << " <-- " << int64_t(value)
          << " <-- " << std::hex << addr << '\n';
 #endif
@@ -736,7 +1034,7 @@ struct machine_t {
       do_trap(exception_code_t::e_load_address_misaligned, addr);
     }
     int16_t value;
-    __load16i(value, addr);  // may fault
+    __load16i(_memory, value, addr);  // may fault
 #ifdef DAWN_ENABLE_LOGGING
     _log << "x" << std::dec << inst.as.i_type.rd() << " <-- " << int64_t(value)
          << " <-- " << std::hex << addr << '\n';
@@ -756,7 +1054,7 @@ struct machine_t {
       do_trap(exception_code_t::e_load_address_misaligned, addr);
     }
     int32_t value;
-    __load32i(value, addr);  // may fault
+    __load32i(_memory, value, addr);  // may fault
 #ifdef DAWN_ENABLE_LOGGING
     _log << "x" << std::dec << inst.as.i_type.rd() << " <-- " << int64_t(value)
          << " <-- " << std::hex << addr << '\n';
@@ -773,7 +1071,7 @@ struct machine_t {
 #endif
     uint64_t addr = _reg[inst.as.i_type.rs1()] + inst.as.i_type.imm_sext();
     uint8_t  value;
-    __load8(value, addr);  // may fault
+    __load8(_memory, value, addr);  // may fault
 #ifdef DAWN_ENABLE_LOGGING
     _log << "x" << std::dec << inst.as.i_type.rd() << " <-- " << uint64_t(value)
          << " <-- " << std::hex << addr << '\n';
@@ -793,7 +1091,7 @@ struct machine_t {
       do_trap(exception_code_t::e_load_address_misaligned, addr);
     }
     uint16_t value;
-    __load16(value, addr);  // may fault
+    __load16(_memory, value, addr);  // may fault
 #ifdef DAWN_ENABLE_LOGGING
     _log << "x" << std::dec << inst.as.i_type.rd() << " <-- " << uint64_t(value)
          << " <-- " << std::hex << addr << '\n';
@@ -813,7 +1111,7 @@ struct machine_t {
     _log << std::hex << addr << " <-- " << std::dec
          << _reg[inst.as.s_type.rs2()] << '\n';
 #endif
-    __store8(addr, _reg[inst.as.s_type.rs2()]);  // may fault
+    __store8(_memory, addr, _reg[inst.as.s_type.rs2()]);  // may fault
     _pc += 4;
   }
     do_dispatch();
@@ -831,7 +1129,7 @@ struct machine_t {
     if (addr % 2 != 0) [[unlikely]] {
       do_trap(exception_code_t::e_store_address_misaligned, addr);
     }
-    __store16(addr, _reg[inst.as.s_type.rs2()]);  // may fault
+    __store16(_memory, addr, _reg[inst.as.s_type.rs2()]);  // may fault
     _pc += 4;
   }
     do_dispatch();
@@ -849,7 +1147,7 @@ struct machine_t {
     if (addr % 4 != 0) [[unlikely]] {
       do_trap(exception_code_t::e_store_address_misaligned, addr);
     }
-    __store32(addr, _reg[inst.as.s_type.rs2()]);  // may fault
+    __store32(_memory, addr, _reg[inst.as.s_type.rs2()]);  // may fault
     _pc += 4;
   }
     do_dispatch();
@@ -907,7 +1205,7 @@ struct machine_t {
       do_trap(exception_code_t::e_load_address_misaligned, addr);
     }
     uint32_t value;
-    __load32(value, addr);  // may fault
+    __load32(_memory, value, addr);  // may fault
 #ifdef DAWN_ENABLE_LOGGING
     _log << "x" << std::dec << inst.as.i_type.rd() << " <-- " << uint64_t(value)
          << " <-- " << std::hex << addr << '\n';
@@ -927,7 +1225,7 @@ struct machine_t {
       do_trap(exception_code_t::e_load_address_misaligned, addr);
     }
     uint64_t value;
-    __load64(value, addr);  // may fault
+    __load64(_memory, value, addr);  // may fault
 #ifdef DAWN_ENABLE_LOGGING
     _log << "x" << std::dec << inst.as.i_type.rd() << " <-- " << uint64_t(value)
          << " <-- " << std::hex << addr << '\n';
@@ -950,7 +1248,7 @@ struct machine_t {
     if (addr % 8 != 0) [[unlikely]] {
       do_trap(exception_code_t::e_store_address_misaligned, addr);
     }
-    __store64(addr, _reg[inst.as.s_type.rs2()]);  // may fault
+    __store64(_memory, addr, _reg[inst.as.s_type.rs2()]);  // may fault
     _pc += 4;
   }
     do_dispatch();
@@ -1488,7 +1786,7 @@ struct machine_t {
           do_trap(exception_code_t::e_load_address_misaligned, addr);
         }
         uint32_t value;
-        __load32(value, addr);  // may fault
+        __load32(_memory, value, addr);  // may fault
         _reg[inst.as.a_type.rd()] = sext<32>(value);
         _reservation_address      = addr;
         _is_reserved              = true;
@@ -1503,7 +1801,7 @@ struct machine_t {
           do_trap(exception_code_t::e_store_address_misaligned, addr);
         }
         if (_is_reserved && _reservation_address == addr) {
-          __store32(addr, static_cast<uint32_t>(rs2));
+          __store32(_memory, addr, static_cast<uint32_t>(rs2));
           _reg[inst.as.a_type.rd()] = 0;
         } else {
           _reg[inst.as.a_type.rd()] = 1;
@@ -1521,9 +1819,9 @@ struct machine_t {
           do_trap(exception_code_t::e_load_address_misaligned, addr);
         }
         uint32_t value;
-        __load32(value, addr);  // may fault
+        __load32(_memory, value, addr);  // may fault
         _reg[inst.as.a_type.rd()] = sext<32>(value);
-        __store32(addr, static_cast<uint32_t>(rs2));
+        __store32(_memory, addr, static_cast<uint32_t>(rs2));
         _is_reserved         = false;
         _reservation_address = 0;
         _pc += 4;
@@ -1537,9 +1835,9 @@ struct machine_t {
           do_trap(exception_code_t::e_load_address_misaligned, addr);
         }
         uint32_t value;
-        __load32(value, addr);  // may fault
+        __load32(_memory, value, addr);  // may fault
         _reg[inst.as.a_type.rd()] = sext<32>(value);
-        __store32(addr, static_cast<uint32_t>(value + rs2));
+        __store32(_memory, addr, static_cast<uint32_t>(value + rs2));
         _is_reserved         = false;
         _reservation_address = 0;
         _pc += 4;
@@ -1553,9 +1851,9 @@ struct machine_t {
           do_trap(exception_code_t::e_load_address_misaligned, addr);
         }
         uint32_t value;
-        __load32(value, addr);  // may fault
+        __load32(_memory, value, addr);  // may fault
         _reg[inst.as.a_type.rd()] = sext<32>(value);
-        __store32(addr, static_cast<uint32_t>(value ^ rs2));
+        __store32(_memory, addr, static_cast<uint32_t>(value ^ rs2));
         _is_reserved         = false;
         _reservation_address = 0;
         _pc += 4;
@@ -1569,9 +1867,9 @@ struct machine_t {
           do_trap(exception_code_t::e_load_address_misaligned, addr);
         }
         uint32_t value;
-        __load32(value, addr);  // may fault
+        __load32(_memory, value, addr);  // may fault
         _reg[inst.as.a_type.rd()] = sext<32>(value);
-        __store32(addr, static_cast<uint32_t>(value & rs2));
+        __store32(_memory, addr, static_cast<uint32_t>(value & rs2));
         _is_reserved         = false;
         _reservation_address = 0;
         _pc += 4;
@@ -1585,9 +1883,9 @@ struct machine_t {
           do_trap(exception_code_t::e_load_address_misaligned, addr);
         }
         uint32_t value;
-        __load32(value, addr);  // may fault
+        __load32(_memory, value, addr);  // may fault
         _reg[inst.as.a_type.rd()] = sext<32>(value);
-        __store32(addr, static_cast<uint32_t>(value | rs2));
+        __store32(_memory, addr, static_cast<uint32_t>(value | rs2));
         _is_reserved         = false;
         _reservation_address = 0;
         _pc += 4;
@@ -1601,9 +1899,9 @@ struct machine_t {
           do_trap(exception_code_t::e_load_address_misaligned, addr);
         }
         uint32_t value;
-        __load32(value, addr);  // may fault
+        __load32(_memory, value, addr);  // may fault
         _reg[inst.as.a_type.rd()] = sext<32>(value);
-        __store32(addr,
+        __store32(_memory, addr,
                   static_cast<uint32_t>(std::min(static_cast<int32_t>(value),
                                                  static_cast<int32_t>(rs2))));
         _is_reserved         = false;
@@ -1619,9 +1917,9 @@ struct machine_t {
           do_trap(exception_code_t::e_load_address_misaligned, addr);
         }
         uint32_t value;
-        __load32(value, addr);  // may fault
+        __load32(_memory, value, addr);  // may fault
         _reg[inst.as.a_type.rd()] = sext<32>(value);
-        __store32(addr,
+        __store32(_memory, addr,
                   static_cast<uint32_t>(std::max(static_cast<int32_t>(value),
                                                  static_cast<int32_t>(rs2))));
         _is_reserved         = false;
@@ -1637,10 +1935,11 @@ struct machine_t {
           do_trap(exception_code_t::e_load_address_misaligned, addr);
         }
         uint32_t value;
-        __load32(value, addr);  // may fault
+        __load32(_memory, value, addr);  // may fault
         _reg[inst.as.a_type.rd()] = sext<32>(value);
-        __store32(addr, std::min(static_cast<uint32_t>(value),
-                                 static_cast<uint32_t>(rs2)));
+        __store32(
+            _memory, addr,
+            std::min(static_cast<uint32_t>(value), static_cast<uint32_t>(rs2)));
         _is_reserved         = false;
         _reservation_address = 0;
         _pc += 4;
@@ -1654,10 +1953,11 @@ struct machine_t {
           do_trap(exception_code_t::e_load_address_misaligned, addr);
         }
         uint32_t value;
-        __load32(value, addr);  // may fault
+        __load32(_memory, value, addr);  // may fault
         _reg[inst.as.a_type.rd()] = sext<32>(value);
-        __store32(addr, std::max(static_cast<uint32_t>(value),
-                                 static_cast<uint32_t>(rs2)));
+        __store32(
+            _memory, addr,
+            std::max(static_cast<uint32_t>(value), static_cast<uint32_t>(rs2)));
         _is_reserved         = false;
         _reservation_address = 0;
         _pc += 4;
@@ -1679,7 +1979,7 @@ struct machine_t {
           do_trap(exception_code_t::e_load_address_misaligned, addr);
         }
         uint64_t value;
-        __load64(value, addr);  // may fault
+        __load64(_memory, value, addr);  // may fault
         _reg[inst.as.a_type.rd()] = value;
         _reservation_address      = addr;
         _is_reserved              = true;
@@ -1695,7 +1995,7 @@ struct machine_t {
         }
         if (_is_reserved && _reservation_address == addr) {
           // no e_store_access_fault in this implementation
-          __store64(addr, rs2);
+          __store64(_memory, addr, rs2);
           _reg[inst.as.a_type.rd()] = 0;
         } else {
           _reg[inst.as.a_type.rd()] = 1;
@@ -1713,9 +2013,9 @@ struct machine_t {
           do_trap(exception_code_t::e_load_address_misaligned, addr);
         }
         uint64_t value;
-        __load64(value, addr);  // may fault
+        __load64(_memory, value, addr);  // may fault
         _reg[inst.as.a_type.rd()] = value;
-        __store64(addr, rs2);
+        __store64(_memory, addr, rs2);
         _is_reserved         = false;
         _reservation_address = 0;
         _pc += 4;
@@ -1729,9 +2029,9 @@ struct machine_t {
           do_trap(exception_code_t::e_load_address_misaligned, addr);
         }
         uint64_t value;
-        __load64(value, addr);  // may fault
+        __load64(_memory, value, addr);  // may fault
         _reg[inst.as.a_type.rd()] = value;
-        __store64(addr, value + rs2);
+        __store64(_memory, addr, value + rs2);
         _is_reserved         = false;
         _reservation_address = 0;
         _pc += 4;
@@ -1745,9 +2045,9 @@ struct machine_t {
           do_trap(exception_code_t::e_load_address_misaligned, addr);
         }
         uint64_t value;
-        __load64(value, addr);  // may fault
+        __load64(_memory, value, addr);  // may fault
         _reg[inst.as.a_type.rd()] = value;
-        __store64(addr, value ^ rs2);
+        __store64(_memory, addr, value ^ rs2);
         _is_reserved         = false;
         _reservation_address = 0;
         _pc += 4;
@@ -1761,9 +2061,9 @@ struct machine_t {
           do_trap(exception_code_t::e_load_address_misaligned, addr);
         }
         uint64_t value;
-        __load64(value, addr);  // may fault
+        __load64(_memory, value, addr);  // may fault
         _reg[inst.as.a_type.rd()] = value;
-        __store64(addr, value & rs2);
+        __store64(_memory, addr, value & rs2);
         _is_reserved         = false;
         _reservation_address = 0;
         _pc += 4;
@@ -1777,9 +2077,9 @@ struct machine_t {
           do_trap(exception_code_t::e_load_address_misaligned, addr);
         }
         uint64_t value;
-        __load64(value, addr);  // may fault
+        __load64(_memory, value, addr);  // may fault
         _reg[inst.as.a_type.rd()] = value;
-        __store64(addr, value | rs2);
+        __store64(_memory, addr, value | rs2);
         _is_reserved         = false;
         _reservation_address = 0;
         _pc += 4;
@@ -1793,10 +2093,11 @@ struct machine_t {
           do_trap(exception_code_t::e_load_address_misaligned, addr);
         }
         uint64_t value;
-        __load64(value, addr);  // may fault
+        __load64(_memory, value, addr);  // may fault
         _reg[inst.as.a_type.rd()] = value;
-        __store64(addr, std::min(static_cast<int64_t>(value),
-                                 static_cast<int64_t>(rs2)));
+        __store64(
+            _memory, addr,
+            std::min(static_cast<int64_t>(value), static_cast<int64_t>(rs2)));
         _is_reserved         = false;
         _reservation_address = 0;
         _pc += 4;
@@ -1810,10 +2111,11 @@ struct machine_t {
           do_trap(exception_code_t::e_load_address_misaligned, addr);
         }
         uint64_t value;
-        __load64(value, addr);  // may fault
+        __load64(_memory, value, addr);  // may fault
         _reg[inst.as.a_type.rd()] = value;
-        __store64(addr, std::max(static_cast<int64_t>(value),
-                                 static_cast<int64_t>(rs2)));
+        __store64(
+            _memory, addr,
+            std::max(static_cast<int64_t>(value), static_cast<int64_t>(rs2)));
         _is_reserved         = false;
         _reservation_address = 0;
         _pc += 4;
@@ -1827,10 +2129,11 @@ struct machine_t {
           do_trap(exception_code_t::e_load_address_misaligned, addr);
         }
         uint64_t value;
-        __load64(value, addr);  // may fault
+        __load64(_memory, value, addr);  // may fault
         _reg[inst.as.a_type.rd()] = value;
-        __store64(addr, std::min(static_cast<uint64_t>(value),
-                                 static_cast<uint64_t>(rs2)));
+        __store64(
+            _memory, addr,
+            std::min(static_cast<uint64_t>(value), static_cast<uint64_t>(rs2)));
         _is_reserved         = false;
         _reservation_address = 0;
         _pc += 4;
@@ -1844,10 +2147,11 @@ struct machine_t {
           do_trap(exception_code_t::e_load_address_misaligned, addr);
         }
         uint64_t value;
-        __load64(value, addr);  // may fault
+        __load64(_memory, value, addr);  // may fault
         _reg[inst.as.a_type.rd()] = value;
-        __store64(addr, std::max(static_cast<uint64_t>(value),
-                                 static_cast<uint64_t>(rs2)));
+        __store64(
+            _memory, addr,
+            std::max(static_cast<uint64_t>(value), static_cast<uint64_t>(rs2)));
         _is_reserved         = false;
         _reservation_address = 0;
         _pc += 4;
@@ -1868,10 +2172,11 @@ struct machine_t {
   }
 
   // memory
-  const size_t _ram_size;
-  uint8_t     *_data;
-  uint64_t     _offset{};
-  uint8_t     *_final{};
+  memory_t _memory;
+  // const size_t _ram_size;
+  // uint8_t     *_data;
+  // uint64_t     _offset{};
+  // uint8_t     *_final{};
 
   const std::vector<mmio_handler_t> _mmios;
   mmio_handler_t                    _mru_mmio = {};
