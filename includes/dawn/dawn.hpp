@@ -22,10 +22,10 @@ typedef uint64_t (*load64)(const mmio_handler_t *handler, uint64_t);
 typedef void (*store64)(const mmio_handler_t *handler, uint64_t, uint64_t);
 
 struct mmio_handler_t {
-  uint64_t _start;
-  uint64_t _stop;
-  load64   _load64;
-  store64  _store64;
+  uint64_t start;
+  uint64_t stop;
+  load64   load;
+  store64  store;
 };
 
 // [start, end)
@@ -308,64 +308,64 @@ struct machine_t {
 
 #define fetch32(res, addr) res = *reinterpret_cast<uint32_t *>(_final + addr)
 
-#define _dawn_load(res, addr)                                             \
-  do {                                                                    \
-    if (_mru_mmio._start <= addr && addr < _mru_mmio._stop) {             \
-      res = _mru_mmio._load64(&_mru_mmio, addr);                          \
-      break;                                                              \
-    }                                                                     \
-    bool is_mmio = false;                                                 \
-    for (auto &mmio : _mmios) {                                           \
-      if (mmio._start <= addr && addr < mmio._stop) [[unlikely]] {        \
-        _mru_mmio = mmio;                                                 \
-        res       = mmio._load64(&mmio, addr);                            \
-        is_mmio   = true;                                                 \
-        break;                                                            \
-      }                                                                   \
-    }                                                                     \
-    if (is_mmio) [[unlikely]]                                             \
-      break;                                                              \
-    if ((addr < _offset) || addr >= (_offset + _ram_size)) [[unlikely]] { \
-      do_trap(exception_code_t::e_load_access_fault, addr);               \
-    }                                                                     \
-    res = *reinterpret_cast<decltype(res) *>(_final + addr);              \
+#define __load(__res, __addr)                                                 \
+  do {                                                                        \
+    if (_mru_mmio.start <= __addr && __addr < _mru_mmio.stop) {               \
+      __res = _mru_mmio.load(&_mru_mmio, __addr);                             \
+      break;                                                                  \
+    }                                                                         \
+    bool is_mmio = false;                                                     \
+    for (auto &mmio : _mmios) {                                               \
+      if (mmio.start <= __addr && __addr < mmio.stop) [[unlikely]] {          \
+        _mru_mmio = mmio;                                                     \
+        __res     = mmio.load(&mmio, __addr);                                 \
+        is_mmio   = true;                                                     \
+        break;                                                                \
+      }                                                                       \
+    }                                                                         \
+    if (is_mmio) [[unlikely]]                                                 \
+      break;                                                                  \
+    if ((__addr < _offset) || __addr >= (_offset + _ram_size)) [[unlikely]] { \
+      do_trap(exception_code_t::e_load_access_fault, __addr);                 \
+    }                                                                         \
+    __res = *reinterpret_cast<decltype(__res) *>(_final + __addr);            \
   } while (false)
 
-#define load8(res, addr)   _dawn_load(res, addr)
-#define load16(res, addr)  _dawn_load(res, addr)
-#define load32(res, addr)  _dawn_load(res, addr)
-#define load64(res, addr)  _dawn_load(res, addr)
-#define load8i(res, addr)  _dawn_load(res, addr)
-#define load16i(res, addr) _dawn_load(res, addr)
-#define load32i(res, addr) _dawn_load(res, addr)
+#define __load8(__res, __addr)   __load(__res, __addr)
+#define __load16(__res, __addr)  __load(__res, __addr)
+#define __load32(__res, __addr)  __load(__res, __addr)
+#define __load64(__res, __addr)  __load(__res, __addr)
+#define __load8i(__res, __addr)  __load(__res, __addr)
+#define __load16i(__res, __addr) __load(__res, __addr)
+#define __load32i(__res, __addr) __load(__res, __addr)
 
-#define _dawn_store(type, addr, value)                                    \
-  do {                                                                    \
-    if (_mru_mmio._start <= addr && addr < _mru_mmio._stop) {             \
-      _mru_mmio._store64(&_mru_mmio, addr, value);                        \
-      break;                                                              \
-    }                                                                     \
-    bool is_mmio = false;                                                 \
-    for (auto &mmio : _mmios) {                                           \
-      if (mmio._start <= addr && addr < mmio._stop) [[unlikely]] {        \
-        _mru_mmio = mmio;                                                 \
-        mmio._store64(&mmio, addr, value);                                \
-        is_mmio = true;                                                   \
-        break;                                                            \
-      }                                                                   \
-    }                                                                     \
-    if (is_mmio) [[unlikely]]                                             \
-      break;                                                              \
-    if ((addr < _offset) || addr >= (_offset + _ram_size)) [[unlikely]] { \
-      do_trap(exception_code_t::e_store_access_fault, addr);              \
-    }                                                                     \
-    *reinterpret_cast<type *>(_final + addr) = value;                     \
+#define __store(__type, __addr, __value)                                      \
+  do {                                                                        \
+    if (_mru_mmio.start <= __addr && __addr < _mru_mmio.stop) {               \
+      _mru_mmio.store(&_mru_mmio, __addr, __value);                           \
+      break;                                                                  \
+    }                                                                         \
+    bool is_mmio = false;                                                     \
+    for (auto &mmio : _mmios) {                                               \
+      if (mmio.start <= __addr && __addr < mmio.stop) [[unlikely]] {          \
+        _mru_mmio = mmio;                                                     \
+        mmio.store(&mmio, __addr, __value);                                   \
+        is_mmio = true;                                                       \
+        break;                                                                \
+      }                                                                       \
+    }                                                                         \
+    if (is_mmio) [[unlikely]]                                                 \
+      break;                                                                  \
+    if ((__addr < _offset) || __addr >= (_offset + _ram_size)) [[unlikely]] { \
+      do_trap(exception_code_t::e_store_access_fault, __addr);                \
+    }                                                                         \
+    *reinterpret_cast<__type *>(_final + __addr) = __value;                   \
   } while (false)
 
-#define store8(addr, value)  _dawn_store(uint8_t, addr, value)
-#define store16(addr, value) _dawn_store(uint16_t, addr, value)
-#define store32(addr, value) _dawn_store(uint32_t, addr, value)
-#define store64(addr, value) _dawn_store(uint64_t, addr, value)
+#define __store8(__addr, __value)  __store(uint8_t, __addr, __value)
+#define __store16(__addr, __value) __store(uint16_t, __addr, __value)
+#define __store32(__addr, __value) __store(uint32_t, __addr, __value)
+#define __store64(__addr, __value) __store(uint64_t, __addr, __value)
 
   inline void memcpy_host_to_guest(uint64_t dst, const void *src, size_t size) {
     std::memcpy(_final + dst, src, size);
@@ -546,7 +546,6 @@ struct machine_t {
 
 #define do_dispatch() \
   do {                \
-    logger();         \
     dispatch();       \
   } while (false)
 #else
@@ -712,12 +711,12 @@ struct machine_t {
 
   _do_lb: {
 #ifdef DAWN_ENABLE_LOGGING
-    _log << "    lb x" << std::dec << inst.as.i_type.rd() << ","
+    _log << "lb x" << std::dec << inst.as.i_type.rd() << ","
          << inst.as.i_type.imm_sext() << "(x" << inst.as.i_type.rs1() << ")\n";
 #endif
     uint64_t addr = _reg[inst.as.i_type.rs1()] + inst.as.i_type.imm_sext();
     int8_t   value;
-    load8i(value, addr);  // may fault
+    __load8i(value, addr);  // may fault
 #ifdef DAWN_ENABLE_LOGGING
     _log << "x" << std::dec << inst.as.i_type.rd() << " <-- " << int64_t(value)
          << " <-- " << std::hex << addr << '\n';
@@ -728,73 +727,129 @@ struct machine_t {
     do_dispatch();
 
   _do_lh: {
+#ifdef DAWN_ENABLE_LOGGING
+    _log << "lh x" << std::dec << inst.as.i_type.rd() << ","
+         << inst.as.i_type.imm_sext() << "(x" << inst.as.i_type.rs1() << ")\n";
+#endif
     uint64_t addr = _reg[inst.as.i_type.rs1()] + inst.as.i_type.imm_sext();
     if (addr % 2 != 0) [[unlikely]] {
       do_trap(exception_code_t::e_load_address_misaligned, addr);
     }
     int16_t value;
-    load16i(value, addr);  // may fault
+    __load16i(value, addr);  // may fault
+#ifdef DAWN_ENABLE_LOGGING
+    _log << "x" << std::dec << inst.as.i_type.rd() << " <-- " << int64_t(value)
+         << " <-- " << std::hex << addr << '\n';
+#endif
     _reg[inst.as.i_type.rd()] = static_cast<int64_t>(value);
     _pc += 4;
   }
     do_dispatch();
 
   _do_lw: {
+#ifdef DAWN_ENABLE_LOGGING
+    _log << "lw x" << std::dec << inst.as.i_type.rd() << ","
+         << inst.as.i_type.imm_sext() << "(x" << inst.as.i_type.rs1() << ")\n";
+#endif
     uint64_t addr = _reg[inst.as.i_type.rs1()] + inst.as.i_type.imm_sext();
     if (addr % 4 != 0) [[unlikely]] {
       do_trap(exception_code_t::e_load_address_misaligned, addr);
     }
     int32_t value;
-    load32i(value, addr);  // may fault
+    __load32i(value, addr);  // may fault
+#ifdef DAWN_ENABLE_LOGGING
+    _log << "x" << std::dec << inst.as.i_type.rd() << " <-- " << int64_t(value)
+         << " <-- " << std::hex << addr << '\n';
+#endif
     _reg[inst.as.i_type.rd()] = static_cast<int64_t>(value);
     _pc += 4;
   }
     do_dispatch();
 
   _do_lbu: {
+#ifdef DAWN_ENABLE_LOGGING
+    _log << "lbu x" << std::dec << inst.as.i_type.rd() << ","
+         << inst.as.i_type.imm_sext() << "(x" << inst.as.i_type.rs1() << ")\n";
+#endif
     uint64_t addr = _reg[inst.as.i_type.rs1()] + inst.as.i_type.imm_sext();
     uint8_t  value;
-    load8(value, addr);  // may fault
+    __load8(value, addr);  // may fault
+#ifdef DAWN_ENABLE_LOGGING
+    _log << "x" << std::dec << inst.as.i_type.rd() << " <-- " << uint64_t(value)
+         << " <-- " << std::hex << addr << '\n';
+#endif
     _reg[inst.as.i_type.rd()] = value;
     _pc += 4;
   }
     do_dispatch();
 
   _do_lhu: {
+#ifdef DAWN_ENABLE_LOGGING
+    _log << "lhu x" << std::dec << inst.as.i_type.rd() << ","
+         << inst.as.i_type.imm_sext() << "(x" << inst.as.i_type.rs1() << ")\n";
+#endif
     uint64_t addr = _reg[inst.as.i_type.rs1()] + inst.as.i_type.imm_sext();
     if (addr % 2 != 0) [[unlikely]] {
       do_trap(exception_code_t::e_load_address_misaligned, addr);
     }
     uint16_t value;
-    load16(value, addr);  // may fault
+    __load16(value, addr);  // may fault
+#ifdef DAWN_ENABLE_LOGGING
+    _log << "x" << std::dec << inst.as.i_type.rd() << " <-- " << uint64_t(value)
+         << " <-- " << std::hex << addr << '\n';
+#endif
     _reg[inst.as.i_type.rd()] = value;
     _pc += 4;
   }
     do_dispatch();
 
   _do_sb: {
+#ifdef DAWN_ENABLE_LOGGING
+    _log << "sb x" << std::dec << inst.as.s_type.rs2() << ","
+         << inst.as.s_type.imm_sext() << "(x" << inst.as.s_type.rs1() << ")\n";
+#endif
     uint64_t addr = _reg[inst.as.s_type.rs1()] + inst.as.s_type.imm_sext();
-    store8(addr, _reg[inst.as.s_type.rs2()]);  // may fault
+#ifdef DAWN_ENABLE_LOGGING
+    _log << std::hex << addr << " <-- " << std::dec
+         << _reg[inst.as.s_type.rs2()] << '\n';
+#endif
+    __store8(addr, _reg[inst.as.s_type.rs2()]);  // may fault
     _pc += 4;
   }
     do_dispatch();
 
   _do_sh: {
+#ifdef DAWN_ENABLE_LOGGING
+    _log << "sh x" << std::dec << inst.as.s_type.rs2() << ","
+         << inst.as.s_type.imm_sext() << "(x" << inst.as.s_type.rs1() << ")\n";
+#endif
     uint64_t addr = _reg[inst.as.s_type.rs1()] + inst.as.s_type.imm_sext();
+#ifdef DAWN_ENABLE_LOGGING
+    _log << std::hex << addr << " <-- " << std::dec
+         << _reg[inst.as.s_type.rs2()] << '\n';
+#endif
     if (addr % 2 != 0) [[unlikely]] {
       do_trap(exception_code_t::e_store_address_misaligned, addr);
     }
-    store16(addr, _reg[inst.as.s_type.rs2()]);  // may fault
+    __store16(addr, _reg[inst.as.s_type.rs2()]);  // may fault
     _pc += 4;
   }
     do_dispatch();
 
   _do_sw: {
+#ifdef DAWN_ENABLE_LOGGING
+    _log << "sw x" << std::dec << inst.as.s_type.rs2() << ","
+         << inst.as.s_type.imm_sext() << "(x" << inst.as.s_type.rs1() << ")\n";
+#endif
     uint64_t addr = _reg[inst.as.s_type.rs1()] + inst.as.s_type.imm_sext();
+#ifdef DAWN_ENABLE_LOGGING
+    _log << std::hex << addr << " <-- " << std::dec
+         << _reg[inst.as.s_type.rs2()] << '\n';
+#endif
     if (addr % 4 != 0) [[unlikely]] {
       do_trap(exception_code_t::e_store_address_misaligned, addr);
     }
-    store32(addr, _reg[inst.as.s_type.rs2()]);  // may fault
+    __store32(addr, _reg[inst.as.s_type.rs2()]);  // may fault
     _pc += 4;
   }
     do_dispatch();
@@ -843,35 +898,59 @@ struct machine_t {
     do_dispatch();
 
   _do_lwu: {
+#ifdef DAWN_ENABLE_LOGGING
+    _log << "lwu x" << std::dec << inst.as.i_type.rd() << ","
+         << inst.as.i_type.imm_sext() << "(x" << inst.as.i_type.rs1() << ")\n";
+#endif
     uint64_t addr = _reg[inst.as.i_type.rs1()] + inst.as.i_type.imm_sext();
     if (addr % 4 != 0) [[unlikely]] {
       do_trap(exception_code_t::e_load_address_misaligned, addr);
     }
     uint32_t value;
-    load32(value, addr);  // may fault
+    __load32(value, addr);  // may fault
+#ifdef DAWN_ENABLE_LOGGING
+    _log << "x" << std::dec << inst.as.i_type.rd() << " <-- " << uint64_t(value)
+         << " <-- " << std::hex << addr << '\n';
+#endif
     _reg[inst.as.i_type.rd()] = value;
     _pc += 4;
   }
     do_dispatch();
 
   _do_ld: {
+#ifdef DAWN_ENABLE_LOGGING
+    _log << "ld x" << std::dec << inst.as.i_type.rd() << ","
+         << inst.as.i_type.imm_sext() << "(x" << inst.as.i_type.rs1() << ")\n";
+#endif
     uint64_t addr = _reg[inst.as.i_type.rs1()] + inst.as.i_type.imm_sext();
     if (addr % 8 != 0) [[unlikely]] {
       do_trap(exception_code_t::e_load_address_misaligned, addr);
     }
     uint64_t value;
-    load64(value, addr);  // may fault
+    __load64(value, addr);  // may fault
+#ifdef DAWN_ENABLE_LOGGING
+    _log << "x" << std::dec << inst.as.i_type.rd() << " <-- " << uint64_t(value)
+         << " <-- " << std::hex << addr << '\n';
+#endif
     _reg[inst.as.i_type.rd()] = value;
     _pc += 4;
   }
     do_dispatch();
 
   _do_sd: {
+#ifdef DAWN_ENABLE_LOGGING
+    _log << "sw x" << std::dec << inst.as.s_type.rs2() << ","
+         << inst.as.s_type.imm_sext() << "(x" << inst.as.s_type.rs1() << ")\n";
+#endif
     uint64_t addr = _reg[inst.as.s_type.rs1()] + inst.as.s_type.imm_sext();
+#ifdef DAWN_ENABLE_LOGGING
+    _log << std::hex << addr << " <-- " << std::dec
+         << _reg[inst.as.s_type.rs2()] << '\n';
+#endif
     if (addr % 8 != 0) [[unlikely]] {
       do_trap(exception_code_t::e_store_address_misaligned, addr);
     }
-    store64(addr, _reg[inst.as.s_type.rs2()]);  // may fault
+    __store64(addr, _reg[inst.as.s_type.rs2()]);  // may fault
     _pc += 4;
   }
     do_dispatch();
@@ -1409,7 +1488,7 @@ struct machine_t {
           do_trap(exception_code_t::e_load_address_misaligned, addr);
         }
         uint32_t value;
-        load32(value, addr);  // may fault
+        __load32(value, addr);  // may fault
         _reg[inst.as.a_type.rd()] = sext<32>(value);
         _reservation_address      = addr;
         _is_reserved              = true;
@@ -1424,7 +1503,7 @@ struct machine_t {
           do_trap(exception_code_t::e_store_address_misaligned, addr);
         }
         if (_is_reserved && _reservation_address == addr) {
-          store32(addr, static_cast<uint32_t>(rs2));
+          __store32(addr, static_cast<uint32_t>(rs2));
           _reg[inst.as.a_type.rd()] = 0;
         } else {
           _reg[inst.as.a_type.rd()] = 1;
@@ -1442,9 +1521,9 @@ struct machine_t {
           do_trap(exception_code_t::e_load_address_misaligned, addr);
         }
         uint32_t value;
-        load32(value, addr);  // may fault
+        __load32(value, addr);  // may fault
         _reg[inst.as.a_type.rd()] = sext<32>(value);
-        store32(addr, static_cast<uint32_t>(rs2));
+        __store32(addr, static_cast<uint32_t>(rs2));
         _is_reserved         = false;
         _reservation_address = 0;
         _pc += 4;
@@ -1458,9 +1537,9 @@ struct machine_t {
           do_trap(exception_code_t::e_load_address_misaligned, addr);
         }
         uint32_t value;
-        load32(value, addr);  // may fault
+        __load32(value, addr);  // may fault
         _reg[inst.as.a_type.rd()] = sext<32>(value);
-        store32(addr, static_cast<uint32_t>(value + rs2));
+        __store32(addr, static_cast<uint32_t>(value + rs2));
         _is_reserved         = false;
         _reservation_address = 0;
         _pc += 4;
@@ -1474,9 +1553,9 @@ struct machine_t {
           do_trap(exception_code_t::e_load_address_misaligned, addr);
         }
         uint32_t value;
-        load32(value, addr);  // may fault
+        __load32(value, addr);  // may fault
         _reg[inst.as.a_type.rd()] = sext<32>(value);
-        store32(addr, static_cast<uint32_t>(value ^ rs2));
+        __store32(addr, static_cast<uint32_t>(value ^ rs2));
         _is_reserved         = false;
         _reservation_address = 0;
         _pc += 4;
@@ -1490,9 +1569,9 @@ struct machine_t {
           do_trap(exception_code_t::e_load_address_misaligned, addr);
         }
         uint32_t value;
-        load32(value, addr);  // may fault
+        __load32(value, addr);  // may fault
         _reg[inst.as.a_type.rd()] = sext<32>(value);
-        store32(addr, static_cast<uint32_t>(value & rs2));
+        __store32(addr, static_cast<uint32_t>(value & rs2));
         _is_reserved         = false;
         _reservation_address = 0;
         _pc += 4;
@@ -1506,9 +1585,9 @@ struct machine_t {
           do_trap(exception_code_t::e_load_address_misaligned, addr);
         }
         uint32_t value;
-        load32(value, addr);  // may fault
+        __load32(value, addr);  // may fault
         _reg[inst.as.a_type.rd()] = sext<32>(value);
-        store32(addr, static_cast<uint32_t>(value | rs2));
+        __store32(addr, static_cast<uint32_t>(value | rs2));
         _is_reserved         = false;
         _reservation_address = 0;
         _pc += 4;
@@ -1522,11 +1601,11 @@ struct machine_t {
           do_trap(exception_code_t::e_load_address_misaligned, addr);
         }
         uint32_t value;
-        load32(value, addr);  // may fault
+        __load32(value, addr);  // may fault
         _reg[inst.as.a_type.rd()] = sext<32>(value);
-        store32(addr,
-                static_cast<uint32_t>(std::min(static_cast<int32_t>(value),
-                                               static_cast<int32_t>(rs2))));
+        __store32(addr,
+                  static_cast<uint32_t>(std::min(static_cast<int32_t>(value),
+                                                 static_cast<int32_t>(rs2))));
         _is_reserved         = false;
         _reservation_address = 0;
         _pc += 4;
@@ -1540,11 +1619,11 @@ struct machine_t {
           do_trap(exception_code_t::e_load_address_misaligned, addr);
         }
         uint32_t value;
-        load32(value, addr);  // may fault
+        __load32(value, addr);  // may fault
         _reg[inst.as.a_type.rd()] = sext<32>(value);
-        store32(addr,
-                static_cast<uint32_t>(std::max(static_cast<int32_t>(value),
-                                               static_cast<int32_t>(rs2))));
+        __store32(addr,
+                  static_cast<uint32_t>(std::max(static_cast<int32_t>(value),
+                                                 static_cast<int32_t>(rs2))));
         _is_reserved         = false;
         _reservation_address = 0;
         _pc += 4;
@@ -1558,10 +1637,10 @@ struct machine_t {
           do_trap(exception_code_t::e_load_address_misaligned, addr);
         }
         uint32_t value;
-        load32(value, addr);  // may fault
+        __load32(value, addr);  // may fault
         _reg[inst.as.a_type.rd()] = sext<32>(value);
-        store32(addr, std::min(static_cast<uint32_t>(value),
-                               static_cast<uint32_t>(rs2)));
+        __store32(addr, std::min(static_cast<uint32_t>(value),
+                                 static_cast<uint32_t>(rs2)));
         _is_reserved         = false;
         _reservation_address = 0;
         _pc += 4;
@@ -1575,10 +1654,10 @@ struct machine_t {
           do_trap(exception_code_t::e_load_address_misaligned, addr);
         }
         uint32_t value;
-        load32(value, addr);  // may fault
+        __load32(value, addr);  // may fault
         _reg[inst.as.a_type.rd()] = sext<32>(value);
-        store32(addr, std::max(static_cast<uint32_t>(value),
-                               static_cast<uint32_t>(rs2)));
+        __store32(addr, std::max(static_cast<uint32_t>(value),
+                                 static_cast<uint32_t>(rs2)));
         _is_reserved         = false;
         _reservation_address = 0;
         _pc += 4;
@@ -1600,7 +1679,7 @@ struct machine_t {
           do_trap(exception_code_t::e_load_address_misaligned, addr);
         }
         uint64_t value;
-        load64(value, addr);  // may fault
+        __load64(value, addr);  // may fault
         _reg[inst.as.a_type.rd()] = value;
         _reservation_address      = addr;
         _is_reserved              = true;
@@ -1616,7 +1695,7 @@ struct machine_t {
         }
         if (_is_reserved && _reservation_address == addr) {
           // no e_store_access_fault in this implementation
-          store64(addr, rs2);
+          __store64(addr, rs2);
           _reg[inst.as.a_type.rd()] = 0;
         } else {
           _reg[inst.as.a_type.rd()] = 1;
@@ -1634,9 +1713,9 @@ struct machine_t {
           do_trap(exception_code_t::e_load_address_misaligned, addr);
         }
         uint64_t value;
-        load64(value, addr);  // may fault
+        __load64(value, addr);  // may fault
         _reg[inst.as.a_type.rd()] = value;
-        store64(addr, rs2);
+        __store64(addr, rs2);
         _is_reserved         = false;
         _reservation_address = 0;
         _pc += 4;
@@ -1650,9 +1729,9 @@ struct machine_t {
           do_trap(exception_code_t::e_load_address_misaligned, addr);
         }
         uint64_t value;
-        load64(value, addr);  // may fault
+        __load64(value, addr);  // may fault
         _reg[inst.as.a_type.rd()] = value;
-        store64(addr, value + rs2);
+        __store64(addr, value + rs2);
         _is_reserved         = false;
         _reservation_address = 0;
         _pc += 4;
@@ -1666,9 +1745,9 @@ struct machine_t {
           do_trap(exception_code_t::e_load_address_misaligned, addr);
         }
         uint64_t value;
-        load64(value, addr);  // may fault
+        __load64(value, addr);  // may fault
         _reg[inst.as.a_type.rd()] = value;
-        store64(addr, value ^ rs2);
+        __store64(addr, value ^ rs2);
         _is_reserved         = false;
         _reservation_address = 0;
         _pc += 4;
@@ -1682,9 +1761,9 @@ struct machine_t {
           do_trap(exception_code_t::e_load_address_misaligned, addr);
         }
         uint64_t value;
-        load64(value, addr);  // may fault
+        __load64(value, addr);  // may fault
         _reg[inst.as.a_type.rd()] = value;
-        store64(addr, value & rs2);
+        __store64(addr, value & rs2);
         _is_reserved         = false;
         _reservation_address = 0;
         _pc += 4;
@@ -1698,9 +1777,9 @@ struct machine_t {
           do_trap(exception_code_t::e_load_address_misaligned, addr);
         }
         uint64_t value;
-        load64(value, addr);  // may fault
+        __load64(value, addr);  // may fault
         _reg[inst.as.a_type.rd()] = value;
-        store64(addr, value | rs2);
+        __store64(addr, value | rs2);
         _is_reserved         = false;
         _reservation_address = 0;
         _pc += 4;
@@ -1714,10 +1793,10 @@ struct machine_t {
           do_trap(exception_code_t::e_load_address_misaligned, addr);
         }
         uint64_t value;
-        load64(value, addr);  // may fault
+        __load64(value, addr);  // may fault
         _reg[inst.as.a_type.rd()] = value;
-        store64(addr, std::min(static_cast<int64_t>(value),
-                               static_cast<int64_t>(rs2)));
+        __store64(addr, std::min(static_cast<int64_t>(value),
+                                 static_cast<int64_t>(rs2)));
         _is_reserved         = false;
         _reservation_address = 0;
         _pc += 4;
@@ -1731,10 +1810,10 @@ struct machine_t {
           do_trap(exception_code_t::e_load_address_misaligned, addr);
         }
         uint64_t value;
-        load64(value, addr);  // may fault
+        __load64(value, addr);  // may fault
         _reg[inst.as.a_type.rd()] = value;
-        store64(addr, std::max(static_cast<int64_t>(value),
-                               static_cast<int64_t>(rs2)));
+        __store64(addr, std::max(static_cast<int64_t>(value),
+                                 static_cast<int64_t>(rs2)));
         _is_reserved         = false;
         _reservation_address = 0;
         _pc += 4;
@@ -1748,10 +1827,10 @@ struct machine_t {
           do_trap(exception_code_t::e_load_address_misaligned, addr);
         }
         uint64_t value;
-        load64(value, addr);  // may fault
+        __load64(value, addr);  // may fault
         _reg[inst.as.a_type.rd()] = value;
-        store64(addr, std::min(static_cast<uint64_t>(value),
-                               static_cast<uint64_t>(rs2)));
+        __store64(addr, std::min(static_cast<uint64_t>(value),
+                                 static_cast<uint64_t>(rs2)));
         _is_reserved         = false;
         _reservation_address = 0;
         _pc += 4;
@@ -1765,10 +1844,10 @@ struct machine_t {
           do_trap(exception_code_t::e_load_address_misaligned, addr);
         }
         uint64_t value;
-        load64(value, addr);  // may fault
+        __load64(value, addr);  // may fault
         _reg[inst.as.a_type.rd()] = value;
-        store64(addr, std::max(static_cast<uint64_t>(value),
-                               static_cast<uint64_t>(rs2)));
+        __store64(addr, std::max(static_cast<uint64_t>(value),
+                                 static_cast<uint64_t>(rs2)));
         _is_reserved         = false;
         _reservation_address = 0;
         _pc += 4;

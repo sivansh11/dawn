@@ -88,10 +88,9 @@ struct plic_t {
 };
 static plic_t                  plic{};
 constexpr dawn::mmio_handler_t plic_handler{
-    ._start  = plic_mmio_start,
-    ._stop   = plic_mmio_stop,
-    ._load64 = [](const dawn::mmio_handler_t *handler,
-                  uint64_t                    addr) -> uint64_t {
+    .start = plic_mmio_start,
+    .stop  = plic_mmio_stop,
+    .load = [](const dawn::mmio_handler_t *handler, uint64_t addr) -> uint64_t {
       uint64_t offset = addr - plic_mmio_start;
       if (offset < 0x1000) {  // priority
         return plic._priority[offset >> 2];
@@ -126,7 +125,7 @@ constexpr dawn::mmio_handler_t plic_handler{
       }
       return 0;
     },
-    ._store64 =
+    .store =
         [](const dawn::mmio_handler_t *handler, uint64_t addr, uint64_t value) {
           uint64_t offset = addr - plic_mmio_start;
           uint32_t val32  = static_cast<uint32_t>(value);
@@ -154,10 +153,9 @@ constexpr uint64_t             uart_mmio_start    = 0x10000000;
 constexpr uint64_t             uart_mmio_stop     = 0x10000100;
 constexpr uint64_t             timebase_frequency = 1000000;
 constexpr dawn::mmio_handler_t uart_handler{
-    ._start  = uart_mmio_start,
-    ._stop   = uart_mmio_stop,
-    ._load64 = [](const dawn::mmio_handler_t *handler,
-                  uint64_t                    addr) -> uint64_t {
+    .start = uart_mmio_start,
+    .stop  = uart_mmio_stop,
+    .load = [](const dawn::mmio_handler_t *handler, uint64_t addr) -> uint64_t {
       if (addr == uart_mmio_start && is_kbhit()) {  // data
         return read_kbbyte();
       } else if (addr == uart_mmio_start + 0x5) {  // status
@@ -165,7 +163,7 @@ constexpr dawn::mmio_handler_t uart_handler{
       }
       return 0;
     },
-    ._store64 =
+    .store =
         [](const dawn::mmio_handler_t *handler, uint64_t addr, uint64_t value) {
           if (addr == uart_mmio_start) {  // data
             printf("%c", (int)value);
@@ -179,10 +177,9 @@ static uint64_t                boot_time        = 0;
 constexpr uint64_t             clint_mmio_start = 0x11000000;
 constexpr uint64_t             clint_mmio_stop  = 0x11010000;
 constexpr dawn::mmio_handler_t clint_handler{
-    ._start  = clint_mmio_start,
-    ._stop   = clint_mmio_stop,
-    ._load64 = [](const dawn::mmio_handler_t *handler,
-                  uint64_t                    addr) -> uint64_t {
+    .start = clint_mmio_start,
+    .stop  = clint_mmio_stop,
+    .load = [](const dawn::mmio_handler_t *handler, uint64_t addr) -> uint64_t {
       if (addr == clint_mmio_start) {  // msip
         return (machine->read_csr(dawn::MIP) >> 3) & 1;
       } else if (addr == clint_mmio_start + 0x4000) {  // mtimercmp
@@ -192,7 +189,7 @@ constexpr dawn::mmio_handler_t clint_handler{
       }
       return 0;
     },
-    ._store64 =
+    .store =
         [](const dawn::mmio_handler_t *handler, uint64_t addr, uint64_t value) {
           if (addr == clint_mmio_start) {  // msip
             if (value & 1)
@@ -221,14 +218,13 @@ constexpr uint64_t framebuffer_mmio_stop =
     framebuffer_mmio_start + (width * height * 4);
 uint8_t                        framebuffer[width * height * 4];
 constexpr dawn::mmio_handler_t framebuffer_handler{
-    ._start  = framebuffer_mmio_start,
-    ._stop   = framebuffer_mmio_stop,
-    ._load64 = [](const dawn::mmio_handler_t *handler,
-                  uint64_t                    addr) -> uint64_t {
+    .start = framebuffer_mmio_start,
+    .stop  = framebuffer_mmio_stop,
+    .load = [](const dawn::mmio_handler_t *handler, uint64_t addr) -> uint64_t {
       uint64_t offset = addr - framebuffer_mmio_start;
       return *reinterpret_cast<uint64_t *>(&framebuffer[offset]);
     },
-    ._store64 =
+    .store =
         [](const dawn::mmio_handler_t *handler, uint64_t addr, uint64_t value) {
           uint64_t offset = addr - framebuffer_mmio_start;
           *reinterpret_cast<uint64_t *>(&framebuffer[offset]) = value;
