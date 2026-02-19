@@ -500,7 +500,10 @@ struct memory_t {
     __memory.page_table[__page_number]         = __new_page;                  \
     __memory.fetch_direct_cache[__cache_index] = __new_page;                  \
     __memory.fetch_mru_page                    = __new_page;                  \
-    __frame_ptr                                = __new_page.frame_ptr;        \
+    if (__new_page.has_perms(page_permission_t::e_x)) [[likely]]              \
+      __frame_ptr = __new_page.frame_ptr;                                     \
+    else                                                                      \
+      __frame_ptr = nullptr;                                                  \
   } while (false)
 
 #define __get_page_frame(__memory, __permission, __addr, __frame_ptr)      \
@@ -548,7 +551,10 @@ struct memory_t {
     __memory.page_table[__page_number]   = __new_page;                     \
     __memory.direct_cache[__cache_index] = __new_page;                     \
     __memory.mru_page                    = __new_page;                     \
-    __frame_ptr                          = __new_page.frame_ptr;           \
+    if (__new_page.has_perms(__permission)) [[likely]]                     \
+      __frame_ptr = __new_page.frame_ptr;                                  \
+    else                                                                   \
+      __frame_ptr = nullptr;                                               \
   } while (false)
 
 #define __load(__type, __memory, __addr, __value)                               \
