@@ -11,6 +11,7 @@
 #include <iostream>
 #include <limits>
 #include <map>
+#include <ostream>
 #include <sstream>
 #include <stdexcept>
 #include <unordered_map>
@@ -66,6 +67,56 @@ enum class exception_code_t : uint64_t {
   e_machine_timer_interrupt    = 7 | (1ull << 63),
   e_machine_external_interrupt = 11 | (1ull << 63),
 };
+
+inline std::ostream &operator<<(std::ostream &o, exception_code_t cause) {
+  switch (cause) {
+    case exception_code_t::e_instruction_address_misaligned:
+      o << "instruction_address_misaligned";
+      break;
+    case exception_code_t::e_instruction_access_fault:
+      o << "instruction_access_fault";
+      break;
+    case exception_code_t::e_illegal_instruction:
+      o << "illegal_instruction";
+      break;
+    case exception_code_t::e_breakpoint:
+      o << "breakpoint";
+      break;
+    case exception_code_t::e_load_address_misaligned:
+      o << "load_address_misaligned";
+      break;
+    case exception_code_t::e_load_access_fault:
+      o << "load_access_fault";
+      break;
+    case exception_code_t::e_store_address_misaligned:
+      o << "store_address_misaligned";
+      break;
+    case exception_code_t::e_store_access_fault:
+      o << "store_access_fault";
+      break;
+    case exception_code_t::e_ecall_u_mode:
+      o << "ecall_u_mode";
+      break;
+    case exception_code_t::e_ecall_s_mode:
+      o << "ecall_s_mode";
+      break;
+    case exception_code_t::e_ecall_m_mode:
+      o << "ecall_m_mode";
+      break;
+    case exception_code_t::e_machine_software_interrupt:
+      o << "machine_software_interrupt";
+      break;
+    case exception_code_t::e_machine_timer_interrupt:
+      o << "machine_timer_interrupt";
+      break;
+    case exception_code_t::e_machine_external_interrupt:
+      o << "machine_external_interrupt";
+      break;
+    default:
+      throw std::runtime_error("unknown cause");
+  }
+  return o;
+}
 
 constexpr uint64_t MHARDID = 0xf14;
 
@@ -310,6 +361,15 @@ enum page_permission_t : uint64_t {
   e_rx   = e_r | e_x,
   e_all  = e_r | e_w | e_x,
 };
+
+inline page_permission_t operator|(page_permission_t l, page_permission_t r) {
+  return (page_permission_t)((uint64_t)l | (uint64_t)r);
+}
+inline page_permission_t &operator|=(page_permission_t &l,
+                                     page_permission_t  r) {
+  l = l | r;
+  return l;
+}
 
 struct page_t {
   uint64_t page_number = invalid_page_number;
@@ -737,6 +797,76 @@ struct machine_t {
       std::memset(frame_ptr + offset, value, chunk_size);
       current_addr += chunk_size;
       remaining -= chunk_size;
+    }
+    return true;
+  }
+  inline bool insert_memory(uint64_t dst_addr, const void *src_ptr,
+                            uint64_t size, page_permission_t permission) {
+    uint64_t       remaining    = size;
+    uint64_t       current_addr = dst_addr;
+    const uint8_t *src          = reinterpret_cast<const uint8_t *>(src_ptr);
+    while (remaining > 0) {
+      uint64_t page_number = _memory.page_number(current_addr);
+      auto     itr         = _memory.page_table.find(page_number);
+      page_t   page;
+      if (itr == _memory.page_table.end()) {
+        page_t new_page = _memory.allocate_page(page_number, permission);
+        if (!new_page.frame_ptr) return false;
+        _memory.page_table[page_number] = new_page;
+        page                            = new_page;
+      } else {
+        itr->second.page_number =
+            itr->second.page_number & ~page_permission_t::e_all;
+        itr->second.page_number = itr->second.page_number | permission;
+        page                    = itr->second;
+      }
+      assert(page.frame_ptr);
+      uint64_t offset     = _memory.page_offset(current_addr);
+      uint64_t chunk_size = _memory.bytes_per_page - offset;
+      if (chunk_size > remaining) chunk_size = remaining;
+      std::memcpy(page.frame_ptr + offset, src + (size - remaining),
+                  chunk_size);
+      current_addr += chunk_size;
+      remaining -= chunk_size;
+    }
+    // invalidate everything
+    _memory.mru_page = _memory.fetch_mru_page = page_t{};
+    for (uint32_t i = 0; i < _memory.direct_cache_size; i++) {
+      _memory.direct_cache[i] = _memory.fetch_direct_cache[i] = page_t{};
+    }
+    return true;
+  }
+  inline bool set_memory(uint64_t dst_addr, int value, uint64_t size,
+                         page_permission_t permission) {
+    uint64_t remaining    = size;
+    uint64_t current_addr = dst_addr;
+    while (remaining > 0) {
+      uint64_t page_number = _memory.page_number(current_addr);
+      auto     itr         = _memory.page_table.find(page_number);
+      page_t   page;
+      if (itr == _memory.page_table.end()) {
+        page_t new_page = _memory.allocate_page(page_number, permission);
+        if (!new_page.frame_ptr) return false;
+        _memory.page_table[page_number] = new_page;
+        page                            = new_page;
+      } else {
+        itr->second.page_number =
+            itr->second.page_number & ~page_permission_t::e_all;
+        itr->second.page_number = itr->second.page_number | permission;
+        page                    = itr->second;
+      }
+      assert(page.frame_ptr);
+      uint64_t offset     = _memory.page_offset(current_addr);
+      uint64_t chunk_size = _memory.bytes_per_page - offset;
+      if (chunk_size > remaining) chunk_size = remaining;
+      std::memset(page.frame_ptr + offset, value, chunk_size);
+      current_addr += chunk_size;
+      remaining -= chunk_size;
+    }
+    // invalidate everything
+    _memory.mru_page = _memory.fetch_mru_page = page_t{};
+    for (uint32_t i = 0; i < _memory.direct_cache_size; i++) {
+      _memory.direct_cache[i] = _memory.fetch_direct_cache[i] = page_t{};
     }
     return true;
   }
