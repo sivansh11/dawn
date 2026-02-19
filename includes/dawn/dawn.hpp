@@ -354,13 +354,14 @@ struct memory_t {
     if (frame) allocated_bytes += bytes_per_page;
     return frame;
   }
-  constexpr page_t allocate_page(uint64_t page_number) {
+  constexpr page_t allocate_page(uint64_t          page_number,
+                                 page_permission_t permission) {
     uint8_t *new_frame = allocate_frame();
     if (!new_frame) [[unlikely]] {
       return page_t{};
     }
     page_t new_page{.page_number = page_number, .frame_ptr = new_frame};
-    new_page.page_number |= default_page_permissions;
+    new_page.page_number |= permission;
     return new_page;
   }
 
@@ -430,7 +431,8 @@ struct memory_t {
       break;                                                                  \
     }                                                                         \
     /* allocate new page */                                                   \
-    page_t __new_page = __memory.allocate_page(__page_number);                \
+    page_t __new_page = __memory.allocate_page(                               \
+        __page_number, __memory.default_page_permissions);                    \
     if (!__new_page.frame_ptr) [[unlikely]] {                                 \
       __frame_ptr = nullptr;                                                  \
       break;                                                                  \
@@ -477,7 +479,8 @@ struct memory_t {
       break;                                                               \
     }                                                                      \
     /* allocate new page */                                                \
-    page_t __new_page = __memory.allocate_page(__page_number);             \
+    page_t __new_page = __memory.allocate_page(                            \
+        __page_number, __memory.default_page_permissions);                 \
     if (!__new_page.frame_ptr) [[unlikely]] {                              \
       __frame_ptr = nullptr;                                               \
       break;                                                               \
