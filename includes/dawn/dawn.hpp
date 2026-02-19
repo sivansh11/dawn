@@ -388,9 +388,9 @@ typedef void (*deallocate_callback_t)(void *, uint8_t *);
 
 struct memory_t {
   static const uint64_t bits_per_page = 12;
-  static_assert(bits_per_page >= 3,
-                "bits_per_page need to be bigger than 3 to allow for "
-                "permission handling");
+  static_assert(
+      bits_per_page <= 61,
+      "bits_per_page can be 61 at most to allow for permission handling");
   static const uint64_t       bytes_per_page    = 1 << bits_per_page;
   static const uint64_t       direct_cache_size = 32;
   const uint64_t              memory_limit_bytes;
