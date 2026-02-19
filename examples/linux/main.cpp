@@ -315,8 +315,9 @@ void     deallocate(void *, uint8_t *ptr) { delete[] ptr; }
 int main(int argc, char **argv) {
   if (argc != 3) throw std::runtime_error("[dem] [Image] [initrd]");
 
-  machine = new dawn::machine_t(ram_size, {uart_handler, clint_handler},
-                                nullptr, allocate, deallocate);
+  machine =
+      new dawn::machine_t(ram_size, {uart_handler, clint_handler}, nullptr,
+                          allocate, deallocate, dawn::page_permission_t::e_all);
 
   // read kernel
   auto kernel = read_file(argv[1]);
