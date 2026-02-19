@@ -663,6 +663,8 @@ struct memory_t {
 #define __store64(__memory, __addr, __value) \
   __store(uint64_t, __memory, __addr, __value)
 
+typedef void (*trap_callback_t)(void *, exception_code_t cause, uint64_t value);
+
 // TODO: accurate runtime memory bounds checking (account for size of
 // load/store)
 struct machine_t {
@@ -740,14 +742,9 @@ struct machine_t {
   // TODO: test with a macro
   inline bool handle_trap(exception_code_t cause, uint64_t value) {
     // hack
-    if (cause == exception_code_t::e_ecall_m_mode ||
-        cause == exception_code_t::e_ecall_u_mode) [[unlikely]] {
-      auto itr = _syscalls.find(_reg[17]);
-      if (itr != _syscalls.end()) {
-        itr->second(*this);
-        _pc += 4;
-        return true;
-      }
+    if (_trap_callback) {
+      _trap_callback(_trap_usr_data, cause, value);
+      return true;
     }
 
     bool is_interrupt =
@@ -2255,7 +2252,8 @@ struct machine_t {
 #endif
 
   // hack
-  std::map<uint64_t, std::function<void(machine_t &)>> _syscalls;
+  trap_callback_t _trap_callback = nullptr;
+  void           *_trap_usr_data = nullptr;
 
   // TODO: optimise csr
   std::map<uint16_t, uint64_t> _csr;
