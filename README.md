@@ -39,8 +39,7 @@ Dawn is designed to be flexible, it supports 2 distinct operational mode.
 - For example, in newlib (and linux) the ecall number for write syscall is 64 and read is 63, if the host wants to provide the guest the capability to perform file system read/write, the host needs to register syscall callbacks.
 - When dawn detects a syscall, it calls the respective callback.
 - This method can be used to provide custom syscalls/game engine calls to the script/binary.
-- TODO: add simple example (not yet added).
-for an example, check out (host, native) examples/simple/main.cpp and (guest, riscv) tests/simple/main.cpp. tests/simple/main.cpp is compiled using a crosscompiler, in this case riscv64-unknown-elf-g++, to create the a.out binary
+- for an example, check out (host, native) examples/simple/main.cpp and (guest, riscv) examples/simple/simple_riscv_main.cpp. examples/simple/simple_riscv_main.cpp is compiled using a crosscompiler, in this case riscv64-unknown-elf-g++, to create the a.out binary
 
 # Integration
 To use dawn in your project
