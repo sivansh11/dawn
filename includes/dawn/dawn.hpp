@@ -19,6 +19,10 @@
 
 namespace dawn {
 
+#if defined(__BYTE_ORDER__) && __BYTE_ORDER__ != __ORDER_LITTLE_ENDIAN__
+static_assert(false "dawn can only work on little endian architecture");
+#endif
+
 struct mmio_handler_t;
 
 typedef uint64_t (*load64)(const mmio_handler_t *handler, uint64_t);
