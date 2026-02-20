@@ -87,6 +87,7 @@ data_t* load_elf(const std::filesystem::path& path) {
     }
   }
   // TODO: add a empty frame with no permission for preventing stack overflow
+  // maybe this is not required since I added stack_bottom ?
 
   // TODO: handle heap address
   for (uint32_t i = 0; i < reader.sections.size(); i++) {
