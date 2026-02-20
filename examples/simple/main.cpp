@@ -192,14 +192,14 @@ int main(int argc, char** argv) {
     uint64_t address = data->machine._reg[11];
     size_t   len     = data->machine._reg[12];
     if (vfd == 1 || vfd == 2) {
-      // TODO: optimise this, read the whole section at a time
-      // or and
-      // TODO: add an inplace iterator to iterate over guest memory
       for (uint64_t i = address; i < address + len; i++) {
-        char res;
-        if (!data->machine.memcpy_guest_to_host(&res, i, 1))
-          throw std::runtime_error("something went wrong");
-        std::cout << res;
+        if (auto res = data->machine.at(i)) {
+          std::cout << *res;
+        } else {
+          std::stringstream ss;
+          ss << "failed to read memory at " << std::hex << i << '\n';
+          throw std::runtime_error(ss.str());
+        }
       }
       data->machine._reg[10] = len;
     } else {

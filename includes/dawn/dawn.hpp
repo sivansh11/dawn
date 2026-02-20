@@ -11,6 +11,7 @@
 #include <iostream>
 #include <limits>
 #include <map>
+#include <optional>
 #include <ostream>
 #include <sstream>
 #include <stdexcept>
@@ -931,6 +932,16 @@ struct machine_t {
     }
 
     return true;
+  }
+
+  std::optional<uint8_t> at(uint64_t addr) {
+    exception_code_t trap_cause;
+    uint64_t         trap_value;
+    uint8_t          value;
+    __load8(_memory, value, addr);
+    return value;
+  _do_trap:
+    return std::nullopt;
   }
 
   inline uint64_t step(uint64_t n) {
