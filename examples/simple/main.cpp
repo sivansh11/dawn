@@ -2,12 +2,14 @@
 #include <cstdio>
 #include <cstdlib>
 #include <filesystem>
+#include <functional>
 #include <iostream>
 
 #include <elfio/elfio.hpp>
 #include <limits>
 #include <sstream>
 #include <stdexcept>
+#include <unordered_map>
 
 #include "dawn/dawn.hpp"
 
@@ -15,11 +17,12 @@ uint8_t* allocate(void*, uint64_t size) { return new uint8_t[size]; }
 void     deallocate(void*, uint8_t* ptr) { delete[] ptr; }
 
 struct data_t {
-  dawn::machine_t machine;
-  uint64_t        heap_start;
-  uint64_t        heap_end;
-  uint64_t        stack_top;
-  uint64_t        stack_bottom;
+  dawn::machine_t                                            machine;
+  uint64_t                                                   heap_start;
+  uint64_t                                                   heap_end;
+  uint64_t                                                   stack_top;
+  uint64_t                                                   stack_bottom;
+  std::unordered_map<uint64_t, std::function<void(data_t*)>> syscall_callbacks;
 };
 
 data_t* load_elf(const std::filesystem::path& path) {
@@ -123,58 +126,17 @@ void trap_callback(void* usr_data, dawn::exception_code_t cause,
                    uint64_t value) {
   data_t* data = reinterpret_cast<data_t*>(usr_data);
   switch (cause) {
-    case dawn::exception_code_t::e_ecall_u_mode:
-      switch (data->machine._reg[17]) {
-        case 57:  // close
-          data->machine._reg[10] = 0;
-          data->machine._pc += 4;
-          break;
-        case 64: {  // write
-          int      vfd     = data->machine._reg[10];
-          uint64_t address = data->machine._reg[11];
-          size_t   len     = data->machine._reg[12];
-          if (vfd == 1 || vfd == 2) {
-            // TODO: optimise this, read the whole section at a time
-            for (uint64_t i = address; i < address + len; i++) {
-              char res;
-              if (!data->machine.memcpy_guest_to_host(&res, i, 1))
-                throw std::runtime_error("something went wrong");
-              std::cout << res;
-            }
-            data->machine._reg[10] = len;
-          } else {
-            data->machine._reg[10] = -9;
-          }
-          data->machine._pc += 4;
-        } break;
-        case 80:  // fstat
-          data->machine._reg[10] = -38;
-          data->machine._pc += 4;
-          break;
-        case 93: {  // exit
-          data->machine._pc += 4;
-          exit(data->machine._reg[10]);
-        } break;
-        case 214: {  // brk
-          uint64_t requested_brk = data->machine._reg[10];
-          if (requested_brk >= data->heap_start &&
-              requested_brk < data->stack_bottom) {
-            data->heap_end = requested_brk;
-          }
-          data->machine._reg[10] = data->heap_end;
-          data->machine._pc += 4;
-        } break;
-        case 1000: {  // can implement any game engine function like this
-          // for now return how many pages have been allocated by the machine
-          data->machine._reg[10] = data->machine._memory.page_table.size();
-          data->machine._pc += 4;
-        } break;
-        default:
-          std::stringstream ss;
-          ss << "unknown syscall number " << data->machine._reg[17];
-          throw std::runtime_error(ss.str());
+    case dawn::exception_code_t::e_ecall_u_mode: {
+      auto itr = data->syscall_callbacks.find(data->machine._reg[17]);
+      if (itr != data->syscall_callbacks.end()) {
+        itr->second(data);
+        data->machine._pc += 4;
+      } else {
+        std::stringstream ss;
+        ss << "unknown syscall " << data->machine._reg[17];
+        throw std::runtime_error(ss.str());
       }
-      break;
+    } break;
     case dawn::exception_code_t::e_load_access_fault:
     case dawn::exception_code_t::e_store_access_fault: {
       bool is_stack = (value > data->stack_bottom && value <= data->stack_top);
@@ -217,6 +179,57 @@ int main(int argc, char** argv) {
 
   data->machine._trap_callback = trap_callback;
   data->machine._trap_usr_data = data;
+
+  // close
+  data->syscall_callbacks[57] = [](data_t* data) {
+    data->machine._reg[10] = 0;
+  };
+
+  // write
+  data->syscall_callbacks[64] = [](data_t* data) {
+    int      vfd     = data->machine._reg[10];
+    uint64_t address = data->machine._reg[11];
+    size_t   len     = data->machine._reg[12];
+    if (vfd == 1 || vfd == 2) {
+      // TODO: optimise this, read the whole section at a time
+      // or and
+      // TODO: add an inplace iterator to iterate over guest memory
+      for (uint64_t i = address; i < address + len; i++) {
+        char res;
+        if (!data->machine.memcpy_guest_to_host(&res, i, 1))
+          throw std::runtime_error("something went wrong");
+        std::cout << res;
+      }
+      data->machine._reg[10] = len;
+    } else {
+      data->machine._reg[10] = -9;
+    }
+  };
+
+  // fstat
+  data->syscall_callbacks[80] = [](data_t* data) {
+    data->machine._reg[10] = -38;
+  };
+
+  // exit
+  data->syscall_callbacks[93] = [](data_t* data) {
+    exit(data->machine._reg[10]);
+  };
+
+  // brk
+  data->syscall_callbacks[214] = [](data_t* data) {
+    uint64_t requested_brk = data->machine._reg[10];
+    if (requested_brk >= data->heap_start &&
+        requested_brk < data->stack_bottom) {
+      data->heap_end = requested_brk;
+    }
+    data->machine._reg[10] = data->heap_end;
+  };
+
+  // custom
+  data->syscall_callbacks[1000] = [](data_t* data) {
+    data->machine._reg[10] = data->machine._memory.page_table.size();
+  };
 
   while (1) {
     // std::cout << "pc: " << std::hex << data->machine._pc << '\n';
