@@ -388,21 +388,18 @@ struct page_t {
   }
 };
 
-typedef uint8_t *(*allocate_callback_t)(void *, uint64_t);
-typedef void (*deallocate_callback_t)(void *, uint8_t *);
-
 struct memory_t {
   static const uint64_t bits_per_page = 12;
   static_assert(
       bits_per_page <= 61,
       "bits_per_page can be 61 at most to allow for permission handling");
-  static const uint64_t       bytes_per_page    = 1 << bits_per_page;
-  static const uint64_t       direct_cache_size = 32;
-  const uint64_t              memory_limit_bytes;
-  const allocate_callback_t   allocate_callback;
-  const deallocate_callback_t deallocate_callback;
-  void                       *allocator_state;
-  page_permission_t           default_page_permissions;
+  static const uint64_t bytes_per_page    = 1 << bits_per_page;
+  static const uint64_t direct_cache_size = 32;
+  const uint64_t        memory_limit_bytes;
+  uint8_t *(*allocate_callback)(void *, uint64_t);
+  void (*deallocate_callback)(void *, uint8_t *);
+  void             *allocator_state;
+  page_permission_t default_page_permissions;
 
   constexpr uint64_t page_number(uint64_t addr) const {
     return addr >> bits_per_page;
@@ -441,9 +438,9 @@ struct memory_t {
   }
 
   memory_t(uint64_t memory_limit_bytes, void *allocator_state,
-           allocate_callback_t   allocate_callback,
-           deallocate_callback_t deallocate_callback,
-           page_permission_t     default_page_permissions)
+           uint8_t *(*allocate_callback)(void *, uint64_t),
+           void (*deallocate_callback)(void *, uint8_t *),
+           page_permission_t default_page_permissions)
       : memory_limit_bytes(memory_limit_bytes),
         allocator_state(allocator_state),
         allocate_callback(allocate_callback),
@@ -755,9 +752,10 @@ typedef void (*trap_callback_t)(void *, exception_code_t cause, uint64_t value);
 // load/store)
 struct machine_t {
   machine_t(size_t ram_size, const std::vector<mmio_handler_t> mmios,
-            void *allocator_state, allocate_callback_t allocate_callback,
-            deallocate_callback_t deallocate_callback,
-            page_permission_t     default_page_permissions)
+            void *allocator_state,
+            uint8_t *(*allocate_callback)(void *, uint64_t),
+            void (*deallocate_callback)(void *, uint8_t *),
+            page_permission_t default_page_permissions)
       : _memory(ram_size, allocator_state, allocate_callback,
                 deallocate_callback, default_page_permissions),
         _mmios(mmios) {}
