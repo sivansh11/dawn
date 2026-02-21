@@ -5,6 +5,8 @@
 #include <sched.h>
 #include <unistd.h>
 #include <cstdint>
+#include <cstring>
+#include <iomanip>
 #include <iostream>
 #include <utility>
 
@@ -29,29 +31,45 @@
     return fn(std::forward<args_t>(args)...);                 \
   }
 
-// custom syscall to get number of pages mapped.
-define_syscall(1000, get_number_of_pages_mapped, uint64_t());
 // Note: These custom syscalls can be alot alot more complex, for example render
 // a model at location x, y, z. There is no hard limit for number of paramters
 // that can be passed, but we do need to follow the riscv abi
+define_syscall(1001, get_mapped_memory, void *());
 
 // NOTE: no need to define newlib syscalls as they are handle by the
 // compiler
 
 int main() {
-  // performs custom sycall
-  uint64_t number_of_pages_mapped = get_number_of_pages_mapped();
-
-  // Note: std::cout works because write syscall, ie syscall number 64 is
-  // handled by the exmaple
-  std::cout << "hello wolrd, in riscv\n";
-  std::cout << "there are " << number_of_pages_mapped
-            << " pages in current riscv proccess\n";
-
   // Note: this wont work since fork syscall, ie syscall 57 is not handled by
   // this example (exmaples/simple/main.cpp)
   //
   // fork();
+
+  uint8_t *mapped_memory = reinterpret_cast<uint8_t *>(get_mapped_memory());
+
+  // Note: std::cout works because write syscall, ie syscall number 64 is
+  // handled by the exmaple
+  std::cout << "initial mapped memory as seen in guest\n";
+  for (uint32_t i = 0; i < 64; i++) {
+    std::cout << std::hex << std::setw(2) << std::setfill('0')
+              << (uint32_t)mapped_memory[i] << ' ';
+    if ((i + 1) % 4 == 0) std::cout << " ";
+    if ((i + 1) % 8 == 0) std::cout << '\n';
+  }
+
+  // the string to be copied into the shared memory
+  const char *msg = "hello world, from riscv";
+
+  // copy string to mapped memory
+  std::memcpy(mapped_memory, msg, std::strlen(msg) + 1);
+
+  std::cout << "mapped memory after writes as seen in guest\n";
+  for (uint32_t i = 0; i < 64; i++) {
+    std::cout << std::hex << std::setw(2) << std::setfill('0')
+              << (uint32_t)mapped_memory[i] << ' ';
+    if ((i + 1) % 4 == 0) std::cout << " ";
+    if ((i + 1) % 8 == 0) std::cout << '\n';
+  }
 
   // 0 to indicate success
   return 0;

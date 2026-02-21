@@ -1,4 +1,5 @@
 #include <bitset>
+#include <cassert>
 #include <cstdio>
 #include <cstdlib>
 #include <filesystem>
@@ -17,11 +18,13 @@ uint8_t* allocate(void*, uint64_t size) { return new uint8_t[size]; }
 void     deallocate(void*, uint8_t* ptr) { delete[] ptr; }
 
 struct data_t {
-  dawn::machine_t                                            machine;
-  uint64_t                                                   heap_start;
-  uint64_t                                                   heap_end;
-  uint64_t                                                   stack_top;
-  uint64_t                                                   stack_bottom;
+  dawn::machine_t machine;
+  uint64_t        heap_start;
+  uint64_t        heap_end;
+  uint64_t        stack_top;
+  uint64_t        stack_bottom;
+  uint64_t        custom_shared_memory_start;
+  uint64_t        custom_shared_memory_end;
   std::unordered_map<uint64_t, std::function<void(data_t*)>> syscall_callbacks;
 };
 
@@ -108,6 +111,8 @@ data_t* load_elf(const std::filesystem::path& path) {
       if (name == "_end") {
         data->heap_start = value;
         break;
+      } else if (name == "__global_pointer$") {
+        data->machine._reg[3] = value;
       }
     }
     assert(data->heap_start != 0);
@@ -120,6 +125,10 @@ data_t* load_elf(const std::filesystem::path& path) {
   data->stack_bottom = data->stack_top - (8 * 1024);
   data->heap_end     = data->heap_start;
 
+  // TODO: remove magic number
+  data->custom_shared_memory_start = data->custom_shared_memory_end =
+      0x60000000;
+
   return data;
 }
 
@@ -131,6 +140,8 @@ int main(int argc, char** argv) {
 
   data_t* data = load_elf(argv[1]);
   if (!data) return -1;  // TODO: throw
+
+  bool running = true;
 
   // close
   data->syscall_callbacks[57] = [](data_t* data) {
@@ -164,29 +175,40 @@ int main(int argc, char** argv) {
   };
 
   // exit
-  data->syscall_callbacks[93] = [](data_t* data) {
-    exit(data->machine._reg[10]);
+  data->syscall_callbacks[93] = [&running](data_t* data) {
+    running = false;
+    // exit(data->machine._reg[10]);
   };
 
   // brk
   data->syscall_callbacks[214] = [](data_t* data) {
     uint64_t requested_brk = data->machine._reg[10];
     if (requested_brk >= data->heap_start &&
-        requested_brk < data->stack_bottom) {
+        requested_brk < data->custom_shared_memory_start) {
       data->heap_end = requested_brk;
     }
     data->machine._reg[10] = data->heap_end;
   };
 
-  // custom
-  data->syscall_callbacks[1000] = [](data_t* data) {
-    data->machine._reg[10] = data->machine._memory.page_table.size();
+  // it is recommended that shared_memory should be a multiple of bytes_per_page
+  // if it is not, the emulator may crash as an illformed/malacious program
+  // might access out of bounds.
+  static const uint64_t shared_memory_size =
+      data->machine._memory.bytes_per_page;
+  uint8_t* shared_memory = allocate(nullptr, shared_memory_size);
+  data->custom_shared_memory_end =
+      data->custom_shared_memory_start + shared_memory_size;
+  assert(data->custom_shared_memory_end <= data->stack_bottom);
+
+  // custom syscall to get custom engine shared memory
+  data->syscall_callbacks[1001] = [](data_t* data) {
+    data->machine._reg[10] = data->custom_shared_memory_start;
   };
 
   data->machine._trap_usr_data = data;
-  data->machine._trap_callback = [](void*                  usr_data,
-                                    dawn::exception_code_t cause,
-                                    uint64_t               value) {
+  data->machine._trap_callback = [shared_memory](void* usr_data,
+                                                 dawn::exception_code_t cause,
+                                                 uint64_t               value) {
     data_t* data = reinterpret_cast<data_t*>(usr_data);
     switch (cause) {
       case dawn::exception_code_t::e_ecall_u_mode: {
@@ -205,11 +227,21 @@ int main(int argc, char** argv) {
         bool is_stack =
             (value > data->stack_bottom && value <= data->stack_top);
         bool is_heap = (value < data->heap_end && value >= data->heap_start);
+        bool is_custom_shared_memory =
+            (value < data->custom_shared_memory_end &&
+             value >= data->custom_shared_memory_start);
         if (is_stack || is_heap) {
           uint64_t page_number = data->machine._memory.page_number(value);
           assert(!data->machine._memory.page_table.contains(page_number));
           data->machine.insert_new_page(page_number,
                                         dawn::page_permission_t::e_rw);
+        } else if (is_custom_shared_memory) {
+          uint64_t page_number = data->machine._memory.page_number(value);
+          uint64_t offset =
+              (page_number * data->machine._memory.bytes_per_page) -
+              data->custom_shared_memory_start;
+          data->machine.insert_page(page_number, shared_memory + offset,
+                                    dawn::page_permission_t::e_rw);
         } else {
           std::stringstream ss;
           ss << "error at: " << std::hex << data->machine._pc << '\n';
@@ -224,7 +256,16 @@ int main(int argc, char** argv) {
     }
   };
 
-  while (1) {
+  uint8_t* mapped_memory = reinterpret_cast<uint8_t*>(shared_memory);
+  std::cout << "initial mapped memory as seen in host initially\n";
+  for (uint32_t i = 0; i < 64; i++) {
+    std::cout << std::hex << std::setw(2) << std::setfill('0')
+              << (uint32_t)mapped_memory[i] << ' ';
+    if ((i + 1) % 4 == 0) std::cout << " ";
+    if ((i + 1) % 8 == 0) std::cout << '\n';
+  }
+
+  while (running) {
     // std::cout << "pc: " << std::hex << data->machine._pc << '\n';
     data->machine.step(1);
     // for (uint32_t i = 0; i < 32; i++) {
@@ -236,5 +277,13 @@ int main(int argc, char** argv) {
     // getchar();
   }
 
-  return -1;
+  std::cout << "initial mapped memory as seen in host at end\n";
+  for (uint32_t i = 0; i < 64; i++) {
+    std::cout << std::hex << std::setw(2) << std::setfill('0')
+              << (uint32_t)mapped_memory[i] << ' ';
+    if ((i + 1) % 4 == 0) std::cout << " ";
+    if ((i + 1) % 8 == 0) std::cout << '\n';
+  }
+
+  return data->machine._reg[10];
 }
