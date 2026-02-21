@@ -148,13 +148,8 @@ void trap_callback(void* usr_data, dawn::exception_code_t cause,
             page_number, dawn::page_permission_t::e_rw);
         data->machine._memory.page_table[page_number] = new_page;
         // TODO: maybe be smarter about this, patch/fix the cache properly
-        // invalidate all caches
-        data->machine._memory.mru_page = data->machine._memory.fetch_mru_page =
-            dawn::page_t{};
-        for (uint32_t i = 0; i < data->machine._memory.direct_cache_size; i++) {
-          data->machine._memory.direct_cache[i] =
-              data->machine._memory.fetch_direct_cache[i] = dawn::page_t{};
-        }
+        // rather than invalidating whole cache
+        data->machine._memory.invalidate_caches();
       } else {
         std::stringstream ss;
         ss << "error at: " << std::hex << data->machine._pc << '\n';

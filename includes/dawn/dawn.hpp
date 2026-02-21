@@ -429,6 +429,12 @@ struct memory_t {
     new_page.page_number |= permission;
     return new_page;
   }
+  constexpr void invalidate_caches() {
+    mru_page = fetch_mru_page = dawn::page_t{};
+    for (uint32_t i = 0; i < direct_cache_size; i++) {
+      direct_cache[i] = fetch_direct_cache[i] = dawn::page_t{};
+    }
+  }
 
   memory_t(uint64_t memory_limit_bytes, void *allocator_state,
            allocate_callback_t   allocate_callback,
@@ -841,10 +847,7 @@ struct machine_t {
       remaining -= chunk_size;
     }
     // invalidate everything
-    _memory.mru_page = _memory.fetch_mru_page = page_t{};
-    for (uint32_t i = 0; i < _memory.direct_cache_size; i++) {
-      _memory.direct_cache[i] = _memory.fetch_direct_cache[i] = page_t{};
-    }
+    _memory.invalidate_caches();
     return true;
   }
   inline bool set_memory(uint64_t dst_addr, int value, uint64_t size,
