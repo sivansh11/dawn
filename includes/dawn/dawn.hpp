@@ -419,15 +419,19 @@ struct memory_t {
     if (frame) allocated_bytes += bytes_per_page;
     return frame;
   }
+  constexpr page_t create_page(uint64_t page_number, uint8_t *frame_ptr,
+                               page_permission_t permission) {
+    page_t new_page{.page_number = page_number, .frame_ptr = frame_ptr};
+    new_page.page_number |= permission;
+    return new_page;
+  }
   constexpr page_t allocate_page(uint64_t          page_number,
                                  page_permission_t permission) {
     uint8_t *new_frame = allocate_frame();
     if (!new_frame) [[unlikely]] {
       return page_t{};
     }
-    page_t new_page{.page_number = page_number, .frame_ptr = new_frame};
-    new_page.page_number |= permission;
-    return new_page;
+    return create_page(page_number, new_frame, permission);
   }
   constexpr void invalidate_caches() {
     mru_page = fetch_mru_page = dawn::page_t{};
@@ -947,6 +951,45 @@ struct machine_t {
     return value;
   _do_trap:
     return std::nullopt;
+  }
+
+  bool insert_page(uint64_t page_number, uint8_t *frame_ptr,
+                   page_permission_t permission) {
+    page_t new_page = _memory.create_page(page_number, frame_ptr, permission);
+    _memory.page_table[page_number] = new_page;
+    if (_memory.mru_page.number() == page_number) {
+      _memory.mru_page = new_page;
+    }
+    if (_memory.fetch_mru_page.number() == page_number) {
+      _memory.fetch_mru_page = new_page;
+    }
+    uint64_t cache_index = _memory.cache_index(page_number);
+    if (_memory.direct_cache[cache_index].number() == page_number) {
+      _memory.direct_cache[cache_index] = new_page;
+    }
+    if (_memory.fetch_direct_cache[cache_index].number() == page_number) {
+      _memory.fetch_direct_cache[cache_index] = new_page;
+    }
+    return true;
+  }
+
+  bool insert_new_page(uint64_t page_number, page_permission_t permission) {
+    page_t new_page = _memory.allocate_page(page_number, permission);
+    _memory.page_table[page_number] = new_page;
+    if (_memory.mru_page.number() == page_number) {
+      _memory.mru_page = new_page;
+    }
+    if (_memory.fetch_mru_page.number() == page_number) {
+      _memory.fetch_mru_page = new_page;
+    }
+    uint64_t cache_index = _memory.cache_index(page_number);
+    if (_memory.direct_cache[cache_index].number() == page_number) {
+      _memory.direct_cache[cache_index] = new_page;
+    }
+    if (_memory.fetch_direct_cache[cache_index].number() == page_number) {
+      _memory.fetch_direct_cache[cache_index] = new_page;
+    }
+    return true;
   }
 
   inline uint64_t step(uint64_t n) {
@@ -2411,8 +2454,8 @@ struct machine_t {
 #endif
 
   // hack
-  trap_callback_t _trap_callback = nullptr;
-  void           *_trap_usr_data = nullptr;
+  std::function<void(void *, exception_code_t, uint64_t)> _trap_callback;
+  void *_trap_usr_data = nullptr;
 
   // TODO: optimise csr
   std::map<uint16_t, uint64_t> _csr;

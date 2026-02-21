@@ -73,8 +73,7 @@ data_t* load_elf(const std::filesystem::path& path) {
       return nullptr;
     if (memory_size - file_size) {
       if (!data->machine.set_memory(virtual_address + file_size, 0,
-                                    memory_size - file_size,
-                                    dawn::page_permission_t::e_rw))
+                                    memory_size - file_size, permission))
         return nullptr;
     }
 
@@ -119,49 +118,9 @@ data_t* load_elf(const std::filesystem::path& path) {
 
   data->stack_top    = data->machine._reg[2];
   data->stack_bottom = data->stack_top - (8 * 1024);
+  data->heap_end     = data->heap_start;
 
   return data;
-}
-
-void trap_callback(void* usr_data, dawn::exception_code_t cause,
-                   uint64_t value) {
-  data_t* data = reinterpret_cast<data_t*>(usr_data);
-  switch (cause) {
-    case dawn::exception_code_t::e_ecall_u_mode: {
-      auto itr = data->syscall_callbacks.find(data->machine._reg[17]);
-      if (itr != data->syscall_callbacks.end()) {
-        itr->second(data);
-        data->machine._pc += 4;
-      } else {
-        std::stringstream ss;
-        ss << "unknown syscall " << data->machine._reg[17];
-        throw std::runtime_error(ss.str());
-      }
-    } break;
-    case dawn::exception_code_t::e_load_access_fault:
-    case dawn::exception_code_t::e_store_access_fault: {
-      bool is_stack = (value > data->stack_bottom && value <= data->stack_top);
-      bool is_heap  = (value < data->heap_end && value >= data->heap_start);
-      if (is_stack || is_heap) {
-        uint64_t     page_number = data->machine._memory.page_number(value);
-        dawn::page_t new_page    = data->machine._memory.allocate_page(
-            page_number, dawn::page_permission_t::e_rw);
-        data->machine._memory.page_table[page_number] = new_page;
-        // TODO: maybe be smarter about this, patch/fix the cache properly
-        // rather than invalidating whole cache
-        data->machine._memory.invalidate_caches();
-      } else {
-        std::stringstream ss;
-        ss << "error at: " << std::hex << data->machine._pc << '\n';
-        std::cout << ss.str();
-        throw std::runtime_error("something weird happened");
-      }
-    } break;
-    default:
-      std::stringstream ss;
-      ss << cause << " not implemented\n";
-      throw std::runtime_error(ss.str());
-  }
 }
 
 int main(int argc, char** argv) {
@@ -172,9 +131,6 @@ int main(int argc, char** argv) {
 
   data_t* data = load_elf(argv[1]);
   if (!data) return -1;  // TODO: throw
-
-  data->machine._trap_callback = trap_callback;
-  data->machine._trap_usr_data = data;
 
   // close
   data->syscall_callbacks[57] = [](data_t* data) {
@@ -225,6 +181,47 @@ int main(int argc, char** argv) {
   // custom
   data->syscall_callbacks[1000] = [](data_t* data) {
     data->machine._reg[10] = data->machine._memory.page_table.size();
+  };
+
+  data->machine._trap_usr_data = data;
+  data->machine._trap_callback = [](void*                  usr_data,
+                                    dawn::exception_code_t cause,
+                                    uint64_t               value) {
+    data_t* data = reinterpret_cast<data_t*>(usr_data);
+    switch (cause) {
+      case dawn::exception_code_t::e_ecall_u_mode: {
+        auto itr = data->syscall_callbacks.find(data->machine._reg[17]);
+        if (itr != data->syscall_callbacks.end()) {
+          itr->second(data);
+          data->machine._pc += 4;
+        } else {
+          std::stringstream ss;
+          ss << "unknown syscall " << data->machine._reg[17];
+          throw std::runtime_error(ss.str());
+        }
+      } break;
+      case dawn::exception_code_t::e_load_access_fault:
+      case dawn::exception_code_t::e_store_access_fault: {
+        bool is_stack =
+            (value > data->stack_bottom && value <= data->stack_top);
+        bool is_heap = (value < data->heap_end && value >= data->heap_start);
+        if (is_stack || is_heap) {
+          uint64_t page_number = data->machine._memory.page_number(value);
+          assert(!data->machine._memory.page_table.contains(page_number));
+          data->machine.insert_new_page(page_number,
+                                        dawn::page_permission_t::e_rw);
+        } else {
+          std::stringstream ss;
+          ss << "error at: " << std::hex << data->machine._pc << '\n';
+          std::cout << ss.str();
+          throw std::runtime_error("something weird happened");
+        }
+      } break;
+      default:
+        std::stringstream ss;
+        ss << cause << " not implemented\n";
+        throw std::runtime_error(ss.str());
+    }
   };
 
   while (1) {
