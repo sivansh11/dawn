@@ -177,6 +177,7 @@ int main(int argc, char** argv) {
   // exit
   data->syscall_callbacks[93] = [&running](data_t* data) {
     running = false;
+    data->machine._wfi = true;
     // exit(data->machine._reg[10]);
   };
 
