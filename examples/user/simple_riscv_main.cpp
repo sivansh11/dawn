@@ -41,7 +41,7 @@ define_syscall(1001, get_mapped_memory, void *());
 
 int main() {
   // Note: this wont work since fork syscall, ie syscall 57 is not handled by
-  // this example (exmaples/simple/main.cpp)
+  // this example (exmaples/user/main.cpp)
   //
   // fork();
 

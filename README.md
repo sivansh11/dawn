@@ -32,14 +32,22 @@ Dawn is designed to be flexible, it supports 2 distinct operational mode.
 - In this mode, dawn acts as a hardware provider, it doesnt assume any underlying OS.
 - The guest OS is responsible for transitioning from (M)achine to (U)ser mode, handling all syscalls.
 - Here, the host needs to provide all necessary peripherals, like uart, keyboard, mouse, display output etc.
-- See https://github.com/sivansh11/dem for more information
+- See linux example for more information
 ## Application Emulation
 - This is the main reason dawn was created, the guest code is typically compiled to a lightweight ELF binary using [NewLib](https://en.wikipedia.org/wiki/Newlib)
 - In this, there is no guest OS, instead, any/all syscalls done by the guest script/binary is handled by the host.
 - For example, in newlib (and linux) the ecall number for write syscall is 64 and read is 63, if the host wants to provide the guest the capability to perform file system read/write, the host needs to register syscall callbacks.
 - When dawn detects a syscall, it calls the respective callback.
 - This method can be used to provide custom syscalls/game engine calls to the script/binary.
-- for an example, check out (host, native) examples/simple/main.cpp and (guest, riscv) examples/simple/simple_riscv_main.cpp. examples/simple/simple_riscv_main.cpp is compiled using a crosscompiler, in this case riscv64-unknown-elf-g++, to create the a.out binary
+- for an example, check out (host, native) examples/user/main.cpp and (guest, riscv) examples/user/simple_riscv_main.cpp. examples/user/simple_riscv_main.cpp is compiled using a crosscompiler, in this case riscv64-unknown-elf-g++, to create the a.out binary
+
+# Build Example
+To build and try out the examples
+```cmake
+cmake --build build
+./build/examples/user/user ./examples/user/a.out # run a riscv application in user mode
+./build/examples/linux/linux ./examples/linux/Image ./examples/linux/rootfs.cpio # run uCLinux
+```
 
 # Integration
 To use dawn in your project

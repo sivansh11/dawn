@@ -1,3 +1,3 @@
 add_subdirectory(test)
 add_subdirectory(linux)
-add_subdirectory(simple)
+add_subdirectory(user)
