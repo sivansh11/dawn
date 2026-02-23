@@ -1522,12 +1522,14 @@ struct machine_t {
         _reg[inst.as.i_type.rd()] =
             _reg[inst.as.i_type.rs1()] >> (inst.as.i_type.imm() & 0x3f);
         _pc += 4;
+        do_dispatch();
       } break;
       case 0b010000: {  // srai
         int64_t  rs1_val = static_cast<int64_t>(_reg[inst.as.i_type.rs1()]);
         uint32_t shamt   = inst.as.i_type.imm() & 0x3f;
         _reg[inst.as.i_type.rd()] = rs1_val >> shamt;
         _pc += 4;
+        do_dispatch();
       } break;
 
       default:
@@ -1558,12 +1560,14 @@ struct machine_t {
             static_cast<uint32_t>(_reg[inst.as.i_type.rs1()]) >>
             inst.as.i_type.shamt_w());
         _pc += 4;
+        do_dispatch();
       } break;
       case 0b0100000: {  // sraiw
         _reg[inst.as.i_type.rd()] = static_cast<int32_t>(
             static_cast<int32_t>(_reg[inst.as.i_type.rs1()]) >>
             inst.as.i_type.shamt_w());
         _pc += 4;
+        do_dispatch();
       } break;
 
       default:
@@ -1579,18 +1583,21 @@ struct machine_t {
             static_cast<uint32_t>(_reg[inst.as.r_type.rs1()]) +
             static_cast<uint32_t>(_reg[inst.as.r_type.rs2()]));
         _pc += 4;
+        do_dispatch();
       } break;
       case 0b0100000: {  // subw
         _reg[inst.as.r_type.rd()] = static_cast<int32_t>(
             (static_cast<uint32_t>(_reg[inst.as.r_type.rs1()]) -
              static_cast<uint32_t>(_reg[inst.as.r_type.rs2()])));
         _pc += 4;
+        do_dispatch();
       } break;
       case 0b0000001: {  // mulw
         _reg[inst.as.r_type.rd()] = static_cast<int64_t>(
             static_cast<int32_t>(_reg[inst.as.r_type.rs1()]) *
             static_cast<int32_t>(_reg[inst.as.r_type.rs2()]));
         _pc += 4;
+        do_dispatch();
       } break;
 
       default:
@@ -1630,12 +1637,14 @@ struct machine_t {
             static_cast<uint32_t>(_reg[inst.as.r_type.rs1()]) >>
             (_reg[inst.as.r_type.rs2()] & 0b11111));
         _pc += 4;
+        do_dispatch();
       } break;
       case 0b0100000: {  // sraw
         _reg[inst.as.r_type.rd()] = static_cast<int32_t>(
             static_cast<int32_t>(_reg[inst.as.r_type.rs1()]) >>
             (_reg[inst.as.r_type.rs2()] & 0b11111));
         _pc += 4;
+        do_dispatch();
       } break;
       case 0b0000001: {  // divuw
         uint32_t rs1 = static_cast<uint32_t>(_reg[inst.as.r_type.rs1()]);
@@ -1648,6 +1657,7 @@ struct machine_t {
         _reg[inst.as.r_type.rd()] = static_cast<int64_t>(static_cast<int32_t>(
             static_cast<uint32_t>(_reg[inst.as.r_type.rd()])));
         _pc += 4;
+        do_dispatch();
       } break;
 
       default:
@@ -1692,17 +1702,20 @@ struct machine_t {
         _reg[inst.as.r_type.rd()] =
             _reg[inst.as.r_type.rs1()] + _reg[inst.as.r_type.rs2()];
         _pc += 4;
+        do_dispatch();
       } break;
       case 0b0100000: {  // sub
         _reg[inst.as.r_type.rd()] =
             _reg[inst.as.r_type.rs1()] - _reg[inst.as.r_type.rs2()];
         _pc += 4;
+        do_dispatch();
       } break;
       case 0b0000001: {  // mul
         uint64_t rs1              = _reg[inst.as.r_type.rs1()];
         uint64_t rs2              = _reg[inst.as.r_type.rs2()];
         _reg[inst.as.r_type.rd()] = rs1 * rs2;
         _pc += 4;
+        do_dispatch();
       } break;
 
       default:
@@ -1717,6 +1730,7 @@ struct machine_t {
         _reg[inst.as.r_type.rd()] = _reg[inst.as.r_type.rs1()]
                                     << (_reg[inst.as.r_type.rs2()] & 0b111111);
         _pc += 4;
+        do_dispatch();
       } break;
       case 0b0000001: {  // mulh
         int64_t  rs1 = static_cast<int64_t>(_reg[inst.as.r_type.rs1()]);
@@ -1728,6 +1742,7 @@ struct machine_t {
         if (rs2 < 0) result_hi -= rs1;
         _reg[inst.as.r_type.rd()] = result_hi;
         _pc += 4;
+        do_dispatch();
       } break;
 
       default:
@@ -1743,6 +1758,7 @@ struct machine_t {
             static_cast<int64_t>(_reg[inst.as.r_type.rs1()]) <
             static_cast<int64_t>(_reg[inst.as.r_type.rs2()]);
         _pc += 4;
+        do_dispatch();
       } break;
       case 0b0000001: {  // mulhsu
         int64_t  rs1 = static_cast<int64_t>(_reg[inst.as.r_type.rs1()]);
@@ -1753,6 +1769,7 @@ struct machine_t {
         if (rs1 < 0) result_hi -= rs2;
         _reg[inst.as.r_type.rd()] = result_hi;
         _pc += 4;
+        do_dispatch();
       } break;
 
       default:
@@ -1767,6 +1784,7 @@ struct machine_t {
         _reg[inst.as.r_type.rd()] =
             _reg[inst.as.r_type.rs1()] < _reg[inst.as.r_type.rs2()];
         _pc += 4;
+        do_dispatch();
       } break;
       case 0b0000001: {  // mulhu
         uint64_t rs1 = _reg[inst.as.r_type.rs1()];
@@ -1775,6 +1793,7 @@ struct machine_t {
         mul_64x64_u(rs1, rs2, result);
         _reg[inst.as.r_type.rd()] = result[1];
         _pc += 4;
+        do_dispatch();
       } break;
 
       default:
@@ -1789,6 +1808,7 @@ struct machine_t {
         _reg[inst.as.r_type.rd()] =
             _reg[inst.as.r_type.rs1()] ^ _reg[inst.as.r_type.rs2()];
         _pc += 4;
+        do_dispatch();
       } break;
       case 0b0000001: {  // div
         int64_t rs1 = static_cast<int64_t>(_reg[inst.as.r_type.rs1()]);
@@ -1801,6 +1821,7 @@ struct machine_t {
           _reg[inst.as.r_type.rd()] = static_cast<uint64_t>(rs1 / rs2);
         }
         _pc += 4;
+        do_dispatch();
       } break;
 
       default:
@@ -1815,12 +1836,14 @@ struct machine_t {
         _reg[inst.as.r_type.rd()] = _reg[inst.as.r_type.rs1()] >>
                                     (_reg[inst.as.r_type.rs2()] & 0b111111);
         _pc += 4;
+        do_dispatch();
       } break;
       case 0b0100000: {  // sra
         _reg[inst.as.r_type.rd()] =
             static_cast<int64_t>(_reg[inst.as.r_type.rs1()]) >>
             (_reg[inst.as.r_type.rs2()] & 0b111111);
         _pc += 4;
+        do_dispatch();
       } break;
       case 0b0000001: {  // divu
         uint64_t rs1 = _reg[inst.as.r_type.rs1()];
@@ -1831,6 +1854,7 @@ struct machine_t {
           _reg[inst.as.r_type.rd()] = rs1 / rs2;
         }
         _pc += 4;
+        do_dispatch();
       } break;
 
       default:
@@ -1845,6 +1869,7 @@ struct machine_t {
         _reg[inst.as.r_type.rd()] =
             _reg[inst.as.r_type.rs1()] | _reg[inst.as.r_type.rs2()];
         _pc += 4;
+        do_dispatch();
       } break;
       case 0b0000001: {  // rem
         int64_t rs1 = static_cast<int64_t>(_reg[inst.as.r_type.rs1()]);
@@ -1857,6 +1882,7 @@ struct machine_t {
           _reg[inst.as.r_type.rd()] = static_cast<uint64_t>(rs1 % rs2);
         }
         _pc += 4;
+        do_dispatch();
       } break;
 
       default:
@@ -1871,6 +1897,7 @@ struct machine_t {
         _reg[inst.as.r_type.rd()] =
             _reg[inst.as.r_type.rs1()] & _reg[inst.as.r_type.rs2()];
         _pc += 4;
+        do_dispatch();
       } break;
       case 0b0000001: {  // remu
         uint64_t rs1 = _reg[inst.as.r_type.rs1()];
@@ -1881,6 +1908,7 @@ struct machine_t {
           _reg[inst.as.r_type.rd()] = rs1 % rs2;
         }
         _pc += 4;
+        do_dispatch();
       } break;
 
       default:
@@ -1918,16 +1946,16 @@ struct machine_t {
         mstatus = (mstatus & ~MSTATUS_MIE_MASK) | (mpie << MSTATUS_MIE_SHIFT);
         mstatus = (mstatus & ~MSTATUS_MPIE_MASK) | (1u << MSTATUS_MPIE_SHIFT);
         mstatus = (mstatus & ~MSTATUS_MPP_MASK) | (0b00u << MSTATUS_MPP_SHIFT);
-      }
         do_dispatch();  // goto next instruction no need to break
+      } break;
 
       case 0b000100000101: {  // wfi
         _wfi = true;
         if (_wfi_callback) [[likely]]
           _wfi_callback();
         _pc += 4;
-      }
         do_dispatch();
+      } break;
 
       default:
         goto _do_unknown_instruction;
@@ -2047,6 +2075,7 @@ struct machine_t {
         _reservation_address      = addr;
         _is_reserved              = true;
         _pc += 4;
+        do_dispatch();
       } break;
       case 0b00011: {  // sc
         const uint64_t rs1       = _reg[inst.as.a_type.rs1()];
@@ -2065,6 +2094,7 @@ struct machine_t {
         _is_reserved         = false;
         _reservation_address = 0;
         _pc += 4;
+        do_dispatch();
       } break;
       case 0b00001: {  // amoswap
         const uint64_t rs1       = _reg[inst.as.a_type.rs1()];
@@ -2081,6 +2111,7 @@ struct machine_t {
         _is_reserved         = false;
         _reservation_address = 0;
         _pc += 4;
+        do_dispatch();
       } break;
       case 0b00000: {  // amoadd
         const uint64_t rs1       = _reg[inst.as.a_type.rs1()];
@@ -2097,6 +2128,7 @@ struct machine_t {
         _is_reserved         = false;
         _reservation_address = 0;
         _pc += 4;
+        do_dispatch();
       } break;
       case 0b00100: {  // amoxor
         const uint64_t rs1       = _reg[inst.as.a_type.rs1()];
@@ -2113,6 +2145,7 @@ struct machine_t {
         _is_reserved         = false;
         _reservation_address = 0;
         _pc += 4;
+        do_dispatch();
       } break;
       case 0b01100: {  // amoand
         const uint64_t rs1       = _reg[inst.as.a_type.rs1()];
@@ -2129,6 +2162,7 @@ struct machine_t {
         _is_reserved         = false;
         _reservation_address = 0;
         _pc += 4;
+        do_dispatch();
       } break;
       case 0b01000: {  // amoor
         const uint64_t rs1       = _reg[inst.as.a_type.rs1()];
@@ -2145,6 +2179,7 @@ struct machine_t {
         _is_reserved         = false;
         _reservation_address = 0;
         _pc += 4;
+        do_dispatch();
       } break;
       case 0b10000: {  // amomin
         const uint64_t rs1       = _reg[inst.as.a_type.rs1()];
@@ -2163,6 +2198,7 @@ struct machine_t {
         _is_reserved         = false;
         _reservation_address = 0;
         _pc += 4;
+        do_dispatch();
       } break;
       case 0b10100: {  // amomax
         const uint64_t rs1       = _reg[inst.as.a_type.rs1()];
@@ -2181,6 +2217,7 @@ struct machine_t {
         _is_reserved         = false;
         _reservation_address = 0;
         _pc += 4;
+        do_dispatch();
       } break;
       case 0b11000: {  // amominu
         const uint64_t rs1       = _reg[inst.as.a_type.rs1()];
@@ -2199,6 +2236,7 @@ struct machine_t {
         _is_reserved         = false;
         _reservation_address = 0;
         _pc += 4;
+        do_dispatch();
       } break;
       case 0b11100: {  // amomaxu
         const uint64_t rs1       = _reg[inst.as.a_type.rs1()];
@@ -2217,6 +2255,7 @@ struct machine_t {
         _is_reserved         = false;
         _reservation_address = 0;
         _pc += 4;
+        do_dispatch();
       } break;
 
       default:
@@ -2240,6 +2279,7 @@ struct machine_t {
         _reservation_address      = addr;
         _is_reserved              = true;
         _pc += 4;
+        do_dispatch();
       } break;
       case 0b00011: {  // sc
         const uint64_t rs1       = _reg[inst.as.a_type.rs1()];
@@ -2259,6 +2299,7 @@ struct machine_t {
         _is_reserved         = false;
         _reservation_address = 0;
         _pc += 4;
+        do_dispatch();
       } break;
       case 0b00001: {  // amoswap
         const uint64_t rs1       = _reg[inst.as.a_type.rs1()];
@@ -2275,6 +2316,7 @@ struct machine_t {
         _is_reserved         = false;
         _reservation_address = 0;
         _pc += 4;
+        do_dispatch();
       } break;
       case 0b00000: {  // amoadd
         const uint64_t rs1       = _reg[inst.as.a_type.rs1()];
@@ -2291,6 +2333,7 @@ struct machine_t {
         _is_reserved         = false;
         _reservation_address = 0;
         _pc += 4;
+        do_dispatch();
       } break;
       case 0b00100: {  // amoxor
         const uint64_t rs1       = _reg[inst.as.a_type.rs1()];
@@ -2307,6 +2350,7 @@ struct machine_t {
         _is_reserved         = false;
         _reservation_address = 0;
         _pc += 4;
+        do_dispatch();
       } break;
       case 0b01100: {  // amoand
         const uint64_t rs1       = _reg[inst.as.a_type.rs1()];
@@ -2323,6 +2367,7 @@ struct machine_t {
         _is_reserved         = false;
         _reservation_address = 0;
         _pc += 4;
+        do_dispatch();
       } break;
       case 0b01000: {  // amoor
         const uint64_t rs1       = _reg[inst.as.a_type.rs1()];
@@ -2339,6 +2384,7 @@ struct machine_t {
         _is_reserved         = false;
         _reservation_address = 0;
         _pc += 4;
+        do_dispatch();
       } break;
       case 0b10000: {  // amomin
         const uint64_t rs1       = _reg[inst.as.a_type.rs1()];
@@ -2357,6 +2403,7 @@ struct machine_t {
         _is_reserved         = false;
         _reservation_address = 0;
         _pc += 4;
+        do_dispatch();
       } break;
       case 0b10100: {  // amomax
         const uint64_t rs1       = _reg[inst.as.a_type.rs1()];
@@ -2375,6 +2422,7 @@ struct machine_t {
         _is_reserved         = false;
         _reservation_address = 0;
         _pc += 4;
+        do_dispatch();
       } break;
       case 0b11000: {  // amominu
         const uint64_t rs1       = _reg[inst.as.a_type.rs1()];
@@ -2393,6 +2441,7 @@ struct machine_t {
         _is_reserved         = false;
         _reservation_address = 0;
         _pc += 4;
+        do_dispatch();
       } break;
       case 0b11100: {  // amomaxu
         const uint64_t rs1       = _reg[inst.as.a_type.rs1()];
@@ -2411,6 +2460,7 @@ struct machine_t {
         _is_reserved         = false;
         _reservation_address = 0;
         _pc += 4;
+        do_dispatch();
       } break;
 
       default:
