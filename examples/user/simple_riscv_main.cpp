@@ -39,37 +39,48 @@ define_syscall(1001, get_mapped_memory, void *());
 // NOTE: no need to define newlib syscalls as they are handle by the
 // compiler
 
+uint64_t fib(uint64_t n) {
+  if (n == 1) {
+    return 1;
+  }
+  if (n == 2) {
+    return 1;
+  }
+  return fib(n - 1) + fib(n - 2);
+}
+
 int main() {
   // Note: this wont work since fork syscall, ie syscall 57 is not handled by
   // this example (exmaples/user/main.cpp)
   //
   // fork();
 
-  uint8_t *mapped_memory = reinterpret_cast<uint8_t *>(get_mapped_memory());
-
-  // Note: std::cout works because write syscall, ie syscall number 64 is
-  // handled by the exmaple
-  std::cout << "initial mapped memory as seen in guest\n";
-  for (uint32_t i = 0; i < 64; i++) {
-    std::cout << std::hex << std::setw(2) << std::setfill('0')
-              << (uint32_t)mapped_memory[i] << ' ';
-    if ((i + 1) % 4 == 0) std::cout << " ";
-    if ((i + 1) % 8 == 0) std::cout << '\n';
-  }
-
-  // the string to be copied into the shared memory
-  const char *msg = "hello world, from riscv";
-
-  // copy string to mapped memory
-  std::memcpy(mapped_memory, msg, std::strlen(msg) + 1);
-
-  std::cout << "mapped memory after writes as seen in guest\n";
-  for (uint32_t i = 0; i < 64; i++) {
-    std::cout << std::hex << std::setw(2) << std::setfill('0')
-              << (uint32_t)mapped_memory[i] << ' ';
-    if ((i + 1) % 4 == 0) std::cout << " ";
-    if ((i + 1) % 8 == 0) std::cout << '\n';
-  }
+  // uint8_t *mapped_memory = reinterpret_cast<uint8_t *>(get_mapped_memory());
+  //
+  // // Note: std::cout works because write syscall, ie syscall number 64 is
+  // // handled by the exmaple
+  // std::cout << "initial mapped memory as seen in guest\n";
+  // for (uint32_t i = 0; i < 64; i++) {
+  //   std::cout << std::hex << std::setw(2) << std::setfill('0')
+  //             << (uint32_t)mapped_memory[i] << ' ';
+  //   if ((i + 1) % 4 == 0) std::cout << " ";
+  //   if ((i + 1) % 8 == 0) std::cout << '\n';
+  // }
+  //
+  // // the string to be copied into the shared memory
+  // const char *msg = "hello world, from riscv";
+  //
+  // // copy string to mapped memory
+  // std::memcpy(mapped_memory, msg, std::strlen(msg) + 1);
+  //
+  // std::cout << "mapped memory after writes as seen in guest\n";
+  // for (uint32_t i = 0; i < 64; i++) {
+  //   std::cout << std::hex << std::setw(2) << std::setfill('0')
+  //             << (uint32_t)mapped_memory[i] << ' ';
+  //   if ((i + 1) % 4 == 0) std::cout << " ";
+  //   if ((i + 1) % 8 == 0) std::cout << '\n';
+  // }
+  std::cout << fib(30) << '\n';
 
   // 0 to indicate success
   return 0;

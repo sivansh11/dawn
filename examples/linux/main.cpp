@@ -368,7 +368,8 @@ int main(int argc, char **argv) {
 
   boot_time = get_time_now_us();
   while (1) {
-    machine->step(10);
+    machine->step(1000000);
+    if (!machine->_mode) return 0;
     timer = get_time_now_us() - boot_time;
     if (timer > timercmp) {
       machine->_csr[dawn::MIP] |= (1ull << 7);  // set mtip

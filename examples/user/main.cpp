@@ -122,7 +122,7 @@ data_t* load_elf(const std::filesystem::path& path) {
   data->machine._mode   = 0b00;
 
   data->stack_top    = data->machine._reg[2];
-  data->stack_bottom = data->stack_top - (8 * 1024);
+  data->stack_bottom = data->stack_top - (4 * 1024 * 1024);
   data->heap_end     = data->heap_start;
 
   // TODO: remove magic number
@@ -257,18 +257,18 @@ int main(int argc, char** argv) {
     }
   };
 
-  uint8_t* mapped_memory = reinterpret_cast<uint8_t*>(shared_memory);
-  std::cout << "initial mapped memory as seen in host initially\n";
-  for (uint32_t i = 0; i < 64; i++) {
-    std::cout << std::hex << std::setw(2) << std::setfill('0')
-              << (uint32_t)mapped_memory[i] << ' ';
-    if ((i + 1) % 4 == 0) std::cout << " ";
-    if ((i + 1) % 8 == 0) std::cout << '\n';
-  }
+  // uint8_t* mapped_memory = reinterpret_cast<uint8_t*>(shared_memory);
+  // std::cout << "initial mapped memory as seen in host initially\n";
+  // for (uint32_t i = 0; i < 64; i++) {
+  //   std::cout << std::hex << std::setw(2) << std::setfill('0')
+  //             << (uint32_t)mapped_memory[i] << ' ';
+  //   if ((i + 1) % 4 == 0) std::cout << " ";
+  //   if ((i + 1) % 8 == 0) std::cout << '\n';
+  // }
 
   while (running) {
     // std::cout << "pc: " << std::hex << data->machine._pc << '\n';
-    data->machine.step(1);
+    data->machine.step(100000000);
     // for (uint32_t i = 0; i < 32; i++) {
     //   if (data->machine._reg[i] != 0)
     //     std::cout << "\tx" << std::dec << i << ": " << std::hex
@@ -278,13 +278,13 @@ int main(int argc, char** argv) {
     // getchar();
   }
 
-  std::cout << "initial mapped memory as seen in host at end\n";
-  for (uint32_t i = 0; i < 64; i++) {
-    std::cout << std::hex << std::setw(2) << std::setfill('0')
-              << (uint32_t)mapped_memory[i] << ' ';
-    if ((i + 1) % 4 == 0) std::cout << " ";
-    if ((i + 1) % 8 == 0) std::cout << '\n';
-  }
-
+  // std::cout << "initial mapped memory as seen in host at end\n";
+  // for (uint32_t i = 0; i < 64; i++) {
+  //   std::cout << std::hex << std::setw(2) << std::setfill('0')
+  //             << (uint32_t)mapped_memory[i] << ' ';
+  //   if ((i + 1) % 4 == 0) std::cout << " ";
+  //   if ((i + 1) % 8 == 0) std::cout << '\n';
+  // }
+  //
   return data->machine._reg[10];
 }
