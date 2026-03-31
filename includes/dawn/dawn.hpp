@@ -1919,6 +1919,7 @@ struct machine_t {
 
   _do_fence: {
     // fence not required ?
+    _memory.invalidate_caches();
     _pc += 4;
   }
     do_dispatch();
