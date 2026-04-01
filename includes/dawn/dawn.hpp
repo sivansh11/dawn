@@ -926,6 +926,7 @@ struct machine_t {
       _pc = mtvec_base;
     }
     _mode = 0b11;
+    _is_reserved = false;
 
     // generally will only happen if mtvec is not set
     if (_pc == 0) [[unlikely]] {
