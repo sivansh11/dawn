@@ -290,7 +290,6 @@ std::vector<uint8_t> generate_dtb() {
   int uart   = add_fdt_uart_node(fdt, soc);
   int clint  = add_fdt_clint_node(fdt, soc, intc);
 
-  blob.resize(fdt_totalsize(fdt));
   return blob;
 }
 
@@ -304,6 +303,8 @@ void patch_dtb(std::vector<uint8_t> &blob, uint64_t initrd_addr,
   if (fdt_setprop_cell(fdt, chosen, "linux,initrd-end",
                        initrd_addr + initrd_size))
     throw std::runtime_error("failed to set linux,initrd-end property");
+  if (fdt_pack(fdt)) throw std::runtime_error("failed to pack fdt");
+  blob.resize(fdt_totalsize(fdt));
 }
 
 typedef uint8_t *(*allocate_callback_t)(void *, uint64_t);
