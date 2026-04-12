@@ -378,7 +378,7 @@ inline page_permission_t &operator|=(page_permission_t &l,
 
 struct page_t {
   uint64_t page_number = invalid_page_number;
-  uint8_t *frame_ptr   = nullptr;
+  void    *ptr         = nullptr;
 
   inline uint64_t number() const {
     return page_number & ~page_permission_t::e_all;
@@ -416,9 +416,9 @@ struct memory_t {
     if (frame) allocated_bytes += bytes_per_page;
     return frame;
   }
-  constexpr page_t create_page(uint64_t page_number, uint8_t *frame_ptr,
+  constexpr page_t create_page(uint64_t page_number, uint8_t *ptr,
                                page_permission_t permission) {
-    page_t new_page{.page_number = page_number, .frame_ptr = frame_ptr};
+    page_t new_page{.page_number = page_number, .ptr = ptr};
     new_page.page_number |= permission;
     return new_page;
   }
@@ -465,16 +465,16 @@ struct memory_t {
 // mapped to pages as well
 
 // TODO: think if it is correct to skip checking for permission from mru page
-#define __get_page_frame_fetch(__memory, __addr, __frame_ptr)                 \
+#define __get_page_frame_fetch(__memory, __addr, __ptr)                       \
   do {                                                                        \
     uint64_t __page_number = __memory.page_number(__addr);                    \
     /* mru */                                                                 \
     if (__memory.fetch_mru_page.number() == __page_number) [[likely]] {       \
       /* if (__memory.fetch_mru_page.has_perms(page_permission_t::e_x)) */    \
       /*[[likely]]*/                                                          \
-      __frame_ptr = __memory.fetch_mru_page.frame_ptr;                        \
+      __ptr = static_cast<uint8_t *>(__memory.fetch_mru_page.ptr);            \
       /*else*/                                                                \
-      /*__frame_ptr = nullptr;*/                                              \
+      /*__ptr = nullptr;*/                                                    \
       break;                                                                  \
     }                                                                         \
     uint64_t __cache_index = __memory.cache_index(__page_number);             \
@@ -484,9 +484,9 @@ struct memory_t {
       if (__memory.fetch_direct_cache[__cache_index].has_perms(               \
               page_permission_t::e_x)) [[likely]] {                           \
         __memory.fetch_mru_page = __memory.fetch_direct_cache[__cache_index]; \
-        __frame_ptr             = __memory.fetch_mru_page.frame_ptr;          \
+        __ptr = static_cast<uint8_t *>(__memory.fetch_mru_page.ptr);          \
       } else {                                                                \
-        __frame_ptr = nullptr;                                                \
+        __ptr = nullptr;                                                      \
       }                                                                       \
       break;                                                                  \
     }                                                                         \
@@ -496,79 +496,79 @@ struct memory_t {
       if (__itr->second.has_perms(page_permission_t::e_x)) [[likely]] {       \
         __memory.fetch_mru_page                    = __itr->second;           \
         __memory.fetch_direct_cache[__cache_index] = __itr->second;           \
-        __frame_ptr = __memory.fetch_mru_page.frame_ptr;                      \
+        __ptr = static_cast<uint8_t *>(__memory.fetch_mru_page.ptr);          \
       } else {                                                                \
-        __frame_ptr = nullptr;                                                \
+        __ptr = nullptr;                                                      \
       }                                                                       \
       break;                                                                  \
     }                                                                         \
     /* allocate new page */                                                   \
     page_t __new_page = __memory.allocate_page(                               \
         __page_number, __memory.default_page_permissions);                    \
-    if (!__new_page.frame_ptr) [[unlikely]] {                                 \
-      __frame_ptr = nullptr;                                                  \
+    if (!__new_page.ptr) [[unlikely]] {                                       \
+      __ptr = nullptr;                                                        \
       break;                                                                  \
     }                                                                         \
     __memory.page_table[__page_number]         = __new_page;                  \
     __memory.fetch_direct_cache[__cache_index] = __new_page;                  \
     __memory.fetch_mru_page                    = __new_page;                  \
     if (__new_page.has_perms(page_permission_t::e_x)) [[likely]]              \
-      __frame_ptr = __new_page.frame_ptr;                                     \
+      __ptr = static_cast<uint8_t *>(__new_page.ptr);                         \
     else                                                                      \
-      __frame_ptr = nullptr;                                                  \
+      __ptr = nullptr;                                                        \
   } while (false)
 
-#define __get_page_frame(__memory, __permission, __addr, __frame_ptr)       \
-  do {                                                                      \
-    uint64_t __page_number = __memory.page_number(__addr);                  \
-    /* mru */                                                               \
-    if (__memory.mru_page.page_number == __page_number) [[likely]] {        \
-      if (__memory.mru_page.has_perms(__permission)) [[likely]]             \
-        __frame_ptr = __memory.mru_page.frame_ptr;                          \
-      else                                                                  \
-        __frame_ptr = nullptr;                                              \
-      break;                                                                \
-    }                                                                       \
-    uint64_t __cache_index = __memory.cache_index(__page_number);           \
-    /* cache */                                                             \
-    if (__memory.direct_cache[__cache_index].page_number == __page_number)  \
-        [[likely]] {                                                        \
-      if (__memory.direct_cache[__cache_index].has_perms(__permission))     \
-          [[likely]] {                                                      \
-        __memory.mru_page = __memory.direct_cache[__cache_index];           \
-        __frame_ptr       = __memory.mru_page.frame_ptr;                    \
-      } else {                                                              \
-        __frame_ptr = nullptr;                                              \
-      }                                                                     \
-      break;                                                                \
-    }                                                                       \
-    auto __itr = __memory.page_table.find(__page_number);                   \
-    /* page_table */                                                        \
-    if (__itr != __memory.page_table.end()) [[likely]] {                    \
-      if (__itr->second.has_perms(__permission)) [[likely]] {               \
-        __memory.direct_cache[__cache_index] = __itr->second;               \
-        __memory.mru_page                    = __itr->second;               \
-        __frame_ptr                          = __memory.mru_page.frame_ptr; \
-      } else {                                                              \
-        __frame_ptr = nullptr;                                              \
-      }                                                                     \
-      break;                                                                \
-    }                                                                       \
-    /* allocate new page */                                                 \
-    page_t __new_page = __memory.allocate_page(                             \
-        __page_number, __memory.default_page_permissions);                  \
-    if (!__new_page.frame_ptr) [[unlikely]] {                               \
-      __frame_ptr = nullptr;                                                \
-      break;                                                                \
-    }                                                                       \
-    if (__new_page.has_perms(__permission)) [[likely]] {                    \
-      __memory.page_table[__page_number]   = __new_page;                    \
-      __memory.direct_cache[__cache_index] = __new_page;                    \
-      __memory.mru_page                    = __new_page;                    \
-      __frame_ptr                          = __new_page.frame_ptr;          \
-    } else {                                                                \
-      __frame_ptr = nullptr;                                                \
-    }                                                                       \
+#define __get_page_frame(__memory, __permission, __addr, __ptr)            \
+  do {                                                                     \
+    uint64_t __page_number = __memory.page_number(__addr);                 \
+    /* mru */                                                              \
+    if (__memory.mru_page.page_number == __page_number) [[likely]] {       \
+      if (__memory.mru_page.has_perms(__permission)) [[likely]]            \
+        __ptr = static_cast<uint8_t *>(__memory.mru_page.ptr);             \
+      else                                                                 \
+        __ptr = nullptr;                                                   \
+      break;                                                               \
+    }                                                                      \
+    uint64_t __cache_index = __memory.cache_index(__page_number);          \
+    /* cache */                                                            \
+    if (__memory.direct_cache[__cache_index].page_number == __page_number) \
+        [[likely]] {                                                       \
+      if (__memory.direct_cache[__cache_index].has_perms(__permission))    \
+          [[likely]] {                                                     \
+        __memory.mru_page = __memory.direct_cache[__cache_index];          \
+        __ptr             = static_cast<uint8_t *>(__memory.mru_page.ptr); \
+      } else {                                                             \
+        __ptr = nullptr;                                                   \
+      }                                                                    \
+      break;                                                               \
+    }                                                                      \
+    auto __itr = __memory.page_table.find(__page_number);                  \
+    /* page_table */                                                       \
+    if (__itr != __memory.page_table.end()) [[likely]] {                   \
+      if (__itr->second.has_perms(__permission)) [[likely]] {              \
+        __memory.direct_cache[__cache_index] = __itr->second;              \
+        __memory.mru_page                    = __itr->second;              \
+        __ptr = static_cast<uint8_t *>(__memory.mru_page.ptr);             \
+      } else {                                                             \
+        __ptr = nullptr;                                                   \
+      }                                                                    \
+      break;                                                               \
+    }                                                                      \
+    /* allocate new page */                                                \
+    page_t __new_page = __memory.allocate_page(                            \
+        __page_number, __memory.default_page_permissions);                 \
+    if (!__new_page.ptr) [[unlikely]] {                                    \
+      __ptr = nullptr;                                                     \
+      break;                                                               \
+    }                                                                      \
+    if (__new_page.has_perms(__permission)) [[likely]] {                   \
+      __memory.page_table[__page_number]   = __new_page;                   \
+      __memory.direct_cache[__cache_index] = __new_page;                   \
+      __memory.mru_page                    = __new_page;                   \
+      __ptr = static_cast<uint8_t *>(__new_page.ptr);                      \
+    } else {                                                               \
+      __ptr = nullptr;                                                     \
+    }                                                                      \
   } while (false)
 
 #define __load(__type, __memory, __addr, __value)                               \
@@ -591,7 +591,7 @@ struct memory_t {
     constexpr uint64_t __type_size   = sizeof(__type);                          \
     uint64_t           __page_number = __memory.page_number(__addr);            \
     uint64_t           __offset      = __memory.page_offset(__addr);            \
-    uint8_t           *__frame_ptr;                                             \
+    uint8_t           *__ptr;                                                   \
     uint8_t           *__value_ptr = reinterpret_cast<uint8_t *>(&__value);     \
     if (__offset + __type_size > __memory.bytes_per_page) [[unlikely]] {        \
       /* straddling access */                                                   \
@@ -600,23 +600,21 @@ struct memory_t {
       uint64_t __current_addr = __addr;                                         \
       while (__remaining > 0) {                                                 \
         __get_page_frame(__memory, page_permission_t::e_r, __current_addr,      \
-                         __frame_ptr);                                          \
-        if (!__frame_ptr)                                                       \
-          do_trap(exception_code_t::e_load_access_fault, __addr);               \
+                         __ptr);                                                \
+        if (!__ptr) do_trap(exception_code_t::e_load_access_fault, __addr);     \
         uint64_t __current_offset = __memory.page_offset(__current_addr);       \
         uint64_t __chunk_size     = __memory.bytes_per_page - __current_offset; \
         if (__chunk_size > __remaining) __chunk_size = __remaining;             \
         std::memcpy(__value_ptr + (__type_size - __remaining),                  \
-                    __frame_ptr + __current_offset, __chunk_size);              \
+                    __ptr + __current_offset, __chunk_size);                    \
         __current_addr += __chunk_size;                                         \
         __remaining -= __chunk_size;                                            \
       }                                                                         \
     } else {                                                                    \
       /* single page access */                                                  \
-      __get_page_frame(__memory, page_permission_t::e_r, __addr, __frame_ptr);  \
-      if (!__frame_ptr)                                                         \
-        do_trap(exception_code_t::e_load_access_fault, __addr);                 \
-      std::memcpy(__value_ptr, __frame_ptr + __offset, __type_size);            \
+      __get_page_frame(__memory, page_permission_t::e_r, __addr, __ptr);        \
+      if (!__ptr) do_trap(exception_code_t::e_load_access_fault, __addr);       \
+      std::memcpy(__value_ptr, __ptr + __offset, __type_size);                  \
     }                                                                           \
   } while (false)
 
@@ -625,7 +623,7 @@ struct memory_t {
     constexpr uint64_t __type_size   = sizeof(__type);                          \
     uint64_t           __page_number = __memory.page_number(__addr);            \
     uint64_t           __offset      = __memory.page_offset(__addr);            \
-    uint8_t           *__frame_ptr;                                             \
+    uint8_t           *__ptr;                                                   \
     uint8_t           *__value_ptr = reinterpret_cast<uint8_t *>(&__value);     \
     if (__offset + __type_size > __memory.bytes_per_page) [[unlikely]] {        \
       /* straddling access */                                                   \
@@ -633,23 +631,21 @@ struct memory_t {
       uint64_t __remaining    = __type_size;                                    \
       uint64_t __current_addr = __addr;                                         \
       while (__remaining > 0) {                                                 \
-        __get_page_frame_fetch(__memory, __current_addr, __frame_ptr);          \
-        if (!__frame_ptr)                                                       \
-          do_trap(exception_code_t::e_load_access_fault, __addr);               \
+        __get_page_frame_fetch(__memory, __current_addr, __ptr);                \
+        if (!__ptr) do_trap(exception_code_t::e_load_access_fault, __addr);     \
         uint64_t __current_offset = __memory.page_offset(__current_addr);       \
         uint64_t __chunk_size     = __memory.bytes_per_page - __current_offset; \
         if (__chunk_size > __remaining) __chunk_size = __remaining;             \
         std::memcpy(__value_ptr + (__type_size - __remaining),                  \
-                    __frame_ptr + __current_offset, __chunk_size);              \
+                    __ptr + __current_offset, __chunk_size);                    \
         __current_addr += __chunk_size;                                         \
         __remaining -= __chunk_size;                                            \
       }                                                                         \
     } else {                                                                    \
       /* single page access */                                                  \
-      __get_page_frame_fetch(__memory, __addr, __frame_ptr);                    \
-      if (!__frame_ptr)                                                         \
-        do_trap(exception_code_t::e_load_access_fault, __addr);                 \
-      std::memcpy(__value_ptr, __frame_ptr + __offset, __type_size);            \
+      __get_page_frame_fetch(__memory, __addr, __ptr);                          \
+      if (!__ptr) do_trap(exception_code_t::e_load_access_fault, __addr);       \
+      std::memcpy(__value_ptr, __ptr + __offset, __type_size);                  \
     }                                                                           \
   } while (false)
 
@@ -673,7 +669,7 @@ struct memory_t {
     constexpr uint64_t __type_size   = sizeof(__type);                           \
     uint64_t           __page_number = __memory.page_number(__addr);             \
     uint64_t           __offset      = __memory.page_offset(__addr);             \
-    uint8_t           *__frame_ptr;                                              \
+    uint8_t           *__ptr;                                                    \
     const __type       _value      = __value;                                    \
     const uint8_t     *__value_ptr = reinterpret_cast<const uint8_t *>(&_value); \
     if (__offset + __type_size > __memory.bytes_per_page) [[unlikely]] {         \
@@ -683,8 +679,8 @@ struct memory_t {
         uint64_t __bytes_checked = 0;                                            \
         while (__bytes_checked < __type_size) {                                  \
           __get_page_frame(__memory, page_permission_t::e_w, __probe_addr,       \
-                           __frame_ptr);                                         \
-          if (!__frame_ptr) [[unlikely]]                                         \
+                           __ptr);                                               \
+          if (!__ptr) [[unlikely]]                                               \
             do_trap(exception_code_t::e_store_access_fault, __addr);             \
           uint64_t __offset = __memory.page_offset(__probe_addr);                \
           uint64_t __chunk  = __memory.bytes_per_page - __offset;                \
@@ -696,23 +692,21 @@ struct memory_t {
       uint64_t __current_addr = __addr;                                          \
       while (__remaining > 0) {                                                  \
         __get_page_frame(__memory, page_permission_t::e_w, __current_addr,       \
-                         __frame_ptr);                                           \
-        if (!__frame_ptr)                                                        \
-          do_trap(exception_code_t::e_store_access_fault, __addr);               \
+                         __ptr);                                                 \
+        if (!__ptr) do_trap(exception_code_t::e_store_access_fault, __addr);     \
         uint64_t __current_offset = __memory.page_offset(__current_addr);        \
         uint64_t __chunk_size     = __memory.bytes_per_page - __current_offset;  \
         if (__chunk_size > __remaining) __chunk_size = __remaining;              \
-        std::memcpy(__frame_ptr + __current_offset,                              \
+        std::memcpy(__ptr + __current_offset,                                    \
                     __value_ptr + (__type_size - __remaining), __chunk_size);    \
         __current_addr += __chunk_size;                                          \
         __remaining -= __chunk_size;                                             \
       }                                                                          \
     } else {                                                                     \
       /* single page access */                                                   \
-      __get_page_frame(__memory, page_permission_t::e_w, __addr, __frame_ptr);   \
-      if (!__frame_ptr)                                                          \
-        do_trap(exception_code_t::e_store_access_fault, __addr);                 \
-      std::memcpy(__frame_ptr + __offset, __value_ptr, __type_size);             \
+      __get_page_frame(__memory, page_permission_t::e_w, __addr, __ptr);         \
+      if (!__ptr) do_trap(exception_code_t::e_store_access_fault, __addr);       \
+      std::memcpy(__ptr + __offset, __value_ptr, __type_size);                   \
     }                                                                            \
   } while (false)
 
@@ -772,14 +766,14 @@ struct machine_t {
     uint64_t       current_addr = dst_addr;
     const uint8_t *src          = reinterpret_cast<const uint8_t *>(src_ptr);
     while (remaining > 0) {
-      uint8_t *frame_ptr;
-      __get_page_frame(_memory, page_permission_t::e_all, current_addr,
-                       frame_ptr);
-      if (!frame_ptr) return false;
+      void *ptr;
+      __get_page_frame(_memory, page_permission_t::e_all, current_addr, ptr);
+      if (!ptr) return false;
       uint64_t offset     = _memory.page_offset(current_addr);
       uint64_t chunk_size = _memory.bytes_per_page - offset;
       if (chunk_size > remaining) chunk_size = remaining;
-      std::memcpy(frame_ptr + offset, src + (size - remaining), chunk_size);
+      std::memcpy(static_cast<uint8_t *>(ptr) + offset,
+                  src + (size - remaining), chunk_size);
       current_addr += chunk_size;
       remaining -= chunk_size;
     }
@@ -791,14 +785,14 @@ struct machine_t {
     uint64_t current_addr = src_addr;
     uint8_t *dst          = reinterpret_cast<uint8_t *>(dst_ptr);
     while (remaining > 0) {
-      uint8_t *frame_ptr;
-      __get_page_frame(_memory, page_permission_t::e_all, current_addr,
-                       frame_ptr);
-      if (!frame_ptr) return false;
+      void *ptr;
+      __get_page_frame(_memory, page_permission_t::e_all, current_addr, ptr);
+      if (!ptr) return false;
       uint64_t offset     = _memory.page_offset(current_addr);
       uint64_t chunk_size = _memory.bytes_per_page - offset;
       if (chunk_size > remaining) chunk_size = remaining;
-      std::memcpy(dst + (size - remaining), frame_ptr + offset, chunk_size);
+      std::memcpy(dst + (size - remaining),
+                  static_cast<uint8_t *>(ptr) + offset, chunk_size);
       current_addr += chunk_size;
       remaining -= chunk_size;
     }
@@ -808,14 +802,13 @@ struct machine_t {
     uint64_t remaining    = size;
     uint64_t current_addr = addr;
     while (remaining > 0) {
-      uint8_t *frame_ptr;
-      __get_page_frame(_memory, page_permission_t::e_w, current_addr,
-                       frame_ptr);
-      if (!frame_ptr) return false;
+      void *ptr;
+      __get_page_frame(_memory, page_permission_t::e_w, current_addr, ptr);
+      if (!ptr) return false;
       uint64_t offset     = _memory.page_offset(current_addr);
       uint64_t chunk_size = _memory.bytes_per_page - offset;
       if (chunk_size > remaining) chunk_size = remaining;
-      std::memset(frame_ptr + offset, value, chunk_size);
+      std::memset(static_cast<uint8_t *>(ptr) + offset, value, chunk_size);
       current_addr += chunk_size;
       remaining -= chunk_size;
     }
@@ -832,7 +825,7 @@ struct machine_t {
       page_t   page;
       if (itr == _memory.page_table.end()) {
         page_t new_page = _memory.allocate_page(page_number, permission);
-        if (!new_page.frame_ptr) return false;
+        if (!new_page.ptr) return false;
         _memory.page_table[page_number] = new_page;
         page                            = new_page;
       } else {
@@ -841,12 +834,12 @@ struct machine_t {
         itr->second.page_number = itr->second.page_number | permission;
         page                    = itr->second;
       }
-      assert(page.frame_ptr);
+      assert(page.ptr);
       uint64_t offset     = _memory.page_offset(current_addr);
       uint64_t chunk_size = _memory.bytes_per_page - offset;
       if (chunk_size > remaining) chunk_size = remaining;
-      std::memcpy(page.frame_ptr + offset, src + (size - remaining),
-                  chunk_size);
+      std::memcpy(static_cast<uint8_t *>(page.ptr) + offset,
+                  src + (size - remaining), chunk_size);
       current_addr += chunk_size;
       remaining -= chunk_size;
     }
@@ -864,7 +857,7 @@ struct machine_t {
       page_t   page;
       if (itr == _memory.page_table.end()) {
         page_t new_page = _memory.allocate_page(page_number, permission);
-        if (!new_page.frame_ptr) return false;
+        if (!new_page.ptr) return false;
         _memory.page_table[page_number] = new_page;
         page                            = new_page;
       } else {
@@ -873,11 +866,11 @@ struct machine_t {
         itr->second.page_number = itr->second.page_number | permission;
         page                    = itr->second;
       }
-      assert(page.frame_ptr);
+      assert(page.ptr);
       uint64_t offset     = _memory.page_offset(current_addr);
       uint64_t chunk_size = _memory.bytes_per_page - offset;
       if (chunk_size > remaining) chunk_size = remaining;
-      std::memset(page.frame_ptr + offset, value, chunk_size);
+      std::memset(static_cast<uint8_t *>(page.ptr) + offset, value, chunk_size);
       current_addr += chunk_size;
       remaining -= chunk_size;
     }
@@ -925,7 +918,7 @@ struct machine_t {
     } else {
       _pc = mtvec_base;
     }
-    _mode = 0b11;
+    _mode        = 0b11;
     _is_reserved = false;
 
     // generally will only happen if mtvec is not set
@@ -952,9 +945,9 @@ struct machine_t {
     return std::nullopt;
   }
 
-  bool insert_page(uint64_t page_number, uint8_t *frame_ptr,
+  bool insert_page(uint64_t page_number, uint8_t *ptr,
                    page_permission_t permission) {
-    page_t new_page = _memory.create_page(page_number, frame_ptr, permission);
+    page_t new_page = _memory.create_page(page_number, ptr, permission);
     _memory.page_table[page_number] = new_page;
     if (_memory.mru_page.number() == page_number) {
       _memory.mru_page = new_page;
@@ -1267,11 +1260,11 @@ struct machine_t {
     int8_t   value;
     __load8i(_memory, value, addr);  // may fault
 #ifdef DAWN_ENABLE_LOGGING
-    // uint8_t *frame_ptr;
-    // __get_page_frame(_memory, addr, frame_ptr);
-    // if (!frame_ptr) throw std::runtime_error("failed to get frame ptr");
+    // uint8_t *ptr;
+    // __get_page_frame(_memory, addr, ptr);
+    // if (!ptr) throw std::runtime_error("failed to get frame ptr");
     // uint64_t offset = _memory.page_offset(addr);
-    // _log << std::hex << "addr: " << (void *)(frame_ptr + offset);
+    // _log << std::hex << "addr: " << (void *)(ptr + offset);
     // _log << "\t";
     _log << "x" << std::dec << inst.as.i_type.rd() << " <-- " << int64_t(value)
          << " <-- " << std::hex << addr << '\n';
