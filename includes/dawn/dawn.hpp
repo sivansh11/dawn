@@ -377,8 +377,8 @@ inline page_permission_t &operator|=(page_permission_t &l,
 }
 
 struct page_t {
-  uint64_t page_number = invalid_page_number;
   void    *ptr         = nullptr;
+  uint64_t page_number = invalid_page_number;
 
   inline uint64_t number() const {
     return page_number & ~page_permission_t::e_all;
@@ -418,7 +418,7 @@ struct memory_t {
   }
   constexpr page_t create_page(uint64_t page_number, uint8_t *ptr,
                                page_permission_t permission) {
-    page_t new_page{.page_number = page_number, .ptr = ptr};
+    page_t new_page{.ptr = ptr, .page_number = page_number};
     new_page.page_number |= permission;
     return new_page;
   }
