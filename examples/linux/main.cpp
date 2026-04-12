@@ -335,6 +335,7 @@ int main(int argc, char **argv) {
   machine->_pc = offset;
 
   uint64_t dtb_addr = kernel.size() + offset;
+  dtb_addr += 1024 * 1024;  // leave space for the kernel to grow
   dtb_addr += dtb_addr % 8;
   uint64_t initrd_addr = dtb_addr + dtb.size();
   initrd_addr += initrd_addr % 8;
