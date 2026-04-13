@@ -358,7 +358,7 @@ constexpr inline void mul_64x64_u(uint64_t a, uint64_t b, uint64_t result[2]) {
 static const uint64_t invalid_page_number =
     std::numeric_limits<uint64_t>::max();
 
-enum page_permission_t : uint64_t {
+enum page_metadata_t : uint64_t {
   e_none = 0,
   e_r    = static_cast<uint64_t>(1) << 63,
   e_w    = static_cast<uint64_t>(1) << 62,
@@ -373,11 +373,11 @@ enum page_permission_t : uint64_t {
   e_mask = e_r | e_w | e_x | e_m,
 };
 
-inline page_permission_t operator|(page_permission_t l, page_permission_t r) {
-  return (page_permission_t)((uint64_t)l | (uint64_t)r);
+inline page_metadata_t operator|(page_metadata_t l, page_metadata_t r) {
+  return (page_metadata_t)((uint64_t)l | (uint64_t)r);
 }
-inline page_permission_t &operator|=(page_permission_t &l,
-                                     page_permission_t  r) {
+inline page_metadata_t &operator|=(page_metadata_t &l,
+                                     page_metadata_t  r) {
   l = l | r;
   return l;
 }
@@ -420,10 +420,10 @@ struct page_t {
   uint64_t page_number = invalid_page_number;
 
   inline uint64_t number() const {
-    return page_number & ~page_permission_t::e_mask;
+    return page_number & ~page_metadata_t::e_mask;
   }
-  inline bool has_perms(const page_permission_t permission) const {
-    return page_number & permission;
+  inline bool has_perms(const page_metadata_t metadata) const {
+    return page_number & metadata;
   }
 };
 
@@ -431,14 +431,14 @@ struct memory_t {
   static const uint64_t bits_per_page = 12;
   static_assert(
       bits_per_page <= 60,
-      "bits_per_page can be 60 at most to allow for permission handling");
+      "bits_per_page can be 60 at most to allow for metadata handling");
   static const uint64_t bytes_per_page    = 1 << bits_per_page;
   static const uint64_t direct_cache_size = 32;
   const uint64_t        memory_limit_bytes;
   uint8_t *(*allocate_callback)(void *, uint64_t);
   void (*deallocate_callback)(void *, uint8_t *);
   void             *allocator_state;
-  page_permission_t default_page_permissions;
+  page_metadata_t default_page_metadata;
 
   constexpr uint64_t page_number(uint64_t addr) const {
     return addr >> bits_per_page;
@@ -456,18 +456,18 @@ struct memory_t {
     return frame;
   }
   constexpr page_t create_page(uint64_t page_number, uint8_t *ptr,
-                               page_permission_t permission) {
+                               page_metadata_t metadata) {
     page_t new_page{.ptr = ptr, .page_number = page_number};
-    new_page.page_number |= permission;
+    new_page.page_number |= metadata;
     return new_page;
   }
   constexpr page_t allocate_page(uint64_t          page_number,
-                                 page_permission_t permission) {
+                                 page_metadata_t metadata) {
     uint8_t *new_frame = allocate_frame();
     if (!new_frame) [[unlikely]] {
       return page_t{};
     }
-    return create_page(page_number, new_frame, permission);
+    return create_page(page_number, new_frame, metadata);
   }
   constexpr void invalidate_caches() {
     mru_page = fetch_mru_page = page_t{};
@@ -479,12 +479,12 @@ struct memory_t {
   memory_t(uint64_t memory_limit_bytes, void *allocator_state,
            uint8_t *(*allocate_callback)(void *, uint64_t),
            void (*deallocate_callback)(void *, uint8_t *),
-           page_permission_t default_page_permissions)
+           page_metadata_t default_page_metadata)
       : memory_limit_bytes(memory_limit_bytes),
         allocator_state(allocator_state),
         allocate_callback(allocate_callback),
         deallocate_callback(deallocate_callback),
-        default_page_permissions(default_page_permissions) {}
+        default_page_metadata(default_page_metadata) {}
 
   uint64_t allocated_bytes                       = 0;
   page_t   mru_page                              = {};
@@ -492,7 +492,7 @@ struct memory_t {
   page_t   fetch_mru_page                        = {};
   page_t   fetch_direct_cache[direct_cache_size] = {};
   // page_number -> page
-  // NOTE: the page_number inside page has permissions
+  // NOTE: the page_number inside page has metadata
   // TODO: try some faster map implementations
   std::unordered_map<uint64_t, page_t> page_table;
 };
@@ -504,7 +504,7 @@ page_t slow_get_page_fetch(memory_t &memory, uint64_t addr) {
   if (memory.fetch_direct_cache[cache_index].number() == page_number)
       [[likely]] {
     if (memory.fetch_direct_cache[cache_index].has_perms(
-            page_permission_t::e_x)) [[likely]] {
+            page_metadata_t::e_x)) [[likely]] {
       memory.fetch_mru_page = memory.fetch_direct_cache[cache_index];
       page                  = memory.fetch_mru_page;
     } else {
@@ -514,7 +514,7 @@ page_t slow_get_page_fetch(memory_t &memory, uint64_t addr) {
   }
   auto itr = memory.page_table.find(page_number);
   if (itr != memory.page_table.end()) [[likely]] {
-    if (itr->second.has_perms(page_permission_t::e_x)) [[likely]] {
+    if (itr->second.has_perms(page_metadata_t::e_x)) [[likely]] {
       memory.fetch_mru_page                  = itr->second;
       memory.fetch_direct_cache[cache_index] = itr->second;
       page                                   = memory.fetch_mru_page;
@@ -524,7 +524,7 @@ page_t slow_get_page_fetch(memory_t &memory, uint64_t addr) {
     return page;
   } /* allocate new page */
   page_t new_page =
-      memory.allocate_page(page_number, memory.default_page_permissions);
+      memory.allocate_page(page_number, memory.default_page_metadata);
   if (!new_page.ptr) [[unlikely]] {
     page = {};
     return page;
@@ -532,7 +532,7 @@ page_t slow_get_page_fetch(memory_t &memory, uint64_t addr) {
   memory.page_table[page_number]         = new_page;
   memory.fetch_direct_cache[cache_index] = new_page;
   memory.fetch_mru_page                  = new_page;
-  if (new_page.has_perms(page_permission_t::e_x)) [[likely]]
+  if (new_page.has_perms(page_metadata_t::e_x)) [[likely]]
     page = memory.fetch_mru_page;
   else
     page = {};
@@ -545,8 +545,8 @@ page_t slow_get_page_fetch(memory_t &memory, uint64_t addr) {
     /* mru */                                                              \
     if (__memory.fetch_mru_page.number() == __page_number) [[likely]] {    \
       /* Note: saving cycles, maybe dont hide ? */                         \
-      assert(__memory.fetch_mru_page.has_perms(page_permission_t::e_x));   \
-      /* if (__memory.fetch_mru_page.has_perms(page_permission_t::e_x)) */ \
+      assert(__memory.fetch_mru_page.has_perms(page_metadata_t::e_x));   \
+      /* if (__memory.fetch_mru_page.has_perms(page_metadata_t::e_x)) */ \
       /*[[likely]]*/                                                       \
       __page = __memory.fetch_mru_page;                                    \
       /*else*/                                                             \
@@ -559,13 +559,13 @@ page_t slow_get_page_fetch(memory_t &memory, uint64_t addr) {
     __page = slow_get_page_fetch(__memory, __addr);                        \
   } while (false)
 
-page_t slow_get_page(memory_t &memory, page_permission_t permission,
+page_t slow_get_page(memory_t &memory, page_metadata_t metadata,
                      uint64_t addr) {
   uint64_t page_number = memory.page_number(addr);
   uint64_t cache_index = memory.cache_index(page_number);
   page_t   page{};
   if (memory.direct_cache[cache_index].number() == page_number) [[likely]] {
-    if (memory.direct_cache[cache_index].has_perms(permission)) [[likely]] {
+    if (memory.direct_cache[cache_index].has_perms(metadata)) [[likely]] {
       memory.mru_page = memory.direct_cache[cache_index];
       page            = memory.mru_page;
     } else {
@@ -575,7 +575,7 @@ page_t slow_get_page(memory_t &memory, page_permission_t permission,
   }
   auto itr = memory.page_table.find(page_number);
   if (itr != memory.page_table.end()) [[likely]] {
-    if (itr->second.has_perms(permission)) [[likely]] {
+    if (itr->second.has_perms(metadata)) [[likely]] {
       memory.direct_cache[cache_index] = itr->second;
       memory.mru_page                  = itr->second;
       page                             = memory.mru_page;
@@ -585,12 +585,12 @@ page_t slow_get_page(memory_t &memory, page_permission_t permission,
     return page;
   } /* allocate new page */
   page_t new_page =
-      memory.allocate_page(page_number, memory.default_page_permissions);
+      memory.allocate_page(page_number, memory.default_page_metadata);
   if (!new_page.ptr) [[unlikely]] {
     page = {};
     return page;
   }
-  if (new_page.has_perms(permission)) [[likely]] {
+  if (new_page.has_perms(metadata)) [[likely]] {
     memory.page_table[page_number]   = new_page;
     memory.direct_cache[cache_index] = new_page;
     memory.mru_page                  = new_page;
@@ -600,12 +600,12 @@ page_t slow_get_page(memory_t &memory, page_permission_t permission,
   }
   return page;
 }
-#define __get_page(__memory, __permission, __addr, __page)        \
+#define __get_page(__memory, __metadata, __addr, __page)        \
   do {                                                            \
     uint64_t __page_number = __memory.page_number(__addr);        \
     /* mru */                                                     \
     if (__memory.mru_page.number() == __page_number) [[likely]] { \
-      if (__memory.mru_page.has_perms(__permission)) [[likely]]   \
+      if (__memory.mru_page.has_perms(__metadata)) [[likely]]   \
         __page = __memory.mru_page;                               \
       else                                                        \
         __page = {};                                              \
@@ -614,7 +614,7 @@ page_t slow_get_page(memory_t &memory, page_permission_t permission,
     uint64_t __cache_index = __memory.cache_index(__page_number); \
     /* cache */                                                   \
     /* page_table */                                              \
-    __page = slow_get_page(__memory, __permission, __addr);       \
+    __page = slow_get_page(__memory, __metadata, __addr);       \
   } while (false)
 
 // TODO: maybe make all load/store/fetch straddling into 1 function ?
@@ -627,7 +627,7 @@ std::pair<bool, type> load_straddling(memory_t &memory, uint64_t addr) {
   uint64_t           current_addr = addr;
   while (remaining > 0) {
     page_t page;
-    __get_page(memory, page_permission_t::e_r, current_addr, page);
+    __get_page(memory, page_metadata_t::e_r, current_addr, page);
     if (page.ptr) return {false, value};
     uint64_t current_offset = memory.page_offset(current_addr);
     uint64_t chunk_size     = memory.bytes_per_page - current_offset;
@@ -647,9 +647,9 @@ std::pair<bool, type> load_straddling(memory_t &memory, uint64_t addr) {
     uint64_t           __offset      = __memory.page_offset(__addr);          \
     page_t             __page;                                                \
     uint8_t           *__value_ptr = reinterpret_cast<uint8_t *>(&__value);   \
-    __get_page(__memory, page_permission_t::e_r, __addr, __page);             \
+    __get_page(__memory, page_metadata_t::e_r, __addr, __page);             \
     if (!__page.ptr) do_trap(exception_code_t::e_load_access_fault, __addr);  \
-    if (__page.has_perms(page_permission_t::e_m)) [[unlikely]] {              \
+    if (__page.has_perms(page_metadata_t::e_m)) [[unlikely]] {              \
       mmio_page_data_t *mmio_page_data =                                      \
           reinterpret_cast<mmio_page_data_t *>(__page.ptr);                   \
       assert(__type_size == 8); /* mmio_page_data_load64 returns 8 bytes */   \
@@ -703,8 +703,8 @@ std::pair<bool, type> fetch_straddling(memory_t &memory, uint64_t addr) {
       do_trap(exception_code_t::e_instruction_access_fault, __addr);          \
     /* Note: ignoring fetch for mmio to be more performant */                 \
     /* TODO: maybe dont ignore ? and do a guest trap ? */                     \
-    assert(!__page.has_perms(page_permission_t::e_m));                        \
-    /* if (__page.has_perms(page_permission_t::e_m)) [[unlikely]] {           \
+    assert(!__page.has_perms(page_metadata_t::e_m));                        \
+    /* if (__page.has_perms(page_metadata_t::e_m)) [[unlikely]] {           \
       mmio_page_data_t *mmio_page_data =                                      \
           reinterpret_cast<mmio_page_data_t *>(__page.ptr);                   \
       assert(__type_size == 8);                                               \
@@ -739,7 +739,7 @@ bool store_straddling(memory_t &memory, uint64_t addr, uint64_t value) {
     uint64_t probe_addr    = addr;
     uint64_t bytes_checked = 0;
     while (bytes_checked < type_size) {
-      __get_page(memory, page_permission_t::e_w, probe_addr, page);
+      __get_page(memory, page_metadata_t::e_w, probe_addr, page);
       if (!page.ptr) [[unlikely]]
         return false;
       uint64_t offset = memory.page_offset(probe_addr);
@@ -751,7 +751,7 @@ bool store_straddling(memory_t &memory, uint64_t addr, uint64_t value) {
   uint64_t remaining    = type_size;
   uint64_t current_addr = addr;
   while (remaining > 0) {
-    __get_page(memory, page_permission_t::e_w, current_addr, page);
+    __get_page(memory, page_metadata_t::e_w, current_addr, page);
     if (!page.ptr) return false;
     uint64_t current_offset = memory.page_offset(current_addr);
     uint64_t chunk_size     = memory.bytes_per_page - current_offset;
@@ -772,9 +772,9 @@ bool store_straddling(memory_t &memory, uint64_t addr, uint64_t value) {
     page_t             __page;                                                   \
     const __type       _value      = __value;                                    \
     const uint8_t     *__value_ptr = reinterpret_cast<const uint8_t *>(&_value); \
-    __get_page(__memory, page_permission_t::e_w, __addr, __page);                \
+    __get_page(__memory, page_metadata_t::e_w, __addr, __page);                \
     if (!__page.ptr) do_trap(exception_code_t::e_store_access_fault, __addr);    \
-    if (__page.has_perms(page_permission_t::e_m)) [[unlikely]] {                 \
+    if (__page.has_perms(page_metadata_t::e_m)) [[unlikely]] {                 \
       mmio_page_data_t *mmio_page_data =                                         \
           reinterpret_cast<mmio_page_data_t *>(__page.ptr);                      \
       assert(__type_size == 8); /* mmio_page_data_load64 returns 8 bytes */      \
@@ -833,9 +833,9 @@ struct machine_t {
             void *allocator_state,
             uint8_t *(*allocate_callback)(void *, uint64_t),
             void (*deallocate_callback)(void *, uint8_t *),
-            page_permission_t default_page_permissions)
+            page_metadata_t default_page_metadata)
       : _memory(ram_size, allocator_state, allocate_callback,
-                deallocate_callback, default_page_permissions),
+                deallocate_callback, default_page_metadata),
         _mmios(mmios) {
     for (const auto &mmio : mmios) {
       uint64_t start = _memory.page_number(mmio.start);
@@ -845,7 +845,7 @@ struct machine_t {
       for (; start <= stop; start++) {
         auto itr = _memory.page_table.find(start);
         if (itr == _memory.page_table.end()) {
-          page.page_number                 = start | page_permission_t::e_rwm;
+          page.page_number                 = start | page_metadata_t::e_rwm;
           mmio_page_data_t &mmio_page_data = _mmio_page_data.emplace_back();
           page.ptr                         = &mmio_page_data;
           _memory.page_table[start]        = page;
@@ -872,9 +872,9 @@ struct machine_t {
     const uint8_t *src          = reinterpret_cast<const uint8_t *>(src_ptr);
     while (remaining > 0) {
       page_t page;
-      __get_page(_memory, page_permission_t::e_mask, current_addr, page);
+      __get_page(_memory, page_metadata_t::e_mask, current_addr, page);
       if (!page.ptr) return false;
-      if (page.has_perms(page_permission_t::e_m))
+      if (page.has_perms(page_metadata_t::e_m))
         throw std::runtime_error("cannot memcpy_host_to_guest mmio");
       uint64_t offset     = _memory.page_offset(current_addr);
       uint64_t chunk_size = _memory.bytes_per_page - offset;
@@ -893,9 +893,9 @@ struct machine_t {
     uint8_t *dst          = reinterpret_cast<uint8_t *>(dst_ptr);
     while (remaining > 0) {
       page_t page;
-      __get_page(_memory, page_permission_t::e_mask, current_addr, page);
+      __get_page(_memory, page_metadata_t::e_mask, current_addr, page);
       if (!page.ptr) return false;
-      if (page.has_perms(page_permission_t::e_m))
+      if (page.has_perms(page_metadata_t::e_m))
         throw std::runtime_error("cannot memcpy_guest_to_host mmio");
       uint64_t offset     = _memory.page_offset(current_addr);
       uint64_t chunk_size = _memory.bytes_per_page - offset;
@@ -912,9 +912,9 @@ struct machine_t {
     uint64_t current_addr = addr;
     while (remaining > 0) {
       page_t page;
-      __get_page(_memory, page_permission_t::e_w, current_addr, page);
+      __get_page(_memory, page_metadata_t::e_w, current_addr, page);
       if (!page.ptr) return false;
-      if (page.has_perms(page_permission_t::e_m))
+      if (page.has_perms(page_metadata_t::e_m))
         throw std::runtime_error("cannot memset mmio");
       uint64_t offset     = _memory.page_offset(current_addr);
       uint64_t chunk_size = _memory.bytes_per_page - offset;
@@ -926,8 +926,8 @@ struct machine_t {
     return true;
   }
   inline bool insert_memory(uint64_t dst_addr, const void *src_ptr,
-                            uint64_t size, page_permission_t permission) {
-    if (permission & page_permission_t::e_m)
+                            uint64_t size, page_metadata_t metadata) {
+    if (metadata & page_metadata_t::e_m)
       throw std::runtime_error("mmio should not be a part of insert_memory");
     uint64_t       remaining    = size;
     uint64_t       current_addr = dst_addr;
@@ -937,14 +937,14 @@ struct machine_t {
       auto     itr         = _memory.page_table.find(page_number);
       page_t   page;
       if (itr == _memory.page_table.end()) {
-        page_t new_page = _memory.allocate_page(page_number, permission);
+        page_t new_page = _memory.allocate_page(page_number, metadata);
         if (!new_page.ptr) return false;
         _memory.page_table[page_number] = new_page;
         page                            = new_page;
       } else {
         itr->second.page_number =
-            itr->second.page_number & ~page_permission_t::e_mask;
-        itr->second.page_number = itr->second.page_number | permission;
+            itr->second.page_number & ~page_metadata_t::e_mask;
+        itr->second.page_number = itr->second.page_number | metadata;
         page                    = itr->second;
       }
       assert(page.ptr);
@@ -961,8 +961,8 @@ struct machine_t {
     return true;
   }
   inline bool set_memory(uint64_t dst_addr, int value, uint64_t size,
-                         page_permission_t permission) {
-    if (permission & page_permission_t::e_m)
+                         page_metadata_t metadata) {
+    if (metadata & page_metadata_t::e_m)
       throw std::runtime_error("mmio should not be a part of set_memory");
     uint64_t remaining    = size;
     uint64_t current_addr = dst_addr;
@@ -971,14 +971,14 @@ struct machine_t {
       auto     itr         = _memory.page_table.find(page_number);
       page_t   page;
       if (itr == _memory.page_table.end()) {
-        page_t new_page = _memory.allocate_page(page_number, permission);
+        page_t new_page = _memory.allocate_page(page_number, metadata);
         if (!new_page.ptr) return false;
         _memory.page_table[page_number] = new_page;
         page                            = new_page;
       } else {
         itr->second.page_number =
-            itr->second.page_number & ~page_permission_t::e_mask;
-        itr->second.page_number = itr->second.page_number | permission;
+            itr->second.page_number & ~page_metadata_t::e_mask;
+        itr->second.page_number = itr->second.page_number | metadata;
         page                    = itr->second;
       }
       assert(page.ptr);
@@ -1061,8 +1061,8 @@ struct machine_t {
   }
 
   bool insert_page(uint64_t page_number, uint8_t *ptr,
-                   page_permission_t permission) {
-    page_t new_page = _memory.create_page(page_number, ptr, permission);
+                   page_metadata_t metadata) {
+    page_t new_page = _memory.create_page(page_number, ptr, metadata);
     _memory.page_table[page_number] = new_page;
     if (_memory.mru_page.number() == page_number) {
       _memory.mru_page = new_page;
@@ -1080,8 +1080,8 @@ struct machine_t {
     return true;
   }
 
-  bool insert_new_page(uint64_t page_number, page_permission_t permission) {
-    page_t new_page = _memory.allocate_page(page_number, permission);
+  bool insert_new_page(uint64_t page_number, page_metadata_t metadata) {
+    page_t new_page = _memory.allocate_page(page_number, metadata);
     _memory.page_table[page_number] = new_page;
     if (_memory.mru_page.number() == page_number) {
       _memory.mru_page = new_page;

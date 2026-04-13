@@ -318,7 +318,7 @@ int main(int argc, char **argv) {
 
   machine =
       new dawn::machine_t(ram_size, {uart_handler, clint_handler}, nullptr,
-                          allocate, deallocate, dawn::page_permission_t::e_rwx);
+                          allocate, deallocate, dawn::page_metadata_t::e_rwx);
 
   // read kernel
   auto kernel = read_file(argv[1]);

@@ -33,7 +33,7 @@ dawn::machine_t* load_elf(const std::filesystem::path& path) {
 
   dawn::machine_t* machine = new dawn::machine_t{
       16 * 1024 * 1024, {},         nullptr,
-      allocate,         deallocate, dawn::page_permission_t::e_none};
+      allocate,         deallocate, dawn::page_metadata_t::e_none};
 
   for (uint32_t i = 0; i < reader.segments.size(); i++) {
     const ELFIO::segment* segment = reader.segments[i];
@@ -46,10 +46,10 @@ dawn::machine_t* load_elf(const std::filesystem::path& path) {
     bool              is_write        = segment->get_flags() & ELFIO::PF_W;
     bool              is_exec         = segment->get_flags() & ELFIO::PF_X;
 
-    dawn::page_permission_t permission{};
-    if (is_read) permission |= dawn::page_permission_t::e_r;
-    if (is_write) permission |= dawn::page_permission_t::e_w;
-    if (is_exec) permission |= dawn::page_permission_t::e_x;
+    dawn::page_metadata_t permission{};
+    if (is_read) permission |= dawn::page_metadata_t::e_r;
+    if (is_write) permission |= dawn::page_metadata_t::e_w;
+    if (is_exec) permission |= dawn::page_metadata_t::e_x;
 
     if (!machine->insert_memory(
             virtual_address, reinterpret_cast<const void*>(segment->get_data()),
@@ -58,7 +58,7 @@ dawn::machine_t* load_elf(const std::filesystem::path& path) {
     if (memory_size - file_size) {
       if (!machine->set_memory(virtual_address + file_size, 0,
                                memory_size - file_size,
-                               dawn::page_permission_t::e_rw))
+                               dawn::page_metadata_t::e_rw))
         return nullptr;
     }
 

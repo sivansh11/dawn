@@ -52,7 +52,7 @@ data_t* load_elf(const std::filesystem::path& path) {
                                             nullptr,
                                             allocate,
                                             deallocate,
-                                            dawn::page_permission_t::e_none}};
+                                            dawn::page_metadata_t::e_none}};
 
   for (uint32_t i = 0; i < reader.segments.size(); i++) {
     const ELFIO::segment* segment = reader.segments[i];
@@ -65,10 +65,10 @@ data_t* load_elf(const std::filesystem::path& path) {
     bool              is_write        = segment->get_flags() & ELFIO::PF_W;
     bool              is_exec         = segment->get_flags() & ELFIO::PF_X;
 
-    dawn::page_permission_t permission{};
-    if (is_read) permission |= dawn::page_permission_t::e_r;
-    if (is_write) permission |= dawn::page_permission_t::e_w;
-    if (is_exec) permission |= dawn::page_permission_t::e_x;
+    dawn::page_metadata_t permission{};
+    if (is_read) permission |= dawn::page_metadata_t::e_r;
+    if (is_write) permission |= dawn::page_metadata_t::e_w;
+    if (is_exec) permission |= dawn::page_metadata_t::e_x;
 
     if (!data->machine.insert_memory(
             virtual_address, reinterpret_cast<const void*>(segment->get_data()),
@@ -235,14 +235,14 @@ int main(int argc, char** argv) {
           uint64_t page_number = data->machine._memory.page_number(value);
           assert(!data->machine._memory.page_table.contains(page_number));
           data->machine.insert_new_page(page_number,
-                                        dawn::page_permission_t::e_rw);
+                                        dawn::page_metadata_t::e_rw);
         } else if (is_custom_shared_memory) {
           uint64_t page_number = data->machine._memory.page_number(value);
           uint64_t offset =
               (page_number * data->machine._memory.bytes_per_page) -
               data->custom_shared_memory_start;
           data->machine.insert_page(page_number, shared_memory + offset,
-                                    dawn::page_permission_t::e_rw);
+                                    dawn::page_metadata_t::e_rw);
         } else {
           std::stringstream ss;
           ss << "error at: " << std::hex << data->machine._pc << '\n';
