@@ -367,9 +367,9 @@ enum page_permission_t : uint64_t {
   e_rx   = e_r | e_x,
   // TODO: verify if I need to add e_m here as well, and any other meta data I
   // might add in future
-  e_m   = static_cast<uint64_t>(1) << 60,
-  e_rwm = e_rw | e_m,
-  e_rwx = e_r | e_w | e_x,
+  e_m    = static_cast<uint64_t>(1) << 60,
+  e_rwm  = e_rw | e_m,
+  e_rwx  = e_r | e_w | e_x,
   e_mask = e_r | e_w | e_x | e_m,
 };
 
@@ -497,203 +497,272 @@ struct memory_t {
   std::unordered_map<uint64_t, page_t> page_table;
 };
 
-// TODO (general): consider only aggressive inlining hot paths, slow paths can
-// be a function call, this way instruction cache will be under less pressure.
+page_t slow_get_page_fetch(memory_t &memory, uint64_t addr) {
+  uint64_t page_number = memory.page_number(addr);
+  uint64_t cache_index = memory.cache_index(page_number);
+  page_t   page{};
+  if (memory.fetch_direct_cache[cache_index].number() == page_number)
+      [[likely]] {
+    if (memory.fetch_direct_cache[cache_index].has_perms(
+            page_permission_t::e_x)) [[likely]] {
+      memory.fetch_mru_page = memory.fetch_direct_cache[cache_index];
+      page                  = memory.fetch_mru_page;
+    } else {
+      page = {};
+    }
+    return page;
+  }
+  auto itr = memory.page_table.find(page_number);
+  if (itr != memory.page_table.end()) [[likely]] {
+    if (itr->second.has_perms(page_permission_t::e_x)) [[likely]] {
+      memory.fetch_mru_page                  = itr->second;
+      memory.fetch_direct_cache[cache_index] = itr->second;
+      page                                   = memory.fetch_mru_page;
+    } else {
+      page = {};
+    }
+    return page;
+  } /* allocate new page */
+  page_t new_page =
+      memory.allocate_page(page_number, memory.default_page_permissions);
+  if (!new_page.ptr) [[unlikely]] {
+    page = {};
+    return page;
+  }
+  memory.page_table[page_number]         = new_page;
+  memory.fetch_direct_cache[cache_index] = new_page;
+  memory.fetch_mru_page                  = new_page;
+  if (new_page.has_perms(page_permission_t::e_x)) [[likely]]
+    page = memory.fetch_mru_page;
+  else
+    page = {};
+  return page;
+}
 
-#define __get_page_fetch(__memory, __addr, __page)                            \
+#define __get_page_fetch(__memory, __addr, __page)                         \
+  do {                                                                     \
+    uint64_t __page_number = __memory.page_number(__addr);                 \
+    /* mru */                                                              \
+    if (__memory.fetch_mru_page.number() == __page_number) [[likely]] {    \
+      /* Note: saving cycles, maybe dont hide ? */                         \
+      assert(__memory.fetch_mru_page.has_perms(page_permission_t::e_x));   \
+      /* if (__memory.fetch_mru_page.has_perms(page_permission_t::e_x)) */ \
+      /*[[likely]]*/                                                       \
+      __page = __memory.fetch_mru_page;                                    \
+      /*else*/                                                             \
+      /*__page = {};*/                                                     \
+      break;                                                               \
+    }                                                                      \
+    uint64_t __cache_index = __memory.cache_index(__page_number);          \
+    /* cache */                                                            \
+    /* page_table */                                                       \
+    __page = slow_get_page_fetch(__memory, __addr);                        \
+  } while (false)
+
+page_t slow_get_page(memory_t &memory, page_permission_t permission,
+                     uint64_t addr) {
+  uint64_t page_number = memory.page_number(addr);
+  uint64_t cache_index = memory.cache_index(page_number);
+  page_t   page{};
+  if (memory.direct_cache[cache_index].number() == page_number) [[likely]] {
+    if (memory.direct_cache[cache_index].has_perms(permission)) [[likely]] {
+      memory.mru_page = memory.direct_cache[cache_index];
+      page            = memory.mru_page;
+    } else {
+      page = {};
+    }
+    return page;
+  }
+  auto itr = memory.page_table.find(page_number);
+  if (itr != memory.page_table.end()) [[likely]] {
+    if (itr->second.has_perms(permission)) [[likely]] {
+      memory.direct_cache[cache_index] = itr->second;
+      memory.mru_page                  = itr->second;
+      page                             = memory.mru_page;
+    } else {
+      page = {};
+    }
+    return page;
+  } /* allocate new page */
+  page_t new_page =
+      memory.allocate_page(page_number, memory.default_page_permissions);
+  if (!new_page.ptr) [[unlikely]] {
+    page = {};
+    return page;
+  }
+  if (new_page.has_perms(permission)) [[likely]] {
+    memory.page_table[page_number]   = new_page;
+    memory.direct_cache[cache_index] = new_page;
+    memory.mru_page                  = new_page;
+    page                             = memory.mru_page;
+  } else {
+    page = {};
+  }
+  return page;
+}
+#define __get_page(__memory, __permission, __addr, __page)        \
+  do {                                                            \
+    uint64_t __page_number = __memory.page_number(__addr);        \
+    /* mru */                                                     \
+    if (__memory.mru_page.number() == __page_number) [[likely]] { \
+      if (__memory.mru_page.has_perms(__permission)) [[likely]]   \
+        __page = __memory.mru_page;                               \
+      else                                                        \
+        __page = {};                                              \
+      break;                                                      \
+    }                                                             \
+    uint64_t __cache_index = __memory.cache_index(__page_number); \
+    /* cache */                                                   \
+    /* page_table */                                              \
+    __page = slow_get_page(__memory, __permission, __addr);       \
+  } while (false)
+
+// TODO: maybe make all load/store/fetch straddling into 1 function ?
+template <typename type>
+std::pair<bool, type> load_straddling(memory_t &memory, uint64_t addr) {
+  type               value        = 0;
+  uint8_t           *value_ptr    = reinterpret_cast<uint8_t *>(&value);
+  constexpr uint64_t type_size    = sizeof(type);
+  uint64_t           remaining    = type_size;
+  uint64_t           current_addr = addr;
+  while (remaining > 0) {
+    page_t page;
+    __get_page(memory, page_permission_t::e_r, current_addr, page);
+    if (page.ptr) return {false, value};
+    uint64_t current_offset = memory.page_offset(current_addr);
+    uint64_t chunk_size     = memory.bytes_per_page - current_offset;
+    if (chunk_size > remaining) chunk_size = remaining;
+    std::memcpy(value_ptr + (type_size - remaining),
+                static_cast<uint8_t *>(page.ptr) + current_offset, chunk_size);
+    current_addr += chunk_size;
+    remaining -= chunk_size;
+  }
+  return {true, value};
+}
+
+#define __load(__type, __memory, __addr, __value)                             \
   do {                                                                        \
-    uint64_t __page_number = __memory.page_number(__addr);                    \
-    /* mru */                                                                 \
-    if (__memory.fetch_mru_page.number() == __page_number) [[likely]] {       \
-      /* Note: saving cycles, maybe dont hide ? */                            \
-      assert(__memory.fetch_mru_page.has_perms(page_permission_t::e_x));      \
-      /* if (__memory.fetch_mru_page.has_perms(page_permission_t::e_x)) */    \
-      /*[[likely]]*/                                                          \
-      __page = __memory.fetch_mru_page;                                       \
-      /*else*/                                                                \
-      /*__page = {};*/                                                        \
-      break;                                                                  \
-    }                                                                         \
-    uint64_t __cache_index = __memory.cache_index(__page_number);             \
-    /* cache */                                                               \
-    if (__memory.fetch_direct_cache[__cache_index].number() == __page_number) \
-        [[likely]] {                                                          \
-      if (__memory.fetch_direct_cache[__cache_index].has_perms(               \
-              page_permission_t::e_x)) [[likely]] {                           \
-        __memory.fetch_mru_page = __memory.fetch_direct_cache[__cache_index]; \
-        __page                  = __memory.fetch_mru_page;                    \
-      } else {                                                                \
-        __page = {};                                                          \
+    constexpr uint64_t __type_size   = sizeof(__type);                        \
+    uint64_t           __page_number = __memory.page_number(__addr);          \
+    uint64_t           __offset      = __memory.page_offset(__addr);          \
+    page_t             __page;                                                \
+    uint8_t           *__value_ptr = reinterpret_cast<uint8_t *>(&__value);   \
+    __get_page(__memory, page_permission_t::e_r, __addr, __page);             \
+    if (!__page.ptr) do_trap(exception_code_t::e_load_access_fault, __addr);  \
+    if (__page.has_perms(page_permission_t::e_m)) [[unlikely]] {              \
+      mmio_page_data_t *mmio_page_data =                                      \
+          reinterpret_cast<mmio_page_data_t *>(__page.ptr);                   \
+      assert(__type_size == 8); /* mmio_page_data_load64 returns 8 bytes */   \
+      __value = mmio_page_data_load64(*mmio_page_data, __addr);               \
+    } else if (__offset + __type_size > __memory.bytes_per_page)              \
+        [[unlikely]] {                                                        \
+      /* straddling access */                                                 \
+      auto __straddling_result = load_straddling<__type>(__memory, __addr);   \
+      if (!__straddling_result.first) {                                       \
+        do_trap(exception_code_t::e_load_access_fault, __addr);               \
       }                                                                       \
-      break;                                                                  \
+      __value = __straddling_result.second;                                   \
+    } else {                                                                  \
+      /* single page access */                                                \
+      std::memcpy(__value_ptr, static_cast<uint8_t *>(__page.ptr) + __offset, \
+                  __type_size);                                               \
     }                                                                         \
-    auto __itr = __memory.page_table.find(__page_number);                     \
-    /* page_table */                                                          \
-    if (__itr != __memory.page_table.end()) [[likely]] {                      \
-      if (__itr->second.has_perms(page_permission_t::e_x)) [[likely]] {       \
-        __memory.fetch_mru_page                    = __itr->second;           \
-        __memory.fetch_direct_cache[__cache_index] = __itr->second;           \
-        __page                                     = __memory.fetch_mru_page; \
-      } else {                                                                \
-        __page = {};                                                          \
+  } while (false)
+
+template <typename type>
+std::pair<bool, type> fetch_straddling(memory_t &memory, uint64_t addr) {
+  type               value        = 0;
+  uint8_t           *value_ptr    = reinterpret_cast<uint8_t *>(&value);
+  constexpr uint64_t type_size    = sizeof(type);
+  uint64_t           remaining    = type_size;
+  uint64_t           current_addr = addr;
+  while (remaining > 0) {
+    page_t page;
+    __get_page_fetch(memory, current_addr, page);
+    if (page.ptr) return {false, value};
+    uint64_t current_offset = memory.page_offset(current_addr);
+    uint64_t chunk_size     = memory.bytes_per_page - current_offset;
+    if (chunk_size > remaining) chunk_size = remaining;
+    std::memcpy(value_ptr + (type_size - remaining),
+                static_cast<uint8_t *>(page.ptr) + current_offset, chunk_size);
+    current_addr += chunk_size;
+    remaining -= chunk_size;
+  }
+  return {true, value};
+}
+
+#define __fetch(__type, __memory, __addr, __value)                            \
+  do {                                                                        \
+    constexpr uint64_t __type_size   = sizeof(__type);                        \
+    uint64_t           __page_number = __memory.page_number(__addr);          \
+    uint64_t           __offset      = __memory.page_offset(__addr);          \
+    page_t             __page;                                                \
+    uint8_t           *__value_ptr = reinterpret_cast<uint8_t *>(&__value);   \
+    __get_page_fetch(__memory, __addr, __page);                               \
+    if (!__page.ptr)                                                          \
+      do_trap(exception_code_t::e_instruction_access_fault, __addr);          \
+    /* Note: ignoring fetch for mmio to be more performant */                 \
+    /* TODO: maybe dont ignore ? and do a guest trap ? */                     \
+    assert(!__page.has_perms(page_permission_t::e_m));                        \
+    /* if (__page.has_perms(page_permission_t::e_m)) [[unlikely]] {           \
+      mmio_page_data_t *mmio_page_data =                                      \
+          reinterpret_cast<mmio_page_data_t *>(__page.ptr);                   \
+      assert(__type_size == 8);                                               \
+      __value = static_cast<__type>(                                          \
+          mmio_page_data_load64(*mmio_page_data, __addr));                    \
+    } else */                                                                 \
+    /* TODO: test without straddling accesses, I dont think this is possible  \
+     */                                                                       \
+    if (__offset + __type_size > __memory.bytes_per_page) [[unlikely]] {      \
+      /* straddling access */                                                 \
+      auto __straddling_result = fetch_straddling<__type>(__memory, __addr);  \
+      if (!__straddling_result.first) {                                       \
+        do_trap(exception_code_t::e_instruction_access_fault, __addr);        \
       }                                                                       \
-      break;                                                                  \
+      __value = __straddling_result.second;                                   \
+    } else {                                                                  \
+      /* single page access */                                                \
+      std::memcpy(__value_ptr, static_cast<uint8_t *>(__page.ptr) + __offset, \
+                  __type_size);                                               \
     }                                                                         \
-    /* allocate new page */                                                   \
-    page_t __new_page = __memory.allocate_page(                               \
-        __page_number, __memory.default_page_permissions);                    \
-    if (!__new_page.ptr) [[unlikely]] {                                       \
-      __page = {};                                                            \
-      break;                                                                  \
-    }                                                                         \
-    __memory.page_table[__page_number]         = __new_page;                  \
-    __memory.fetch_direct_cache[__cache_index] = __new_page;                  \
-    __memory.fetch_mru_page                    = __new_page;                  \
-    if (__new_page.has_perms(page_permission_t::e_x)) [[likely]]              \
-      __page = __memory.fetch_mru_page;                                       \
-    else                                                                      \
-      __page = {};                                                            \
   } while (false)
 
-#define __get_page(__memory, __permission, __addr, __page)              \
-  do {                                                                  \
-    uint64_t __page_number = __memory.page_number(__addr);              \
-    /* mru */                                                           \
-    if (__memory.mru_page.number() == __page_number) [[likely]] {       \
-      if (__memory.mru_page.has_perms(__permission)) [[likely]]         \
-        __page = __memory.mru_page;                                     \
-      else                                                              \
-        __page = {};                                                    \
-      break;                                                            \
-    }                                                                   \
-    uint64_t __cache_index = __memory.cache_index(__page_number);       \
-    /* cache */                                                         \
-    if (__memory.direct_cache[__cache_index].number() == __page_number) \
-        [[likely]] {                                                    \
-      if (__memory.direct_cache[__cache_index].has_perms(__permission)) \
-          [[likely]] {                                                  \
-        __memory.mru_page = __memory.direct_cache[__cache_index];       \
-        __page            = __memory.mru_page;                          \
-      } else {                                                          \
-        __page = {};                                                    \
-      }                                                                 \
-      break;                                                            \
-    }                                                                   \
-    auto __itr = __memory.page_table.find(__page_number);               \
-    /* page_table */                                                    \
-    if (__itr != __memory.page_table.end()) [[likely]] {                \
-      if (__itr->second.has_perms(__permission)) [[likely]] {           \
-        __memory.direct_cache[__cache_index] = __itr->second;           \
-        __memory.mru_page                    = __itr->second;           \
-        __page                               = __memory.mru_page;       \
-      } else {                                                          \
-        __page = {};                                                    \
-      }                                                                 \
-      break;                                                            \
-    }                                                                   \
-    /* allocate new page */                                             \
-    page_t __new_page = __memory.allocate_page(                         \
-        __page_number, __memory.default_page_permissions);              \
-    if (!__new_page.ptr) [[unlikely]] {                                 \
-      __page = {};                                                      \
-      break;                                                            \
-    }                                                                   \
-    if (__new_page.has_perms(__permission)) [[likely]] {                \
-      __memory.page_table[__page_number]   = __new_page;                \
-      __memory.direct_cache[__cache_index] = __new_page;                \
-      __memory.mru_page                    = __new_page;                \
-      __page                               = __memory.mru_page;         \
-    } else {                                                            \
-      __page = {};                                                      \
-    }                                                                   \
-  } while (false)
-
-#define __load(__type, __memory, __addr, __value)                               \
-  do {                                                                          \
-    constexpr uint64_t __type_size   = sizeof(__type);                          \
-    uint64_t           __page_number = __memory.page_number(__addr);            \
-    uint64_t           __offset      = __memory.page_offset(__addr);            \
-    page_t             __page;                                                  \
-    uint8_t           *__value_ptr = reinterpret_cast<uint8_t *>(&__value);     \
-    __get_page(__memory, page_permission_t::e_r, __addr, __page);               \
-    if (!__page.ptr) do_trap(exception_code_t::e_load_access_fault, __addr);    \
-    if (__page.has_perms(page_permission_t::e_m)) [[unlikely]] {                \
-      mmio_page_data_t *mmio_page_data =                                        \
-          reinterpret_cast<mmio_page_data_t *>(__page.ptr);                     \
-      assert(__type_size == 8); /* mmio_page_data_load64 returns 8 bytes */     \
-      __value = mmio_page_data_load64(*mmio_page_data, __addr);                 \
-    } else if (__offset + __type_size > __memory.bytes_per_page)                \
-        [[unlikely]] {                                                          \
-      /* straddling access */                                                   \
-      __value                 = 0;                                              \
-      uint64_t __remaining    = __type_size;                                    \
-      uint64_t __current_addr = __addr;                                         \
-      while (__remaining > 0) {                                                 \
-        __get_page(__memory, page_permission_t::e_r, __current_addr, __page);   \
-        if (!__page.ptr)                                                        \
-          do_trap(exception_code_t::e_load_access_fault, __addr);               \
-        uint64_t __current_offset = __memory.page_offset(__current_addr);       \
-        uint64_t __chunk_size     = __memory.bytes_per_page - __current_offset; \
-        if (__chunk_size > __remaining) __chunk_size = __remaining;             \
-        std::memcpy(__value_ptr + (__type_size - __remaining),                  \
-                    static_cast<uint8_t *>(__page.ptr) + __current_offset,      \
-                    __chunk_size);                                              \
-        __current_addr += __chunk_size;                                         \
-        __remaining -= __chunk_size;                                            \
-      }                                                                         \
-    } else {                                                                    \
-      /* single page access */                                                  \
-      std::memcpy(__value_ptr, static_cast<uint8_t *>(__page.ptr) + __offset,   \
-                  __type_size);                                                 \
-    }                                                                           \
-  } while (false)
-
-#define __fetch(__type, __memory, __addr, __value)                              \
-  do {                                                                          \
-    constexpr uint64_t __type_size   = sizeof(__type);                          \
-    uint64_t           __page_number = __memory.page_number(__addr);            \
-    uint64_t           __offset      = __memory.page_offset(__addr);            \
-    page_t             __page;                                                  \
-    uint8_t           *__value_ptr = reinterpret_cast<uint8_t *>(&__value);     \
-    __get_page_fetch(__memory, __addr, __page);                                 \
-    if (!__page.ptr)                                                            \
-      do_trap(exception_code_t::e_instruction_access_fault, __addr);            \
-    /* Note: ignoring fetch for mmio to be more performant */                   \
-    /* TODO: maybe dont ignore ? and do a guest trap ? */                       \
-    assert(!__page.has_perms(page_permission_t::e_m));                          \
-    /* if (__page.has_perms(page_permission_t::e_m)) [[unlikely]] {             \
-      mmio_page_data_t *mmio_page_data =                                        \
-          reinterpret_cast<mmio_page_data_t *>(__page.ptr);                     \
-      assert(__type_size == 8);                                                 \
-      __value = static_cast<__type>(                                            \
-          mmio_page_data_load64(*mmio_page_data, __addr));                      \
-    } else */                                                                   \
-    /* TODO: test without straddling accesses, I dont think this is possible    \
-     */                                                                         \
-    if (__offset + __type_size > __memory.bytes_per_page) [[unlikely]] {        \
-      /* straddling access */                                                   \
-      __value                 = 0;                                              \
-      uint64_t __remaining    = __type_size;                                    \
-      uint64_t __current_addr = __addr;                                         \
-      while (__remaining > 0) {                                                 \
-        __get_page_fetch(__memory, __current_addr, __page);                     \
-        if (!__page.ptr)                                                        \
-          do_trap(exception_code_t::e_instruction_access_fault, __addr);        \
-        uint64_t __current_offset = __memory.page_offset(__current_addr);       \
-        uint64_t __chunk_size     = __memory.bytes_per_page - __current_offset; \
-        if (__chunk_size > __remaining) __chunk_size = __remaining;             \
-        std::memcpy(__value_ptr + (__type_size - __remaining),                  \
-                    static_cast<uint8_t *>(__page.ptr) + __current_offset,      \
-                    __chunk_size);                                              \
-        __current_addr += __chunk_size;                                         \
-        __remaining -= __chunk_size;                                            \
-      }                                                                         \
-    } else {                                                                    \
-      /* single page access */                                                  \
-      std::memcpy(__value_ptr, static_cast<uint8_t *>(__page.ptr) + __offset,   \
-                  __type_size);                                                 \
-    }                                                                           \
-  } while (false)
+template <typename type>
+bool store_straddling(memory_t &memory, uint64_t addr, uint64_t value) {
+  constexpr uint64_t type_size   = sizeof(type);
+  uint64_t           page_number = memory.page_number(addr);
+  uint64_t           offset      = memory.page_offset(addr);
+  page_t             page;
+  const type         _value    = value;
+  const uint8_t     *value_ptr = reinterpret_cast<const uint8_t *>(&_value);
+  {
+    uint64_t probe_addr    = addr;
+    uint64_t bytes_checked = 0;
+    while (bytes_checked < type_size) {
+      __get_page(memory, page_permission_t::e_w, probe_addr, page);
+      if (!page.ptr) [[unlikely]]
+        return false;
+      uint64_t offset = memory.page_offset(probe_addr);
+      uint64_t chunk  = memory.bytes_per_page - offset;
+      bytes_checked += chunk;
+      probe_addr += chunk;
+    }
+  }
+  uint64_t remaining    = type_size;
+  uint64_t current_addr = addr;
+  while (remaining > 0) {
+    __get_page(memory, page_permission_t::e_w, current_addr, page);
+    if (!page.ptr) return false;
+    uint64_t current_offset = memory.page_offset(current_addr);
+    uint64_t chunk_size     = memory.bytes_per_page - current_offset;
+    if (chunk_size > remaining) chunk_size = remaining;
+    std::memcpy(static_cast<uint8_t *>(page.ptr) + current_offset,
+                value_ptr + (type_size - remaining), chunk_size);
+    current_addr += chunk_size;
+    remaining -= chunk_size;
+  }
+  return true;
+}
 
 #define __store(__type, __memory, __addr, __value)                               \
   do {                                                                           \
@@ -713,32 +782,10 @@ struct memory_t {
     } else if (__offset + __type_size > __memory.bytes_per_page)                 \
         [[unlikely]] {                                                           \
       /* straddling access */                                                    \
-      {                                                                          \
-        uint64_t __probe_addr    = __addr;                                       \
-        uint64_t __bytes_checked = 0;                                            \
-        while (__bytes_checked < __type_size) {                                  \
-          __get_page(__memory, page_permission_t::e_w, __probe_addr, __page);    \
-          if (!__page.ptr) [[unlikely]]                                          \
-            do_trap(exception_code_t::e_store_access_fault, __addr);             \
-          uint64_t __offset = __memory.page_offset(__probe_addr);                \
-          uint64_t __chunk  = __memory.bytes_per_page - __offset;                \
-          __bytes_checked += __chunk;                                            \
-          __probe_addr += __chunk;                                               \
-        }                                                                        \
-      }                                                                          \
-      uint64_t __remaining    = __type_size;                                     \
-      uint64_t __current_addr = __addr;                                          \
-      while (__remaining > 0) {                                                  \
-        __get_page(__memory, page_permission_t::e_w, __current_addr, __page);    \
-        if (!__page.ptr)                                                         \
-          do_trap(exception_code_t::e_store_access_fault, __addr);               \
-        uint64_t __current_offset = __memory.page_offset(__current_addr);        \
-        uint64_t __chunk_size     = __memory.bytes_per_page - __current_offset;  \
-        if (__chunk_size > __remaining) __chunk_size = __remaining;              \
-        std::memcpy(static_cast<uint8_t *>(__page.ptr) + __current_offset,       \
-                    __value_ptr + (__type_size - __remaining), __chunk_size);    \
-        __current_addr += __chunk_size;                                          \
-        __remaining -= __chunk_size;                                             \
+      auto __should_trap =                                                       \
+          store_straddling<__type>(__memory, __addr, __value);                   \
+      if (!__should_trap) {                                                      \
+        do_trap(exception_code_t::e_instruction_access_fault, __addr);           \
       }                                                                          \
     } else {                                                                     \
       /* single page access */                                                   \
