@@ -376,8 +376,7 @@ enum page_metadata_t : uint64_t {
 inline page_metadata_t operator|(page_metadata_t l, page_metadata_t r) {
   return (page_metadata_t)((uint64_t)l | (uint64_t)r);
 }
-inline page_metadata_t &operator|=(page_metadata_t &l,
-                                     page_metadata_t  r) {
+inline page_metadata_t &operator|=(page_metadata_t &l, page_metadata_t r) {
   l = l | r;
   return l;
 }
@@ -437,7 +436,7 @@ struct memory_t {
   const uint64_t        memory_limit_bytes;
   uint8_t *(*allocate_callback)(void *, uint64_t);
   void (*deallocate_callback)(void *, uint8_t *);
-  void             *allocator_state;
+  void           *allocator_state;
   page_metadata_t default_page_metadata;
 
   constexpr uint64_t page_number(uint64_t addr) const {
@@ -461,7 +460,7 @@ struct memory_t {
     new_page.page_number |= metadata;
     return new_page;
   }
-  constexpr page_t allocate_page(uint64_t          page_number,
+  constexpr page_t allocate_page(uint64_t        page_number,
                                  page_metadata_t metadata) {
     uint8_t *new_frame = allocate_frame();
     if (!new_frame) [[unlikely]] {
@@ -503,8 +502,8 @@ page_t slow_get_page_fetch(memory_t &memory, uint64_t addr) {
   page_t   page{};
   if (memory.fetch_direct_cache[cache_index].number() == page_number)
       [[likely]] {
-    if (memory.fetch_direct_cache[cache_index].has_perms(
-            page_metadata_t::e_x)) [[likely]] {
+    if (memory.fetch_direct_cache[cache_index].has_perms(page_metadata_t::e_x))
+        [[likely]] {
       memory.fetch_mru_page = memory.fetch_direct_cache[cache_index];
       page                  = memory.fetch_mru_page;
     } else {
@@ -539,24 +538,24 @@ page_t slow_get_page_fetch(memory_t &memory, uint64_t addr) {
   return page;
 }
 
-#define __get_page_fetch(__memory, __addr, __page)                         \
-  do {                                                                     \
-    uint64_t __page_number = __memory.page_number(__addr);                 \
-    /* mru */                                                              \
-    if (__memory.fetch_mru_page.number() == __page_number) [[likely]] {    \
-      /* Note: saving cycles, maybe dont hide ? */                         \
+#define __get_page_fetch(__memory, __addr, __page)                       \
+  do {                                                                   \
+    uint64_t __page_number = __memory.page_number(__addr);               \
+    /* mru */                                                            \
+    if (__memory.fetch_mru_page.number() == __page_number) [[likely]] {  \
+      /* Note: saving cycles, maybe dont hide ? */                       \
       assert(__memory.fetch_mru_page.has_perms(page_metadata_t::e_x));   \
       /* if (__memory.fetch_mru_page.has_perms(page_metadata_t::e_x)) */ \
-      /*[[likely]]*/                                                       \
-      __page = __memory.fetch_mru_page;                                    \
-      /*else*/                                                             \
-      /*__page = {};*/                                                     \
-      break;                                                               \
-    }                                                                      \
-    uint64_t __cache_index = __memory.cache_index(__page_number);          \
-    /* cache */                                                            \
-    /* page_table */                                                       \
-    __page = slow_get_page_fetch(__memory, __addr);                        \
+      /*[[likely]]*/                                                     \
+      __page = __memory.fetch_mru_page;                                  \
+      /*else*/                                                           \
+      /*__page = {};*/                                                   \
+      break;                                                             \
+    }                                                                    \
+    uint64_t __cache_index = __memory.cache_index(__page_number);        \
+    /* cache */                                                          \
+    /* page_table */                                                     \
+    __page = slow_get_page_fetch(__memory, __addr);                      \
   } while (false)
 
 page_t slow_get_page(memory_t &memory, page_metadata_t metadata,
@@ -600,12 +599,12 @@ page_t slow_get_page(memory_t &memory, page_metadata_t metadata,
   }
   return page;
 }
-#define __get_page(__memory, __metadata, __addr, __page)        \
+#define __get_page(__memory, __metadata, __addr, __page)          \
   do {                                                            \
     uint64_t __page_number = __memory.page_number(__addr);        \
     /* mru */                                                     \
     if (__memory.mru_page.number() == __page_number) [[likely]] { \
-      if (__memory.mru_page.has_perms(__metadata)) [[likely]]   \
+      if (__memory.mru_page.has_perms(__metadata)) [[likely]]     \
         __page = __memory.mru_page;                               \
       else                                                        \
         __page = {};                                              \
@@ -614,7 +613,7 @@ page_t slow_get_page(memory_t &memory, page_metadata_t metadata,
     uint64_t __cache_index = __memory.cache_index(__page_number); \
     /* cache */                                                   \
     /* page_table */                                              \
-    __page = slow_get_page(__memory, __metadata, __addr);       \
+    __page = slow_get_page(__memory, __metadata, __addr);         \
   } while (false)
 
 // TODO: maybe make all load/store/fetch straddling into 1 function ?
@@ -647,9 +646,9 @@ std::pair<bool, type> load_straddling(memory_t &memory, uint64_t addr) {
     uint64_t           __offset      = __memory.page_offset(__addr);          \
     page_t             __page;                                                \
     uint8_t           *__value_ptr = reinterpret_cast<uint8_t *>(&__value);   \
-    __get_page(__memory, page_metadata_t::e_r, __addr, __page);             \
+    __get_page(__memory, page_metadata_t::e_r, __addr, __page);               \
     if (!__page.ptr) do_trap(exception_code_t::e_load_access_fault, __addr);  \
-    if (__page.has_perms(page_metadata_t::e_m)) [[unlikely]] {              \
+    if (__page.has_perms(page_metadata_t::e_m)) [[unlikely]] {                \
       mmio_page_data_t *mmio_page_data =                                      \
           reinterpret_cast<mmio_page_data_t *>(__page.ptr);                   \
       assert(__type_size == 8); /* mmio_page_data_load64 returns 8 bytes */   \
@@ -703,8 +702,8 @@ std::pair<bool, type> fetch_straddling(memory_t &memory, uint64_t addr) {
       do_trap(exception_code_t::e_instruction_access_fault, __addr);          \
     /* Note: ignoring fetch for mmio to be more performant */                 \
     /* TODO: maybe dont ignore ? and do a guest trap ? */                     \
-    assert(!__page.has_perms(page_metadata_t::e_m));                        \
-    /* if (__page.has_perms(page_metadata_t::e_m)) [[unlikely]] {           \
+    assert(!__page.has_perms(page_metadata_t::e_m));                          \
+    /* if (__page.has_perms(page_metadata_t::e_m)) [[unlikely]] {             \
       mmio_page_data_t *mmio_page_data =                                      \
           reinterpret_cast<mmio_page_data_t *>(__page.ptr);                   \
       assert(__type_size == 8);                                               \
@@ -772,9 +771,9 @@ bool store_straddling(memory_t &memory, uint64_t addr, uint64_t value) {
     page_t             __page;                                                   \
     const __type       _value      = __value;                                    \
     const uint8_t     *__value_ptr = reinterpret_cast<const uint8_t *>(&_value); \
-    __get_page(__memory, page_metadata_t::e_w, __addr, __page);                \
+    __get_page(__memory, page_metadata_t::e_w, __addr, __page);                  \
     if (!__page.ptr) do_trap(exception_code_t::e_store_access_fault, __addr);    \
-    if (__page.has_perms(page_metadata_t::e_m)) [[unlikely]] {                 \
+    if (__page.has_perms(page_metadata_t::e_m)) [[unlikely]] {                   \
       mmio_page_data_t *mmio_page_data =                                         \
           reinterpret_cast<mmio_page_data_t *>(__page.ptr);                      \
       assert(__type_size == 8); /* mmio_page_data_load64 returns 8 bytes */      \
@@ -785,7 +784,7 @@ bool store_straddling(memory_t &memory, uint64_t addr, uint64_t value) {
       auto __should_trap =                                                       \
           store_straddling<__type>(__memory, __addr, __value);                   \
       if (!__should_trap) {                                                      \
-        do_trap(exception_code_t::e_instruction_access_fault, __addr);           \
+        do_trap(exception_code_t::e_store_access_fault, __addr);                 \
       }                                                                          \
     } else {                                                                     \
       /* single page access */                                                   \
@@ -1099,6 +1098,13 @@ struct machine_t {
     return true;
   }
 
+  struct cached_instruction_t {
+    void    *label;
+    uint32_t instruction;
+    uint32_t tag_number;  // Note: should be 64 - 12 = 48 bits, but shouldnt be
+                          // a problem ?
+  };
+
   inline uint64_t step(uint64_t n) {
     static void *dispatch_table[256] = {nullptr};
 
@@ -1176,24 +1182,47 @@ struct machine_t {
       register_instr(0b01011, 0b011, _do_atomic_d);
     }
 
-    uint32_t      _inst;
-    instruction_t inst;
+    uint32_t           _inst;
+    instruction_t      inst;
+    constexpr uint64_t cached_instruction_mask = (1ull << 32) - 1;
 
     // f f f o o o o o (f is func3, o is op)
     // note, we ignore the first 2 bits of op since we dont implement compressed
     // instructions
-#define dispatch()                                                         \
-  do {                                                                     \
-    if (_wfi) [[unlikely]]                                                 \
-      return n;                                                            \
-    _reg[0] = 0;                                                           \
-    if (n-- == 0) [[unlikely]]                                             \
-      return 0;                                                            \
-    __fetch32(_memory, _inst, _pc);                                        \
-    const uint32_t dispatch_index = extract_bit_range(_inst, 2, 7) |       \
-                                    extract_bit_range(_inst, 12, 15) << 5; \
-    reinterpret_cast<uint32_t &>(inst) = _inst;                            \
-    goto *dispatch_table[dispatch_index];                                  \
+#define dispatch()                                                           \
+  do {                                                                       \
+    if (_wfi) [[unlikely]]                                                   \
+      return n;                                                              \
+    _reg[0] = 0;                                                             \
+    if (n-- == 0) [[unlikely]]                                               \
+      return 0;                                                              \
+    uint32_t cached_instruction_index =                                      \
+        (_pc >> 2) & (_num_instruction_cache - 1);                           \
+    if (_cached_instructions[cached_instruction_index].tag_number ==         \
+        ((_pc >> _bits_per_instruction_cache) & cached_instruction_mask))    \
+        [[likely]] {                                                         \
+      _inst = _cached_instructions[cached_instruction_index].instruction;    \
+      reinterpret_cast<uint32_t &>(inst) = _inst;                            \
+      goto *_cached_instructions[cached_instruction_index].label;            \
+    } else {                                                                 \
+      __fetch32(_memory, _inst, _pc);                                        \
+      const uint32_t dispatch_index = extract_bit_range(_inst, 2, 7) |       \
+                                      extract_bit_range(_inst, 12, 15) << 5; \
+      _cached_instructions[cached_instruction_index].instruction = _inst;    \
+      _cached_instructions[cached_instruction_index].label =                 \
+          dispatch_table[dispatch_index];                                    \
+      _cached_instructions[cached_instruction_index].tag_number =            \
+          (_pc >> _bits_per_instruction_cache) & cached_instruction_mask;    \
+      reinterpret_cast<uint32_t &>(inst) = _inst;                            \
+      goto *_cached_instructions[cached_instruction_index].label;            \
+    }                                                                        \
+    /* TODO: write a macro to disable and enable instruction cache           \
+      __fetch32(_memory, _inst, _pc);                                        \
+      const uint32_t dispatch_index = extract_bit_range(_inst, 2, 7) |       \
+                                      extract_bit_range(_inst, 12, 15) << 5; \
+      reinterpret_cast<uint32_t &>(inst) = _inst;                            \
+      goto *dispatch_table[dispatch_index];                                  \
+      */                                                                     \
   } while (false)
 
 #ifdef DAWN_ENABLE_LOGGING
@@ -2029,6 +2058,7 @@ struct machine_t {
   _do_fence: {
     // fence not required ?
     _memory.invalidate_caches();
+    std::memset(_cached_instructions, 0xff, sizeof(_cached_instructions));
     _pc += 4;
   }
     do_dispatch();
@@ -2593,6 +2623,11 @@ struct machine_t {
   // uint8_t     *_data;
   // uint64_t     _offset{};
   // uint8_t     *_final{};
+
+  static const uint64_t _bits_per_instruction_cache = 12;
+  static const uint64_t _num_instruction_cache      = 1
+                                                 << _bits_per_instruction_cache;
+  cached_instruction_t _cached_instructions[_num_instruction_cache];
 
   const std::vector<mmio_handler_t> _mmios;
   std::list<mmio_page_data_t>       _mmio_page_data;
