@@ -14,6 +14,7 @@
 #include <libfdt.h>
 #include <libfdt_env.h>
 
+// #define DAWN_RISCV64
 #include "dawn/dawn.hpp"
 
 std::string to_hex_string(uint64_t val) { return std::format("{:#x}", val); }
@@ -69,13 +70,14 @@ int read_kbbyte() {
 
 static dawn::machine_t *machine;
 
-static const uint64_t             uart_mmio_start    = 0x10000000;
-static const uint64_t             uart_mmio_stop     = 0x10000100;
+static const dawn::register_t     uart_mmio_start    = 0x10000000;
+static const dawn::register_t     uart_mmio_stop     = 0x10000100;
 static const uint64_t             timebase_frequency = 1000000;
 static const dawn::mmio_handler_t uart_handler{
     .start = uart_mmio_start,
     .stop  = uart_mmio_stop,
-    .load = [](const dawn::mmio_handler_t *handler, uint64_t addr) -> uint64_t {
+    .load  = [](const dawn::mmio_handler_t *handler,
+               dawn::register_t            addr) -> dawn::register_t {
       if (addr == uart_mmio_start && is_kbhit()) {  // data
         return read_kbbyte();
       } else if (addr == uart_mmio_start + 0x5) {  // status
@@ -84,22 +86,24 @@ static const dawn::mmio_handler_t uart_handler{
       return 0;
     },
     .store =
-        [](const dawn::mmio_handler_t *handler, uint64_t addr, uint64_t value) {
+        [](const dawn::mmio_handler_t *handler, dawn::register_t addr,
+           dawn::register_t value) {
           if (addr == uart_mmio_start) {  // data
             printf("%c", (int)value);
             fflush(stdout);
           }
         }};
 
-static uint64_t                timercmp         = 0;
-static uint64_t                timer            = 0;
-static uint64_t                boot_time        = 0;
-constexpr uint64_t             clint_mmio_start = 0x11000000;
-constexpr uint64_t             clint_mmio_stop  = 0x11010000;
+static dawn::register_t        timercmp         = 0;
+static dawn::register_t        timer            = 0;
+static dawn::register_t        boot_time        = 0;
+constexpr dawn::register_t     clint_mmio_start = 0x11000000;
+constexpr dawn::register_t     clint_mmio_stop  = 0x11010000;
 constexpr dawn::mmio_handler_t clint_handler{
     .start = clint_mmio_start,
     .stop  = clint_mmio_stop,
-    .load = [](const dawn::mmio_handler_t *handler, uint64_t addr) -> uint64_t {
+    .load  = [](const dawn::mmio_handler_t *handler,
+               dawn::register_t            addr) -> dawn::register_t {
       if (addr == clint_mmio_start) {  // msip
         return (machine->read_csr(dawn::MIP) >> 3) & 1;
       } else if (addr == clint_mmio_start + 0x4000) {  // mtimercmp
@@ -110,7 +114,8 @@ constexpr dawn::mmio_handler_t clint_handler{
       return 0;
     },
     .store =
-        [](const dawn::mmio_handler_t *handler, uint64_t addr, uint64_t value) {
+        [](const dawn::mmio_handler_t *handler, dawn::register_t addr,
+           dawn::register_t value) {
           if (addr == clint_mmio_start) {  // msip
             if (value & 1)
               machine->_csr[dawn::MIP] |= (1ull << 3);
@@ -193,8 +198,14 @@ int add_fdt_cpu_node(void *fdt, int cpus) {
     throw std::runtime_error("failed to set cpu status property");
   if (fdt_setprop_string(fdt, cpu0, "compatible", "riscv"))
     throw std::runtime_error("failed to set cpu compatible property");
+
+#ifdef DAWN_RISCV64
   if (fdt_setprop_string(fdt, cpu0, "riscv,isa", "rv64ima"))
+#else
+  if (fdt_setprop_string(fdt, cpu0, "riscv,isa", "rv32ima"))
+#endif
     throw std::runtime_error("failed to set cpu riscv,isa property");
+
   if (fdt_setprop_string(fdt, cpu0, "mmu-type", "riscv,none"))
     throw std::runtime_error("failed to set cpu mmu-type property");
   return cpu0;

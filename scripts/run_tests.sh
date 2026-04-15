@@ -17,7 +17,7 @@ if [ ! -d "tests/riscv-tests/" ]; then
     exit 1
   fi
   cd tests/riscv-tests
-  ./configure --prefix=$RISCV/target
+  ./configure --prefix=$RISCV/target --with-xlen=64 --with-xlen=32 
   make
   cd ../..
 fi

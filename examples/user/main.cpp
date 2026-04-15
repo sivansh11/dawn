@@ -118,7 +118,7 @@ data_t* load_elf(const std::filesystem::path& path) {
     assert(data->heap_start != 0);
   }
   data->machine._pc     = reader.get_entry();
-  data->machine._reg[2] = std::numeric_limits<uint64_t>::max() - 15;
+  data->machine._reg[2] = std::numeric_limits<dawn::register_t>::max() - 15;
   data->machine._mode   = 0b00;
 
   data->stack_top    = data->machine._reg[2];

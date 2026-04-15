@@ -96,7 +96,7 @@ dawn::machine_t* load_elf(const std::filesystem::path& path) {
   //   assert(state._heap_address != 0);
   // }
   machine->_pc     = reader.get_entry();
-  machine->_reg[2] = std::numeric_limits<uint64_t>::max() - 15;
+  machine->_reg[2] = std::numeric_limits<dawn::register_t>::max() - 15;
   machine->_mode   = 0b00;
 
   return machine;
