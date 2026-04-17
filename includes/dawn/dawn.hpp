@@ -454,7 +454,7 @@ struct memory_t {
   const register_t        memory_limit_bytes;
   uint8_t *(*allocate_callback)(void *, uint64_t);
   void (*deallocate_callback)(void *, uint8_t *);
-  void           *allocator_state;
+  void           *user_state;
   page_metadata_t default_page_metadata;
 
   constexpr register_t page_number(register_t addr) const {
@@ -468,7 +468,7 @@ struct memory_t {
   }
   constexpr uint8_t *allocate_frame() {
     if (allocated_bytes + bytes_per_page > memory_limit_bytes) return nullptr;
-    uint8_t *frame = allocate_callback(allocator_state, bytes_per_page);
+    uint8_t *frame = allocate_callback(user_state, bytes_per_page);
     if (frame) allocated_bytes += bytes_per_page;
     return frame;
   }
@@ -493,12 +493,12 @@ struct memory_t {
     }
   }
 
-  memory_t(register_t memory_limit_bytes, void *allocator_state,
+  memory_t(register_t memory_limit_bytes, void *user_state,
            uint8_t *(*allocate_callback)(void *, uint64_t),
            void (*deallocate_callback)(void *, uint8_t *),
            page_metadata_t default_page_metadata)
       : memory_limit_bytes(memory_limit_bytes),
-        allocator_state(allocator_state),
+        user_state(user_state),
         allocate_callback(allocate_callback),
         deallocate_callback(deallocate_callback),
         default_page_metadata(default_page_metadata) {}
@@ -861,12 +861,11 @@ typedef void (*trap_callback_t)(void *, exception_code_t cause,
 template <size_t direct_cache_size, size_t bits_per_page>
 struct machine_t {
   machine_t(size_t ram_size, const std::vector<mmio_handler_t> mmios,
-            void *allocator_state,
-            uint8_t *(*allocate_callback)(void *, uint64_t),
+            void *user_state, uint8_t *(*allocate_callback)(void *, uint64_t),
             void (*deallocate_callback)(void *, uint8_t *),
             page_metadata_t default_page_metadata)
-      : _memory(ram_size, allocator_state, allocate_callback,
-                deallocate_callback, default_page_metadata),
+      : _memory(ram_size, user_state, allocate_callback, deallocate_callback,
+                default_page_metadata),
         _mmios(mmios) {
     for (const auto &mmio : mmios) {
       register_t start = _memory.page_number(mmio.start);
