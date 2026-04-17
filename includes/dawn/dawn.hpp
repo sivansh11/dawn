@@ -444,14 +444,13 @@ struct page_t {
   }
 };
 
+template <size_t __direct_cache_size = 32, size_t __bits_per_page = 12>
 struct memory_t {
-  // TODO: make this configurable
-  static const register_t bits_per_page = 12;
+  static const register_t bits_per_page = __bits_per_page;
   static_assert(bits_per_page <= sizeof(register_t) * 8 - 4,
                 "bits_per_page needs enough space for metadata handling");
-  static const register_t bytes_per_page = 1 << bits_per_page;
-  // TODO: make this configurable
-  static const register_t direct_cache_size = 32;
+  static const register_t bytes_per_page    = 1 << bits_per_page;
+  const register_t        direct_cache_size = __direct_cache_size;
   const register_t        memory_limit_bytes;
   uint8_t *(*allocate_callback)(void *, uint64_t);
   void (*deallocate_callback)(void *, uint8_t *);
@@ -504,18 +503,20 @@ struct memory_t {
         deallocate_callback(deallocate_callback),
         default_page_metadata(default_page_metadata) {}
 
-  register_t allocated_bytes                       = 0;
-  page_t     mru_page                              = {};
-  page_t     direct_cache[direct_cache_size]       = {};
-  page_t     fetch_mru_page                        = {};
-  page_t     fetch_direct_cache[direct_cache_size] = {};
+  register_t allocated_bytes                         = 0;
+  page_t     mru_page                                = {};
+  page_t     direct_cache[__direct_cache_size]       = {};
+  page_t     fetch_mru_page                          = {};
+  page_t     fetch_direct_cache[__direct_cache_size] = {};
   // page_number -> page
   // NOTE: the page_number inside page has metadata
   // TODO: try some faster map implementations
   std::unordered_map<register_t, page_t> page_table;
 };
 
-page_t slow_get_page_fetch(memory_t &memory, register_t addr) {
+template <size_t direct_cache_size, size_t bits_per_page>
+page_t slow_get_page_fetch(memory_t<direct_cache_size, bits_per_page> &memory,
+                           register_t                                  addr) {
   register_t page_number = memory.page_number(addr);
   register_t cache_index = memory.cache_index(page_number);
   page_t     page{};
@@ -577,8 +578,9 @@ page_t slow_get_page_fetch(memory_t &memory, register_t addr) {
     __page = slow_get_page_fetch(__memory, __addr);                      \
   } while (false)
 
-page_t slow_get_page(memory_t &memory, page_metadata_t metadata,
-                     register_t addr) {
+template <size_t direct_cache_size, size_t bits_per_page>
+page_t slow_get_page(memory_t<direct_cache_size, bits_per_page> &memory,
+                     page_metadata_t metadata, register_t addr) {
   register_t page_number = memory.page_number(addr);
   register_t cache_index = memory.cache_index(page_number);
   page_t     page{};
@@ -636,8 +638,9 @@ page_t slow_get_page(memory_t &memory, page_metadata_t metadata,
   } while (false)
 
 // TODO: maybe make all load/store/fetch straddling into 1 function ?
-template <typename type>
-std::pair<bool, type> load_straddling(memory_t &memory, register_t addr) {
+template <typename type, size_t direct_cache_size, size_t bits_per_page>
+std::pair<bool, type> load_straddling(
+    memory_t<direct_cache_size, bits_per_page> &memory, register_t addr) {
   type                 value        = 0;
   uint8_t             *value_ptr    = reinterpret_cast<uint8_t *>(&value);
   constexpr register_t type_size    = sizeof(type);
@@ -687,8 +690,9 @@ std::pair<bool, type> load_straddling(memory_t &memory, register_t addr) {
     }                                                                         \
   } while (false)
 
-template <typename type>
-std::pair<bool, type> fetch_straddling(memory_t &memory, register_t addr) {
+template <typename type, size_t direct_cache_size, size_t bits_per_page>
+std::pair<bool, type> fetch_straddling(
+    memory_t<direct_cache_size, bits_per_page> &memory, register_t addr) {
   type                 value        = 0;
   uint8_t             *value_ptr    = reinterpret_cast<uint8_t *>(&value);
   constexpr register_t type_size    = sizeof(type);
@@ -745,8 +749,9 @@ std::pair<bool, type> fetch_straddling(memory_t &memory, register_t addr) {
     }                                                                         \
   } while (false)
 
-template <typename type>
-bool store_straddling(memory_t &memory, register_t addr, register_t value) {
+template <typename type, size_t direct_cache_size, size_t bits_per_page>
+bool store_straddling(memory_t<direct_cache_size, bits_per_page> &memory,
+                      register_t addr, register_t value) {
   constexpr register_t type_size   = sizeof(type);
   register_t           page_number = memory.page_number(addr);
   register_t           offset      = memory.page_offset(addr);
@@ -853,6 +858,7 @@ typedef void (*trap_callback_t)(void *, exception_code_t cause,
 
 // TODO: accurate runtime memory bounds checking (account for size of
 // load/store)
+template <size_t direct_cache_size, size_t bits_per_page>
 struct machine_t {
   machine_t(size_t ram_size, const std::vector<mmio_handler_t> mmios,
             void *allocator_state,
@@ -2690,7 +2696,7 @@ struct machine_t {
   }
 
   // memory
-  memory_t _memory;
+  memory_t<direct_cache_size, bits_per_page> _memory;
   // const size_t _ram_size;
   // uint8_t     *_data;
   // uint64_t     _offset{};

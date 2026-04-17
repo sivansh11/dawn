@@ -13,7 +13,7 @@
 uint8_t* allocate(void*, uint64_t size) { return new uint8_t[size]; }
 void     deallocate(void*, uint8_t* ptr) { delete[] ptr; }
 
-dawn::machine_t* load_elf(const std::filesystem::path& path) {
+dawn::machine_t<32, 12>* load_elf(const std::filesystem::path& path) {
   ELFIO::elfio reader;
   if (!reader.load(path)) return nullptr;
 
@@ -31,7 +31,7 @@ dawn::machine_t* load_elf(const std::filesystem::path& path) {
     guest_max  = std::max(guest_max, virtual_address + memory_size);
   }
 
-  dawn::machine_t* machine = new dawn::machine_t{
+  dawn::machine_t<32, 12>* machine = new dawn::machine_t<32, 12>{
       16 * 1024 * 1024, {},         nullptr,
       allocate,         deallocate, dawn::page_metadata_t::e_none};
 
@@ -104,7 +104,8 @@ dawn::machine_t* load_elf(const std::filesystem::path& path) {
 
 void trap_callback(void* usr_data, dawn::exception_code_t cause,
                    uint64_t value) {
-  dawn::machine_t* machine = reinterpret_cast<dawn::machine_t*>(usr_data);
+  dawn::machine_t<32, 12>* machine =
+      reinterpret_cast<dawn::machine_t<32, 12>*>(usr_data);
   switch (cause) {
     case dawn::exception_code_t::e_ecall_u_mode:
       switch (machine->_reg[17]) {
@@ -141,7 +142,7 @@ int main(int argc, char** argv) {
     return -1;
   }
 
-  dawn::machine_t* machine = load_elf(argv[1]);
+  dawn::machine_t<32, 12>* machine = load_elf(argv[1]);
   if (!machine) return -1;  // TODO: throw
 
   machine->_trap_callback = trap_callback;

@@ -18,13 +18,13 @@ uint8_t* allocate(void*, uint64_t size) { return new uint8_t[size]; }
 void     deallocate(void*, uint8_t* ptr) { delete[] ptr; }
 
 struct data_t {
-  dawn::machine_t machine;
-  uint64_t        heap_start;
-  uint64_t        heap_end;
-  uint64_t        stack_top;
-  uint64_t        stack_bottom;
-  uint64_t        custom_shared_memory_start;
-  uint64_t        custom_shared_memory_end;
+  dawn::machine_t<32, 12> machine;
+  uint64_t                heap_start;
+  uint64_t                heap_end;
+  uint64_t                stack_top;
+  uint64_t                stack_bottom;
+  uint64_t                custom_shared_memory_start;
+  uint64_t                custom_shared_memory_end;
   std::unordered_map<uint64_t, std::function<void(data_t*)>> syscall_callbacks;
 };
 
@@ -46,13 +46,13 @@ data_t* load_elf(const std::filesystem::path& path) {
     guest_max  = std::max(guest_max, virtual_address + memory_size);
   }
 
-  data_t* data =
-      new data_t{.machine = dawn::machine_t{16 * 1024 * 1024,
-                                            {},
-                                            nullptr,
-                                            allocate,
-                                            deallocate,
-                                            dawn::page_metadata_t::e_none}};
+  data_t* data = new data_t{
+      .machine = dawn::machine_t<32, 12>{16 * 1024 * 1024,
+                                         {},
+                                         nullptr,
+                                         allocate,
+                                         deallocate,
+                                         dawn::page_metadata_t::e_none}};
 
   for (uint32_t i = 0; i < reader.segments.size(); i++) {
     const ELFIO::segment* segment = reader.segments[i];
@@ -176,7 +176,7 @@ int main(int argc, char** argv) {
 
   // exit
   data->syscall_callbacks[93] = [&running](data_t* data) {
-    running = false;
+    running            = false;
     data->machine._wfi = true;
     // exit(data->machine._reg[10]);
   };

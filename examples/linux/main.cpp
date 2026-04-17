@@ -14,7 +14,7 @@
 #include <libfdt.h>
 #include <libfdt_env.h>
 
-// #define DAWN_RISCV64
+#define DAWN_RISCV64
 #include "dawn/dawn.hpp"
 
 std::string to_hex_string(uint64_t val) { return std::format("{:#x}", val); }
@@ -68,7 +68,7 @@ int read_kbbyte() {
     return -1;
 }
 
-static dawn::machine_t *machine;
+static dawn::machine_t<32, 12> *machine;
 
 static const dawn::register_t     uart_mmio_start    = 0x10000000;
 static const dawn::register_t     uart_mmio_stop     = 0x10000100;
@@ -327,9 +327,9 @@ void     deallocate(void *, uint8_t *ptr) { delete[] ptr; }
 int main(int argc, char **argv) {
   if (argc != 3) throw std::runtime_error("[dem] [Image] [initrd]");
 
-  machine =
-      new dawn::machine_t(ram_size, {uart_handler, clint_handler}, nullptr,
-                          allocate, deallocate, dawn::page_metadata_t::e_rwx);
+  machine = new dawn::machine_t<32, 12>(ram_size, {uart_handler, clint_handler},
+                                        nullptr, allocate, deallocate,
+                                        dawn::page_metadata_t::e_rwx);
 
   // read kernel
   auto kernel = read_file(argv[1]);
