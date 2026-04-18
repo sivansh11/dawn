@@ -443,7 +443,7 @@ struct page_t {
   inline register_t number() const {
     return page_number & ~page_metadata_t::e_mask;
   }
-  inline bool has_perms(const page_metadata_t metadata) const {
+  inline bool has_metadata(const page_metadata_t metadata) const {
     return page_number & metadata;
   }
 };
@@ -526,8 +526,8 @@ page_t slow_get_page_fetch(memory_t<direct_cache_size, bits_per_page> &memory,
   page_t     page{};
   if (memory.fetch_direct_cache[cache_index].number() == page_number)
       [[likely]] {
-    if (memory.fetch_direct_cache[cache_index].has_perms(page_metadata_t::e_x))
-        [[likely]] {
+    if (memory.fetch_direct_cache[cache_index].has_metadata(
+            page_metadata_t::e_x)) [[likely]] {
       memory.fetch_mru_page = memory.fetch_direct_cache[cache_index];
       page                  = memory.fetch_mru_page;
     } else {
@@ -537,7 +537,7 @@ page_t slow_get_page_fetch(memory_t<direct_cache_size, bits_per_page> &memory,
   }
   auto itr = memory.page_table.find(page_number);
   if (itr != memory.page_table.end()) [[likely]] {
-    if (itr->second.has_perms(page_metadata_t::e_x)) [[likely]] {
+    if (itr->second.has_metadata(page_metadata_t::e_x)) [[likely]] {
       memory.fetch_mru_page                  = itr->second;
       memory.fetch_direct_cache[cache_index] = itr->second;
       page                                   = memory.fetch_mru_page;
@@ -555,31 +555,31 @@ page_t slow_get_page_fetch(memory_t<direct_cache_size, bits_per_page> &memory,
   memory.page_table[page_number]         = new_page;
   memory.fetch_direct_cache[cache_index] = new_page;
   memory.fetch_mru_page                  = new_page;
-  if (new_page.has_perms(page_metadata_t::e_x)) [[likely]]
+  if (new_page.has_metadata(page_metadata_t::e_x)) [[likely]]
     page = memory.fetch_mru_page;
   else
     page = {};
   return page;
 }
 
-#define __get_page_fetch(__memory, __addr, __page)                       \
-  do {                                                                   \
-    register_t __page_number = __memory.page_number(__addr);             \
-    /* mru */                                                            \
-    if (__memory.fetch_mru_page.number() == __page_number) [[likely]] {  \
-      /* Note: saving cycles, maybe dont hide ? */                       \
-      assert(__memory.fetch_mru_page.has_perms(page_metadata_t::e_x));   \
-      /* if (__memory.fetch_mru_page.has_perms(page_metadata_t::e_x)) */ \
-      /*[[likely]]*/                                                     \
-      __page = __memory.fetch_mru_page;                                  \
-      /*else*/                                                           \
-      /*__page = {};*/                                                   \
-      break;                                                             \
-    }                                                                    \
-    register_t __cache_index = __memory.cache_index(__page_number);      \
-    /* cache */                                                          \
-    /* page_table */                                                     \
-    __page = slow_get_page_fetch(__memory, __addr);                      \
+#define __get_page_fetch(__memory, __addr, __page)                          \
+  do {                                                                      \
+    register_t __page_number = __memory.page_number(__addr);                \
+    /* mru */                                                               \
+    if (__memory.fetch_mru_page.number() == __page_number) [[likely]] {     \
+      /* Note: saving cycles, maybe dont hide ? */                          \
+      assert(__memory.fetch_mru_page.has_metadata(page_metadata_t::e_x));   \
+      /* if (__memory.fetch_mru_page.has_metadata(page_metadata_t::e_x)) */ \
+      /*[[likely]]*/                                                        \
+      __page = __memory.fetch_mru_page;                                     \
+      /*else*/                                                              \
+      /*__page = {};*/                                                      \
+      break;                                                                \
+    }                                                                       \
+    register_t __cache_index = __memory.cache_index(__page_number);         \
+    /* cache */                                                             \
+    /* page_table */                                                        \
+    __page = slow_get_page_fetch(__memory, __addr);                         \
   } while (false)
 
 template <size_t direct_cache_size, size_t bits_per_page>
@@ -589,7 +589,7 @@ page_t slow_get_page(memory_t<direct_cache_size, bits_per_page> &memory,
   register_t cache_index = memory.cache_index(page_number);
   page_t     page{};
   if (memory.direct_cache[cache_index].number() == page_number) [[likely]] {
-    if (memory.direct_cache[cache_index].has_perms(metadata)) [[likely]] {
+    if (memory.direct_cache[cache_index].has_metadata(metadata)) [[likely]] {
       memory.mru_page = memory.direct_cache[cache_index];
       page            = memory.mru_page;
     } else {
@@ -599,7 +599,7 @@ page_t slow_get_page(memory_t<direct_cache_size, bits_per_page> &memory,
   }
   auto itr = memory.page_table.find(page_number);
   if (itr != memory.page_table.end()) [[likely]] {
-    if (itr->second.has_perms(metadata)) [[likely]] {
+    if (itr->second.has_metadata(metadata)) [[likely]] {
       memory.direct_cache[cache_index] = itr->second;
       memory.mru_page                  = itr->second;
       page                             = memory.mru_page;
@@ -614,7 +614,7 @@ page_t slow_get_page(memory_t<direct_cache_size, bits_per_page> &memory,
     page = {};
     return page;
   }
-  if (new_page.has_perms(metadata)) [[likely]] {
+  if (new_page.has_metadata(metadata)) [[likely]] {
     memory.page_table[page_number]   = new_page;
     memory.direct_cache[cache_index] = new_page;
     memory.mru_page                  = new_page;
@@ -629,7 +629,7 @@ page_t slow_get_page(memory_t<direct_cache_size, bits_per_page> &memory,
     register_t __page_number = __memory.page_number(__addr);        \
     /* mru */                                                       \
     if (__memory.mru_page.number() == __page_number) [[likely]] {   \
-      if (__memory.mru_page.has_perms(__metadata)) [[likely]]       \
+      if (__memory.mru_page.has_metadata(__metadata)) [[likely]]    \
         __page = __memory.mru_page;                                 \
       else                                                          \
         __page = {};                                                \
@@ -674,7 +674,7 @@ std::pair<bool, type> load_straddling(
     uint8_t             *__value_ptr = reinterpret_cast<uint8_t *>(&__value); \
     __get_page(__memory, page_metadata_t::e_r, __addr, __page);               \
     if (!__page.ptr) do_trap(exception_code_t::e_load_access_fault, __addr);  \
-    if (__page.has_perms(page_metadata_t::e_m)) [[unlikely]] {                \
+    if (__page.has_metadata(page_metadata_t::e_m)) [[unlikely]] {             \
       mmio_page_data_t *mmio_page_data =                                      \
           reinterpret_cast<mmio_page_data_t *>(__page.ptr);                   \
       assert(__type_size == sizeof(register_t));                              \
@@ -729,8 +729,8 @@ std::pair<bool, type> fetch_straddling(
       do_trap(exception_code_t::e_instruction_access_fault, __addr);          \
     /* Note: ignoring fetch for mmio to be more performant */                 \
     /* TODO: maybe dont ignore ? and do a guest trap ? */                     \
-    assert(!__page.has_perms(page_metadata_t::e_m));                          \
-    /* if (__page.has_perms(page_metadata_t::e_m)) [[unlikely]] {             \
+    assert(!__page.has_metadata(page_metadata_t::e_m));                       \
+    /* if (__page.has_metadata(page_metadata_t::e_m)) [[unlikely]] {          \
       mmio_page_data_t *mmio_page_data =                                      \
           reinterpret_cast<mmio_page_data_t *>(__page.ptr);                   \
       assert(__type_size == 8);                                               \
@@ -801,7 +801,7 @@ bool store_straddling(memory_t<direct_cache_size, bits_per_page> &memory,
     const uint8_t *__value_ptr  = reinterpret_cast<const uint8_t *>(&_value); \
     __get_page(__memory, page_metadata_t::e_w, __addr, __page);               \
     if (!__page.ptr) do_trap(exception_code_t::e_store_access_fault, __addr); \
-    if (__page.has_perms(page_metadata_t::e_m)) [[unlikely]] {                \
+    if (__page.has_metadata(page_metadata_t::e_m)) [[unlikely]] {             \
       mmio_page_data_t *mmio_page_data =                                      \
           reinterpret_cast<mmio_page_data_t *>(__page.ptr);                   \
       assert(__type_size == sizeof(register_t));                              \
@@ -910,7 +910,7 @@ struct machine_t {
       page_t page;
       __get_page(_memory, page_metadata_t::e_mask, current_addr, page);
       if (!page.ptr) return false;
-      if (page.has_perms(page_metadata_t::e_m))
+      if (page.has_metadata(page_metadata_t::e_m))
         throw std::runtime_error("cannot memcpy_host_to_guest mmio");
       register_t offset     = _memory.page_offset(current_addr);
       register_t chunk_size = _memory.bytes_per_page - offset;
@@ -931,7 +931,7 @@ struct machine_t {
       page_t page;
       __get_page(_memory, page_metadata_t::e_mask, current_addr, page);
       if (!page.ptr) return false;
-      if (page.has_perms(page_metadata_t::e_m))
+      if (page.has_metadata(page_metadata_t::e_m))
         throw std::runtime_error("cannot memcpy_guest_to_host mmio");
       register_t offset     = _memory.page_offset(current_addr);
       register_t chunk_size = _memory.bytes_per_page - offset;
@@ -950,7 +950,7 @@ struct machine_t {
       page_t page;
       __get_page(_memory, page_metadata_t::e_w, current_addr, page);
       if (!page.ptr) return false;
-      if (page.has_perms(page_metadata_t::e_m))
+      if (page.has_metadata(page_metadata_t::e_m))
         throw std::runtime_error("cannot memset mmio");
       register_t offset     = _memory.page_offset(current_addr);
       register_t chunk_size = _memory.bytes_per_page - offset;
