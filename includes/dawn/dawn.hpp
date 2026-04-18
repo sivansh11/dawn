@@ -403,7 +403,10 @@ struct mmio_page_data_t {
 
 register_t mmio_page_data_load(mmio_page_data_t &mmio_page_data,
                                register_t        addr) {
-  // TODO: add mru
+  if (mmio_page_data.mru_mmio.start <= addr &&
+      addr < mmio_page_data.mru_mmio.stop) {
+    return mmio_page_data.mru_mmio.load(&mmio_page_data.mru_mmio, addr);
+  }
   for (const auto &mmio : mmio_page_data.mmios) {
     if (mmio.start <= addr && addr < mmio.stop) {
       mmio_page_data.mru_mmio = mmio;
