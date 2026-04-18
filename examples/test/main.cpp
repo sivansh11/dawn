@@ -97,7 +97,8 @@ dawn::machine_t<32, 12>* load_elf(const std::filesystem::path& path) {
   // }
   machine->_pc     = reader.get_entry();
   machine->_reg[2] = std::numeric_limits<dawn::register_t>::max() - 15;
-  machine->_mode   = 0b00;
+  machine->_mode = 0b11;  // start in machine, since the test binary does a mret
+                          // ??? why tho ??
 
   return machine;
 }

@@ -2148,6 +2148,8 @@ struct machine_t {
       }
 
       case 0b001100000010: {  // mret
+        if (_mode != 0b11)
+          do_trap(exception_code_t::e_illegal_instruction, inst);
         register_t &mstatus = _csr[MSTATUS];
         register_t  mpp     = (mstatus & MSTATUS_MPP_MASK) >> MSTATUS_MPP_SHIFT;
         register_t  mpie = (mstatus & MSTATUS_MPIE_MASK) >> MSTATUS_MPIE_SHIFT;
