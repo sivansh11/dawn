@@ -177,6 +177,7 @@ constexpr register_t MCAUSE_INTERRUPT_BIT =
 
 constexpr register_t MTVAL = 0x343;
 
+// TODO: rewrite all instruction parsing to use extract_bit_range helper
 struct base_t {
   uint32_t _opcode : 7;   // 0-6
   uint32_t _pad    : 25;  // 7-31
