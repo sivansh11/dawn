@@ -127,7 +127,7 @@ void trap_callback(void* usr_data, dawn::exception_code_t cause,
       dawn::page_t page =
           machine->_memory.page_table[machine->_memory.page_number(value)];
       // TODO: only print most significant 3 bits
-      std::cout << std::bitset<64>(page.page_number) << '\n';
+      std::cout << std::bitset<64>(page.number()) << '\n';
     }
     default:
       std::stringstream ss;

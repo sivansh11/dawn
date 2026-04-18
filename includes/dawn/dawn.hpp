@@ -371,7 +371,7 @@ constexpr inline void mul_64x64_u(uint64_t a, uint64_t b, uint64_t result[2]) {
     goto _do_trap;                \
   } while (false)
 
-static const register_t invalid_page_number =
+static const register_t invalid_descriptor =
     std::numeric_limits<register_t>::max();
 
 enum page_metadata_t : register_t {
@@ -436,15 +436,14 @@ void mmio_page_data_store(mmio_page_data_t &mmio_page_data, register_t addr,
 
 struct page_t {
   void *ptr = nullptr;
-  // TODO: rename this to something more sensible
-  // it is actually the page number + meta data
-  register_t page_number = invalid_page_number;
+  // Note: page number + meta data
+  register_t descriptor = invalid_descriptor;
 
   inline register_t number() const {
-    return page_number & ~page_metadata_t::e_mask;
+    return descriptor & ~page_metadata_t::e_mask;
   }
   inline bool has_metadata(const page_metadata_t metadata) const {
-    return page_number & metadata;
+    return descriptor & metadata;
   }
 };
 
@@ -478,8 +477,8 @@ struct memory_t {
   }
   constexpr page_t create_page(register_t page_number, uint8_t *ptr,
                                page_metadata_t metadata) {
-    page_t new_page{.ptr = ptr, .page_number = page_number};
-    new_page.page_number |= metadata;
+    page_t new_page{.ptr = ptr, .descriptor = page_number};
+    new_page.descriptor |= metadata;
     return new_page;
   }
   constexpr page_t allocate_page(register_t      page_number,
@@ -513,7 +512,6 @@ struct memory_t {
   page_t     fetch_mru_page                          = {};
   page_t     fetch_direct_cache[__direct_cache_size] = {};
   // page_number -> page
-  // NOTE: the page_number inside page has metadata
   // TODO: try some faster map implementations
   std::unordered_map<register_t, page_t> page_table;
 };
@@ -545,7 +543,8 @@ page_t slow_get_page_fetch(memory_t<direct_cache_size, bits_per_page> &memory,
       page = {};
     }
     return page;
-  } /* allocate new page */
+  }
+  /* allocate new page */
   page_t new_page =
       memory.allocate_page(page_number, memory.default_page_metadata);
   if (!new_page.ptr) [[unlikely]] {
@@ -607,7 +606,8 @@ page_t slow_get_page(memory_t<direct_cache_size, bits_per_page> &memory,
       page = {};
     }
     return page;
-  } /* allocate new page */
+  }
+  /* allocate new page */
   page_t new_page =
       memory.allocate_page(page_number, memory.default_page_metadata);
   if (!new_page.ptr) [[unlikely]] {
@@ -677,7 +677,6 @@ std::pair<bool, type> load_straddling(
     if (__page.has_metadata(page_metadata_t::e_m)) [[unlikely]] {             \
       mmio_page_data_t *mmio_page_data =                                      \
           reinterpret_cast<mmio_page_data_t *>(__page.ptr);                   \
-      assert(__type_size == sizeof(register_t));                              \
       __value = mmio_page_data_load(*mmio_page_data, __addr);                 \
     } else if (__offset + __type_size > __memory.bytes_per_page)              \
         [[unlikely]] {                                                        \
@@ -733,7 +732,6 @@ std::pair<bool, type> fetch_straddling(
     /* if (__page.has_metadata(page_metadata_t::e_m)) [[unlikely]] {          \
       mmio_page_data_t *mmio_page_data =                                      \
           reinterpret_cast<mmio_page_data_t *>(__page.ptr);                   \
-      assert(__type_size == 8);                                               \
       __value = static_cast<__type>(                                          \
           mmio_page_data_load64(*mmio_page_data, __addr));                    \
     } else */                                                                 \
@@ -804,7 +802,6 @@ bool store_straddling(memory_t<direct_cache_size, bits_per_page> &memory,
     if (__page.has_metadata(page_metadata_t::e_m)) [[unlikely]] {             \
       mmio_page_data_t *mmio_page_data =                                      \
           reinterpret_cast<mmio_page_data_t *>(__page.ptr);                   \
-      assert(__type_size == sizeof(register_t));                              \
       mmio_page_data_store(*mmio_page_data, __addr, __value);                 \
     } else if (__offset + __type_size > __memory.bytes_per_page)              \
         [[unlikely]] {                                                        \
@@ -879,7 +876,7 @@ struct machine_t {
       for (; start <= stop; start++) {
         auto itr = _memory.page_table.find(start);
         if (itr == _memory.page_table.end()) {
-          page.page_number                 = start | page_metadata_t::e_rwm;
+          page.descriptor                  = start | page_metadata_t::e_rwm;
           mmio_page_data_t &mmio_page_data = _mmio_page_data.emplace_back();
           page.ptr                         = &mmio_page_data;
           _memory.page_table[start]        = page;
@@ -978,10 +975,10 @@ struct machine_t {
         _memory.page_table[page_number] = new_page;
         page                            = new_page;
       } else {
-        itr->second.page_number =
-            itr->second.page_number & ~page_metadata_t::e_mask;
-        itr->second.page_number = itr->second.page_number | metadata;
-        page                    = itr->second;
+        itr->second.descriptor =
+            itr->second.descriptor & ~page_metadata_t::e_mask;
+        itr->second.descriptor = itr->second.descriptor | metadata;
+        page                   = itr->second;
       }
       assert(page.ptr);
       register_t offset     = _memory.page_offset(current_addr);
@@ -992,7 +989,6 @@ struct machine_t {
       current_addr += chunk_size;
       remaining -= chunk_size;
     }
-    // invalidate everything
     _memory.invalidate_caches();
     return true;
   }
@@ -1012,10 +1008,10 @@ struct machine_t {
         _memory.page_table[page_number] = new_page;
         page                            = new_page;
       } else {
-        itr->second.page_number =
-            itr->second.page_number & ~page_metadata_t::e_mask;
-        itr->second.page_number = itr->second.page_number | metadata;
-        page                    = itr->second;
+        itr->second.descriptor =
+            itr->second.descriptor & ~page_metadata_t::e_mask;
+        itr->second.descriptor = itr->second.descriptor | metadata;
+        page                   = itr->second;
       }
       assert(page.ptr);
       register_t offset     = _memory.page_offset(current_addr);
@@ -1025,11 +1021,7 @@ struct machine_t {
       current_addr += chunk_size;
       remaining -= chunk_size;
     }
-    // invalidate everything
-    _memory.mru_page = _memory.fetch_mru_page = page_t{};
-    for (uint32_t i = 0; i < _memory.direct_cache_size; i++) {
-      _memory.direct_cache[i] = _memory.fetch_direct_cache[i] = page_t{};
-    }
+    _memory.invalidate_caches();
     return true;
   }
 
@@ -1298,7 +1290,7 @@ struct machine_t {
     register_t pending_interrupts = _csr[MIP] & _csr[MIE];
     if (pending_interrupts) {
       _wfi = false;
-      if (_mode < 0b11 || _csr[MSTATUS] & MSTATUS_MIE_MASK) {
+      if ((_mode & 0b11) < 0b11 || _csr[MSTATUS] & MSTATUS_MIE_MASK) {
         if (pending_interrupts & MIP_MEIP_MASK) {
           do_trap(exception_code_t::e_machine_external_interrupt, 0);
         } else if (pending_interrupts & MIP_MSIP_MASK) {
@@ -2732,7 +2724,7 @@ struct machine_t {
   void *_trap_usr_data = nullptr;
 
   // TODO: optimise csr
-  std::map<uint16_t, register_t> _csr;
+  register_t _csr[4096];
 };
 
 }  // namespace dawn
