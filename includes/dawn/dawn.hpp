@@ -1,6 +1,7 @@
 #ifndef DAWN_MACHINE_HPP
 #define DAWN_MACHINE_HPP
 
+#include <atomic>
 #include <bitset>
 #include <cassert>
 #include <cstddef>
@@ -892,10 +893,27 @@ struct machine_t {
   ~machine_t() {}
 
   // TODO: a more involved csr read
-  inline register_t read_csr(uint16_t csrno) { return _csr[csrno]; }
+  inline register_t read_csr(uint16_t csrno, std::memory_order memory_order =
+                                                 std::memory_order::relaxed) {
+    return _csr[csrno].load(memory_order);
+  }
   // TODO: a more involved csr write
-  inline void write_csr(uint16_t csrno, register_t value) {
-    _csr[csrno] = value;
+  inline void write_csr(
+      uint16_t csrno, register_t value,
+      std::memory_order memory_order = std::memory_order_relaxed) {
+    _csr[csrno].store(value, memory_order);
+  }
+  // TODO: a more involved csr fetch or
+  inline void fetch_or_csr(
+      uint16_t csrno, register_t value,
+      std::memory_order memory_order = std::memory_order::relaxed) {
+    _csr[csrno].fetch_or(value, memory_order);
+  }
+  // TODO: a more involved csr fetch and
+  inline void fetch_and_csr(
+      uint16_t csrno, register_t value,
+      std::memory_order memory_order = std::memory_order::relaxed) {
+    _csr[csrno].fetch_and(value, memory_order);
   }
 
   inline bool memcpy_host_to_guest(register_t dst_addr, const void *src_ptr,
@@ -1028,6 +1046,8 @@ struct machine_t {
   // TODO: test with and without inline
   // TODO: test with a macro
   inline bool handle_trap(exception_code_t cause, register_t value) {
+    // Note: all traps clears wfi
+    _wfi = false;
     // hack
     if (_trap_callback) {
       _trap_callback(_trap_usr_data, cause, value);
@@ -1036,12 +1056,12 @@ struct machine_t {
 
     bool is_interrupt =
         (static_cast<register_t>(cause) & MCAUSE_INTERRUPT_BIT) != 0;
-    register_t &mstatus    = _csr[MSTATUS];
-    bool        global_mie = (mstatus & MSTATUS_MIE_MASK) != 0;
+    register_t mstatus    = read_csr(MSTATUS);
+    bool       global_mie = (mstatus & MSTATUS_MIE_MASK) != 0;
 
-    _csr[MEPC]   = _pc;
-    _csr[MCAUSE] = static_cast<register_t>(cause);
-    _csr[MTVAL]  = value;
+    write_csr(MEPC, _pc);
+    write_csr(MCAUSE, static_cast<register_t>(cause));
+    write_csr(MTVAL, value);
 
     mstatus = (mstatus & ~MSTATUS_MPP_MASK) |
               ((static_cast<register_t>(_mode) << MSTATUS_MPP_SHIFT) &
@@ -1049,8 +1069,9 @@ struct machine_t {
     mstatus = (mstatus & ~MSTATUS_MPIE_MASK) |
               ((global_mie << MSTATUS_MPIE_SHIFT) & MSTATUS_MPIE_MASK);
     mstatus &= ~MSTATUS_MIE_MASK;
+    write_csr(MSTATUS, mstatus);
 
-    register_t mtvec      = _csr[MTVEC];
+    register_t mtvec      = read_csr(MTVEC);
     register_t mtvec_base = mtvec & MTVEC_BASE_ALIGN_MASK;
     register_t mtvec_mode = mtvec & MTVEC_MODE_MASK;
 
@@ -1298,10 +1319,13 @@ struct machine_t {
     // enable/disable interrupts, ie mret csr accessing instructions
   _check_for_interrupts:
     // check pending interrupts
-    register_t pending_interrupts = _csr[MIP] & _csr[MIE];
+    // Note: only mip needs acquire since only this csr can be written to
+    // outside of machine
+    register_t pending_interrupts =
+        read_csr(MIP, std::memory_order::acquire) & read_csr(MIE);
     if (pending_interrupts) {
       _wfi = false;
-      if ((_mode & 0b11) < 0b11 || _csr[MSTATUS] & MSTATUS_MIE_MASK) {
+      if ((_mode & 0b11) < 0b11 || read_csr(MSTATUS) & MSTATUS_MIE_MASK) {
         if (pending_interrupts & MIP_MEIP_MASK) {
           do_trap(exception_code_t::e_machine_external_interrupt, 0);
         } else if (pending_interrupts & MIP_MSIP_MASK) {
@@ -2069,14 +2093,15 @@ struct machine_t {
       case 0b001100000010: {  // mret
         if (_mode != 0b11)
           do_trap(exception_code_t::e_illegal_instruction, inst);
-        register_t &mstatus = _csr[MSTATUS];
-        register_t  mpp     = (mstatus & MSTATUS_MPP_MASK) >> MSTATUS_MPP_SHIFT;
-        register_t  mpie = (mstatus & MSTATUS_MPIE_MASK) >> MSTATUS_MPIE_SHIFT;
-        _mode            = mpp;
-        _pc              = _csr[MEPC];
+        register_t mstatus = read_csr(MSTATUS);
+        register_t mpp     = (mstatus & MSTATUS_MPP_MASK) >> MSTATUS_MPP_SHIFT;
+        register_t mpie = (mstatus & MSTATUS_MPIE_MASK) >> MSTATUS_MPIE_SHIFT;
+        _mode           = mpp;
+        _pc             = read_csr(MEPC);
         mstatus = (mstatus & ~MSTATUS_MIE_MASK) | (mpie << MSTATUS_MIE_SHIFT);
         mstatus = (mstatus & ~MSTATUS_MPIE_MASK) | (1u << MSTATUS_MPIE_SHIFT);
         mstatus = (mstatus & ~MSTATUS_MPP_MASK) | (0b00u << MSTATUS_MPP_SHIFT);
+        write_csr(MSTATUS, mstatus);
         goto _check_for_interrupts;  // no need to break
       } break;
 
@@ -2098,14 +2123,14 @@ struct machine_t {
   _do_csrrw: {
     // TODO: can reading csr fail ?
     uint16_t addr = inst.as.i_type.imm();
-    uint64_t csr  = _csr[addr];
+    uint64_t csr  = read_csr(addr);
 
     uint8_t rs1 = inst.as.i_type.rs1();
     if ((addr >> 10) == 0b11 && rs1 != 0) {
       do_trap(exception_code_t::e_illegal_instruction, inst);
     }
 
-    _csr[addr] = _reg[rs1];
+    write_csr(addr, _reg[rs1]);
     // write old value to rd
     _reg[inst.as.i_type.rd()] = csr;
     _pc += 4;
@@ -2115,13 +2140,13 @@ struct machine_t {
   _do_csrrs: {
     // TODO: can reading csr fail ?
     uint16_t addr = inst.as.i_type.imm();
-    uint64_t csr  = _csr[addr];
+    uint64_t csr  = read_csr(addr);
 
     uint8_t rs1 = inst.as.i_type.rs1();
     if ((addr >> 10) == 0b11 && rs1 != 0) [[unlikely]] {
       do_trap(exception_code_t::e_illegal_instruction, inst);
     }
-    _csr[addr] = csr | _reg[rs1];
+    write_csr(addr, csr | _reg[rs1]);
     // write old value to rd
     _reg[inst.as.i_type.rd()] = csr;
     _pc += 4;
@@ -2131,13 +2156,13 @@ struct machine_t {
   _do_csrrc: {
     // TODO: can reading csr fail ?
     uint16_t addr = inst.as.i_type.imm();
-    uint64_t csr  = _csr[addr];
+    uint64_t csr  = read_csr(addr);
 
     uint8_t rs1 = inst.as.i_type.rs1();
     if ((addr >> 10) == 0b11 && rs1 != 0) [[unlikely]] {
       do_trap(exception_code_t::e_illegal_instruction, inst);
     }
-    _csr[addr] = csr & ~_reg[rs1];
+    write_csr(addr, csr & ~_reg[rs1]);
     // write old value to rd
     _reg[inst.as.i_type.rd()] = csr;
     _pc += 4;
@@ -2147,13 +2172,13 @@ struct machine_t {
   _do_csrrwi: {
     // TODO: can reading csr fail ?
     uint16_t addr = inst.as.i_type.imm();
-    uint64_t csr  = _csr[addr];
+    uint64_t csr  = read_csr(addr);
 
     uint8_t rs1 = inst.as.i_type.rs1();
     if ((addr >> 10) == 0b11 && rs1 != 0) [[unlikely]] {
       do_trap(exception_code_t::e_illegal_instruction, inst);
     }
-    _csr[addr] = rs1;
+    write_csr(addr, rs1);
     // write old value to rd
     _reg[inst.as.i_type.rd()] = csr;
     _pc += 4;
@@ -2163,13 +2188,13 @@ struct machine_t {
   _do_csrrsi: {
     // TODO: can reading csr fail ?
     uint16_t addr = inst.as.i_type.imm();
-    uint64_t csr  = _csr[addr];
+    uint64_t csr  = read_csr(addr);
 
     uint8_t rs1 = inst.as.i_type.rs1();
     if ((addr >> 10) == 0b11 && rs1 != 0) [[unlikely]] {
       do_trap(exception_code_t::e_illegal_instruction, inst);
     }
-    _csr[addr] = csr | rs1;
+    write_csr(addr, csr | rs1);
     // write old value to rd
     _reg[inst.as.i_type.rd()] = csr;
     _pc += 4;
@@ -2179,13 +2204,13 @@ struct machine_t {
   _do_csrrci: {
     // TODO: can reading csr fail ?
     uint16_t addr = inst.as.i_type.imm();
-    uint64_t csr  = _csr[addr];
+    uint64_t csr  = read_csr(addr);
 
     uint8_t rs1 = inst.as.i_type.rs1();
     if ((addr >> 10) == 0b11 && rs1 != 0) [[unlikely]] {
       do_trap(exception_code_t::e_illegal_instruction, inst);
     }
-    _csr[addr] = csr & ~rs1;
+    write_csr(addr, csr & ~rs1);
     // write old value to rd
     _reg[inst.as.i_type.rd()] = csr;
     _pc += 4;
@@ -2648,7 +2673,7 @@ struct machine_t {
   void *_trap_usr_data = nullptr;
 
   // TODO: optimise csr
-  register_t _csr[4096];
+  std::atomic<register_t> _csr[4096];
 };
 
 }  // namespace dawn

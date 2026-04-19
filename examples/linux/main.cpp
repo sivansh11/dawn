@@ -106,7 +106,7 @@ constexpr dawn::mmio_handler_t clint_handler{
     .load  = [](const dawn::mmio_handler_t *handler,
                dawn::register_t            addr) -> dawn::register_t {
       if (addr == clint_mmio_start) {  // msip
-        return (machine->read_csr(dawn::MIP) >> 3) & 1;
+        return (machine->read_csr(dawn::MIP) & dawn::MIP_MSIP_MASK);
       } else if (addr == clint_mmio_start + 0x4000) {  // mtimercmp
         return timercmp;
       } else if (addr == clint_mmio_start + 0xbff8) {  // mtimer
@@ -119,16 +119,15 @@ constexpr dawn::mmio_handler_t clint_handler{
            dawn::register_t value) {
           if (addr == clint_mmio_start) {  // msip
             if (value & 1)
-              machine->_csr[dawn::MIP] |= (1ull << 3);
+              machine->fetch_or_csr(dawn::MIP, dawn::MIP_MSIP_MASK);
             else
-              machine->_csr[dawn::MIP] &= ~(1ull << 3);
+              machine->fetch_and_csr(dawn::MIP, ~dawn::MIP_MSIP_MASK);
           } else if (addr == clint_mmio_start + 0x4000) {  // mtimercmp
             timercmp = value;
-            if (timer >= timercmp) {
-              machine->_csr[dawn::MIP] |= (1ull << 7);
-            } else {
-              machine->_csr[dawn::MIP] &= ~(1ull << 7);
-            }
+            if (timer >= timercmp)
+              machine->fetch_or_csr(dawn::MIP, dawn::MIP_MTIP_MASK);
+            else
+              machine->fetch_and_csr(dawn::MIP, ~dawn::MIP_MTIP_MASK);
           } else if (addr == clint_mmio_start + 0xbff8) {  // mtimer
             timer = value;
             // TODO: remove this
@@ -384,11 +383,10 @@ int main(int argc, char **argv) {
   while (1) {
     machine->step(10);
     timer = get_time_now_us() - boot_time;
-    if (timer > timercmp) {
-      machine->_csr[dawn::MIP] |= (1ull << 7);  // set mtip
-    } else {
-      machine->_csr[dawn::MIP] &= ~(1ull << 7);  // set mtip
-    }
+    if (timer > timercmp)
+      machine->fetch_or_csr(dawn::MIP, dawn::MIP_MTIP_MASK);  // set mtip
+    else
+      machine->fetch_and_csr(dawn::MIP, ~dawn::MIP_MTIP_MASK);  // set mtip
   }
 
   return 0;
