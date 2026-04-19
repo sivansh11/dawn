@@ -35,16 +35,16 @@ using sregister_t = int64_t;
 
 struct mmio_handler_t;
 
-typedef register_t (*mmio_load_callback)(const mmio_handler_t *handler,
-                                         register_t);
-typedef void (*mmio_store_callback)(const mmio_handler_t *handler, register_t,
-                                    register_t);
+typedef register_t (*mmio_load_callback_t)(const mmio_handler_t *handler,
+                                           register_t);
+typedef void (*mmio_store_callback_t)(const mmio_handler_t *handler, register_t,
+                                      register_t);
 
 struct mmio_handler_t {
-  register_t          start;
-  register_t          stop;
-  mmio_load_callback  load;
-  mmio_store_callback store;
+  register_t            start;
+  register_t            stop;
+  mmio_load_callback_t  load;
+  mmio_store_callback_t store;
 };
 
 // [start, end)
