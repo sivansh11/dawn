@@ -1294,6 +1294,9 @@ struct machine_t {
     exception_code_t trap_cause;
     register_t       trap_value;
 
+    // check for interrupts after every instruction that can potentially
+    // enable/disable interrupts, ie mret csr accessing instructions
+  _check_for_interrupts:
     // check pending interrupts
     register_t pending_interrupts = _csr[MIP] & _csr[MIE];
     if (pending_interrupts) {
@@ -2074,7 +2077,7 @@ struct machine_t {
         mstatus = (mstatus & ~MSTATUS_MIE_MASK) | (mpie << MSTATUS_MIE_SHIFT);
         mstatus = (mstatus & ~MSTATUS_MPIE_MASK) | (1u << MSTATUS_MPIE_SHIFT);
         mstatus = (mstatus & ~MSTATUS_MPP_MASK) | (0b00u << MSTATUS_MPP_SHIFT);
-        do_dispatch();  // goto next instruction no need to break
+        goto _check_for_interrupts;  // no need to break
       } break;
 
       case 0b000100000101: {  // wfi
@@ -2107,7 +2110,7 @@ struct machine_t {
     _reg[inst.as.i_type.rd()] = csr;
     _pc += 4;
   }
-    do_dispatch();
+    goto _check_for_interrupts;
 
   _do_csrrs: {
     // TODO: can reading csr fail ?
@@ -2123,7 +2126,7 @@ struct machine_t {
     _reg[inst.as.i_type.rd()] = csr;
     _pc += 4;
   }
-    do_dispatch();
+    goto _check_for_interrupts;
 
   _do_csrrc: {
     // TODO: can reading csr fail ?
@@ -2139,7 +2142,7 @@ struct machine_t {
     _reg[inst.as.i_type.rd()] = csr;
     _pc += 4;
   }
-    do_dispatch();
+    goto _check_for_interrupts;
 
   _do_csrrwi: {
     // TODO: can reading csr fail ?
@@ -2155,7 +2158,7 @@ struct machine_t {
     _reg[inst.as.i_type.rd()] = csr;
     _pc += 4;
   }
-    do_dispatch();
+    goto _check_for_interrupts;
 
   _do_csrrsi: {
     // TODO: can reading csr fail ?
@@ -2171,7 +2174,7 @@ struct machine_t {
     _reg[inst.as.i_type.rd()] = csr;
     _pc += 4;
   }
-    do_dispatch();
+    goto _check_for_interrupts;
 
   _do_csrrci: {
     // TODO: can reading csr fail ?
@@ -2187,7 +2190,7 @@ struct machine_t {
     _reg[inst.as.i_type.rd()] = csr;
     _pc += 4;
   }
-    do_dispatch();
+    goto _check_for_interrupts;
 
     // TODO: fix all traps, it should be store traps, not load traps
   _do_atomic_w: {
