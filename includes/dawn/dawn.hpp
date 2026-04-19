@@ -1432,130 +1432,68 @@ struct machine_t {
     do_dispatch();
 
   _do_lb: {
-#ifdef DAWN_ENABLE_LOGGING
-    _log << "lb x" << std::dec << inst.as.i_type.rd() << ","
-         << inst.as.i_type.imm_sext() << "(x" << inst.as.i_type.rs1() << ")\n";
-#endif
     uint64_t addr = _reg[inst.as.i_type.rs1()] + inst.as.i_type.imm_sext();
     int8_t   value;
     __load8i(_memory, value, addr);  // may fault
-#ifdef DAWN_ENABLE_LOGGING
-    // uint8_t *ptr;
-    // __get_page_frame(_memory, addr, ptr);
-    // if (!ptr) throw std::runtime_error("failed to get frame ptr");
-    // uint64_t offset = _memory.page_offset(addr);
-    // _log << std::hex << "addr: " << (void *)(ptr + offset);
-    // _log << "\t";
-    _log << "x" << std::dec << inst.as.i_type.rd() << " <-- " << int64_t(value)
-         << " <-- " << std::hex << addr << '\n';
-#endif
     _reg[inst.as.i_type.rd()] = static_cast<sregister_t>(value);
     _pc += 4;
   }
     do_dispatch();
 
   _do_lh: {
-#ifdef DAWN_ENABLE_LOGGING
-    _log << "lh x" << std::dec << inst.as.i_type.rd() << ","
-         << inst.as.i_type.imm_sext() << "(x" << inst.as.i_type.rs1() << ")\n";
-#endif
     uint64_t addr = _reg[inst.as.i_type.rs1()] + inst.as.i_type.imm_sext();
     if (addr % 2 != 0) [[unlikely]] {
       do_trap(exception_code_t::e_load_address_misaligned, addr);
     }
     int16_t value;
     __load16i(_memory, value, addr);  // may fault
-#ifdef DAWN_ENABLE_LOGGING
-    _log << "x" << std::dec << inst.as.i_type.rd() << " <-- " << int64_t(value)
-         << " <-- " << std::hex << addr << '\n';
-#endif
     _reg[inst.as.i_type.rd()] = static_cast<sregister_t>(value);
     _pc += 4;
   }
     do_dispatch();
 
   _do_lw: {
-#ifdef DAWN_ENABLE_LOGGING
-    _log << "lw x" << std::dec << inst.as.i_type.rd() << ","
-         << inst.as.i_type.imm_sext() << "(x" << inst.as.i_type.rs1() << ")\n";
-#endif
     uint64_t addr = _reg[inst.as.i_type.rs1()] + inst.as.i_type.imm_sext();
     if (addr % 4 != 0) [[unlikely]] {
       do_trap(exception_code_t::e_load_address_misaligned, addr);
     }
     int32_t value;
     __load32i(_memory, value, addr);  // may fault
-#ifdef DAWN_ENABLE_LOGGING
-    _log << "x" << std::dec << inst.as.i_type.rd() << " <-- " << int64_t(value)
-         << " <-- " << std::hex << addr << '\n';
-#endif
     _reg[inst.as.i_type.rd()] = static_cast<sregister_t>(value);
     _pc += 4;
   }
     do_dispatch();
 
   _do_lbu: {
-#ifdef DAWN_ENABLE_LOGGING
-    _log << "lbu x" << std::dec << inst.as.i_type.rd() << ","
-         << inst.as.i_type.imm_sext() << "(x" << inst.as.i_type.rs1() << ")\n";
-#endif
     uint64_t addr = _reg[inst.as.i_type.rs1()] + inst.as.i_type.imm_sext();
     uint8_t  value;
     __load8(_memory, value, addr);  // may fault
-#ifdef DAWN_ENABLE_LOGGING
-    _log << "x" << std::dec << inst.as.i_type.rd() << " <-- " << uint64_t(value)
-         << " <-- " << std::hex << addr << '\n';
-#endif
     _reg[inst.as.i_type.rd()] = value;
     _pc += 4;
   }
     do_dispatch();
 
   _do_lhu: {
-#ifdef DAWN_ENABLE_LOGGING
-    _log << "lhu x" << std::dec << inst.as.i_type.rd() << ","
-         << inst.as.i_type.imm_sext() << "(x" << inst.as.i_type.rs1() << ")\n";
-#endif
     uint64_t addr = _reg[inst.as.i_type.rs1()] + inst.as.i_type.imm_sext();
     if (addr % 2 != 0) [[unlikely]] {
       do_trap(exception_code_t::e_load_address_misaligned, addr);
     }
     uint16_t value;
     __load16(_memory, value, addr);  // may fault
-#ifdef DAWN_ENABLE_LOGGING
-    _log << "x" << std::dec << inst.as.i_type.rd() << " <-- " << uint64_t(value)
-         << " <-- " << std::hex << addr << '\n';
-#endif
     _reg[inst.as.i_type.rd()] = value;
     _pc += 4;
   }
     do_dispatch();
 
   _do_sb: {
-#ifdef DAWN_ENABLE_LOGGING
-    _log << "sb x" << std::dec << inst.as.s_type.rs2() << ","
-         << inst.as.s_type.imm_sext() << "(x" << inst.as.s_type.rs1() << ")\n";
-#endif
     uint64_t addr = _reg[inst.as.s_type.rs1()] + inst.as.s_type.imm_sext();
-#ifdef DAWN_ENABLE_LOGGING
-    _log << std::hex << addr << " <-- " << std::dec
-         << _reg[inst.as.s_type.rs2()] << '\n';
-#endif
     __store8(_memory, addr, _reg[inst.as.s_type.rs2()]);  // may fault
     _pc += 4;
   }
     do_dispatch();
 
   _do_sh: {
-#ifdef DAWN_ENABLE_LOGGING
-    _log << "sh x" << std::dec << inst.as.s_type.rs2() << ","
-         << inst.as.s_type.imm_sext() << "(x" << inst.as.s_type.rs1() << ")\n";
-#endif
     uint64_t addr = _reg[inst.as.s_type.rs1()] + inst.as.s_type.imm_sext();
-#ifdef DAWN_ENABLE_LOGGING
-    _log << std::hex << addr << " <-- " << std::dec
-         << _reg[inst.as.s_type.rs2()] << '\n';
-#endif
     if (addr % 2 != 0) [[unlikely]] {
       do_trap(exception_code_t::e_store_address_misaligned, addr);
     }
@@ -1565,15 +1503,7 @@ struct machine_t {
     do_dispatch();
 
   _do_sw: {
-#ifdef DAWN_ENABLE_LOGGING
-    _log << "sw x" << std::dec << inst.as.s_type.rs2() << ","
-         << inst.as.s_type.imm_sext() << "(x" << inst.as.s_type.rs1() << ")\n";
-#endif
     uint64_t addr = _reg[inst.as.s_type.rs1()] + inst.as.s_type.imm_sext();
-#ifdef DAWN_ENABLE_LOGGING
-    _log << std::hex << addr << " <-- " << std::dec
-         << _reg[inst.as.s_type.rs2()] << '\n';
-#endif
     if (addr % 4 != 0) [[unlikely]] {
       do_trap(exception_code_t::e_store_address_misaligned, addr);
     }
@@ -1626,20 +1556,12 @@ struct machine_t {
     do_dispatch();
 
   _do_lwu: {
-#ifdef DAWN_ENABLE_LOGGING
-    _log << "lwu x" << std::dec << inst.as.i_type.rd() << ","
-         << inst.as.i_type.imm_sext() << "(x" << inst.as.i_type.rs1() << ")\n";
-#endif
     uint64_t addr = _reg[inst.as.i_type.rs1()] + inst.as.i_type.imm_sext();
     if (addr % 4 != 0) [[unlikely]] {
       do_trap(exception_code_t::e_load_address_misaligned, addr);
     }
     uint32_t value;
     __load32(_memory, value, addr);  // may fault
-#ifdef DAWN_ENABLE_LOGGING
-    _log << "x" << std::dec << inst.as.i_type.rd() << " <-- " << uint64_t(value)
-         << " <-- " << std::hex << addr << '\n';
-#endif
     _reg[inst.as.i_type.rd()] = value;
     _pc += 4;
   }
@@ -1647,20 +1569,12 @@ struct machine_t {
 
 #ifdef DAWN_RISCV64
   _do_ld: {
-#ifdef DAWN_ENABLE_LOGGING
-    _log << "ld x" << std::dec << inst.as.i_type.rd() << ","
-         << inst.as.i_type.imm_sext() << "(x" << inst.as.i_type.rs1() << ")\n";
-#endif
     uint64_t addr = _reg[inst.as.i_type.rs1()] + inst.as.i_type.imm_sext();
     if (addr % 8 != 0) [[unlikely]] {
       do_trap(exception_code_t::e_load_address_misaligned, addr);
     }
     uint64_t value;
     __load64(_memory, value, addr);  // may fault
-#ifdef DAWN_ENABLE_LOGGING
-    _log << "x" << std::dec << inst.as.i_type.rd() << " <-- " << uint64_t(value)
-         << " <-- " << std::hex << addr << '\n';
-#endif
     _reg[inst.as.i_type.rd()] = value;
     _pc += 4;
   }
@@ -1669,15 +1583,7 @@ struct machine_t {
 
 #ifdef DAWN_RISCV64
   _do_sd: {
-#ifdef DAWN_ENABLE_LOGGING
-    _log << "sw x" << std::dec << inst.as.s_type.rs2() << ","
-         << inst.as.s_type.imm_sext() << "(x" << inst.as.s_type.rs1() << ")\n";
-#endif
     uint64_t addr = _reg[inst.as.s_type.rs1()] + inst.as.s_type.imm_sext();
-#ifdef DAWN_ENABLE_LOGGING
-    _log << std::hex << addr << " <-- " << std::dec
-         << _reg[inst.as.s_type.rs2()] << '\n';
-#endif
     if (addr % 8 != 0) [[unlikely]] {
       do_trap(exception_code_t::e_store_address_misaligned, addr);
     }
