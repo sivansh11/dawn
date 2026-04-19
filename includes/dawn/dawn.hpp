@@ -2172,6 +2172,7 @@ struct machine_t {
     _pc += 4;
   }
     do_dispatch();
+
   _do_csrrci: {
     // TODO: can reading csr fail ?
     uint16_t addr = inst.as.i_type.imm();
