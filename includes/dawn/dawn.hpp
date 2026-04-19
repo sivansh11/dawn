@@ -1047,7 +1047,7 @@ struct machine_t {
   // TODO: test with a macro
   inline bool handle_trap(exception_code_t cause, register_t value) {
     // Note: all traps clears wfi
-    _wfi = false;
+    _wfi.store(false, std::memory_order::relaxed);
     // hack
     if (_trap_callback) {
       _trap_callback(_trap_usr_data, cause, value);
@@ -1250,7 +1250,7 @@ struct machine_t {
     constexpr uint64_t cached_instruction_mask = (1ull << 32) - 1;
 #define dispatch()                                                           \
   do {                                                                       \
-    if (_wfi) [[unlikely]]                                                   \
+    if (_wfi.load(std::memory_order::relaxed)) [[unlikely]]                  \
       return n;                                                              \
     _reg[0] = 0;                                                             \
     if (n-- == 0) [[unlikely]]                                               \
@@ -1279,7 +1279,7 @@ struct machine_t {
 #else
 #define dispatch()                                                         \
   do {                                                                     \
-    if (_wfi) [[unlikely]]                                                 \
+    if (_wfi.load(std::memory_order::relaxed)) [[unlikely]]                \
       return n;                                                            \
     _reg[0] = 0;                                                           \
     if (n-- == 0) [[unlikely]]                                             \
@@ -1324,7 +1324,7 @@ struct machine_t {
     register_t pending_interrupts =
         read_csr(MIP, std::memory_order::acquire) & read_csr(MIE);
     if (pending_interrupts) {
-      _wfi = false;
+      _wfi.store(false, std::memory_order::relaxed);
       if ((_mode & 0b11) < 0b11 || read_csr(MSTATUS) & MSTATUS_MIE_MASK) {
         if (pending_interrupts & MIP_MEIP_MASK) {
           do_trap(exception_code_t::e_machine_external_interrupt, 0);
@@ -2106,7 +2106,7 @@ struct machine_t {
       } break;
 
       case 0b000100000101: {  // wfi
-        _wfi = true;
+        _wfi.store(true, std::memory_order::relaxed);
         if (_wfi_callback) [[likely]]
           _wfi_callback();
         _pc += 4;
@@ -2654,7 +2654,7 @@ struct machine_t {
   const std::vector<mmio_handler_t> _mmios;
   std::list<mmio_page_data_t>       _mmio_page_data;
 
-  bool _wfi = false;
+  std::atomic<bool> _wfi = false;
   typedef void (*wfi_callback_t)();
   wfi_callback_t _wfi_callback = 0;
 

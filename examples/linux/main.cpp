@@ -1,3 +1,4 @@
+#include <atomic>
 #include <csignal>
 #include <cstdint>
 #include <cstdio>
@@ -96,26 +97,26 @@ static const dawn::mmio_handler_t uart_handler{
           }
         }};
 
-static dawn::register_t        timercmp         = 0;
-static dawn::register_t        timer            = 0;
-static dawn::register_t        boot_time        = 0;
-constexpr dawn::register_t     clint_mmio_start = 0x11000000;
-constexpr dawn::register_t     clint_mmio_stop  = 0x11010000;
-constexpr dawn::mmio_handler_t clint_handler{
-    .start = clint_mmio_start,
-    .stop  = clint_mmio_stop,
-    .load  = [](const dawn::mmio_handler_t *handler,
+static std::atomic<dawn::register_t> timercmp         = 0;
+static std::atomic<dawn::register_t> timer            = 0;
+static dawn::register_t              boot_time        = 0;
+constexpr dawn::register_t           clint_mmio_start = 0x11000000;
+constexpr dawn::register_t           clint_mmio_stop  = 0x11010000;
+constexpr dawn::mmio_handler_t       clint_handler{
+          .start = clint_mmio_start,
+          .stop  = clint_mmio_stop,
+          .load  = [](const dawn::mmio_handler_t *handler,
                dawn::register_t            addr) -> dawn::register_t {
       if (addr == clint_mmio_start) {  // msip
         return (machine->read_csr(dawn::MIP) & dawn::MIP_MSIP_MASK);
       } else if (addr == clint_mmio_start + 0x4000) {  // mtimercmp
-        return timercmp;
+        return timercmp.load(std::memory_order::relaxed);
       } else if (addr == clint_mmio_start + 0xbff8) {  // mtimer
-        return timer;
+        return timer.load(std::memory_order::relaxed);
       }
       return 0;
     },
-    .store =
+          .store =
         [](const dawn::mmio_handler_t *handler, dawn::register_t addr,
            dawn::register_t value) {
           if (addr == clint_mmio_start) {  // msip
@@ -124,17 +125,34 @@ constexpr dawn::mmio_handler_t clint_handler{
             else
               machine->fetch_and_csr(dawn::MIP, ~dawn::MIP_MSIP_MASK);
           } else if (addr == clint_mmio_start + 0x4000) {  // mtimercmp
-            timercmp = value;
+            timercmp.store(value, std::memory_order::relaxed);
+            // TODO: maybe doesnt need to check since clint_worker already
+            // checks ? I have it here since I gain a bit of perf with this here
+            // maybe I should remove this and do sleep_until
             if (timer >= timercmp)
               machine->fetch_or_csr(dawn::MIP, dawn::MIP_MTIP_MASK);
             else
               machine->fetch_and_csr(dawn::MIP, ~dawn::MIP_MTIP_MASK);
           } else if (addr == clint_mmio_start + 0xbff8) {  // mtimer
-            timer = value;
             // TODO: remove this
             throw std::runtime_error("wrote to mtimer");
           }
         }};
+
+void clint_worker() {
+  while (!should_termiate) {
+    auto now = get_time_now_us() - boot_time;
+    timer.store(now, std::memory_order::relaxed);
+    if (now > timercmp.load(std::memory_order::relaxed)) {
+      machine->fetch_or_csr(dawn::MIP, dawn::MIP_MTIP_MASK,
+                            std::memory_order::release);  // set mtip
+      machine->_wfi.store(false, std::memory_order::relaxed);
+    } else
+      machine->fetch_and_csr(dawn::MIP, ~dawn::MIP_MTIP_MASK,
+                             std::memory_order::release);  // set mtip
+    std::this_thread::sleep_for(std::chrono::microseconds{100});
+  }
+}
 
 static const uint64_t    ram_size = 1024 * 1024 * 1024;
 static const uint64_t    offset   = 0x80000000;
@@ -374,6 +392,8 @@ int main(int argc, char **argv) {
     should_termiate = true;
   });
 
+  std::thread clint_thread{clint_worker};
+
   signal(SIGINT, [](int sig) { exit(0); });
 
   struct termios term;
@@ -383,12 +403,9 @@ int main(int argc, char **argv) {
 
   boot_time = get_time_now_us();
   while (!should_termiate) {
-    machine->step(10);
-    timer = get_time_now_us() - boot_time;
-    if (timer > timercmp)
-      machine->fetch_or_csr(dawn::MIP, dawn::MIP_MTIP_MASK);  // set mtip
-    else
-      machine->fetch_and_csr(dawn::MIP, ~dawn::MIP_MTIP_MASK);  // set mtip
+    machine->step(2048);
+    if (machine->_wfi.load(std::memory_order::relaxed))
+      std::this_thread::sleep_for(std::chrono::microseconds{100});
   }
 
   return 0;
