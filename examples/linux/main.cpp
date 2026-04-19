@@ -73,18 +73,122 @@ int read_kbbyte() {
 static bool                     should_termiate = false;
 static dawn::machine_t<32, 12> *machine;
 
-static const dawn::register_t     uart_mmio_start    = 0x10000000;
-static const dawn::register_t     uart_mmio_stop     = 0x10000100;
-static const uint64_t             timebase_frequency = 1000000;
+struct plic_state_t {
+  uint32_t priorities[32];
+  uint32_t pending;
+  uint32_t enables;
+  uint32_t threshold;
+  uint32_t claimed_irq;
+};
+static plic_state_t plic_state{};
+void                plic_update_interrupts() {
+  uint32_t mask     = plic_state.pending & plic_state.enables;
+  uint32_t best_irq = 0;
+  uint32_t max_prio = plic_state.threshold;
+  // 0 is reserved
+  for (uint32_t i = 1; i < 32; i++) {
+    if ((mask & (1u << i)) && plic_state.priorities[i] > max_prio) {
+      max_prio = plic_state.priorities[i];
+      best_irq = i;
+    }
+  }
+  if (best_irq > 0) {
+    machine->fetch_or_csr(dawn::MIP, dawn::MIP_MEIP_MASK,
+                                         std::memory_order::release);
+  } else {
+    machine->fetch_and_csr(dawn::MIP, ~dawn::MIP_MEIP_MASK,
+                                          std::memory_order::release);
+  }
+}
+void plic_set_irq(uint32_t irq, bool level) {
+  if (irq == 0 || irq >= 32) return;
+  if (level)
+    plic_state.pending |= (1u << irq);
+  else
+    plic_state.pending &= ~(1u << irq);
+  plic_update_interrupts();
+  if (level) machine->_wfi.store(false, std::memory_order::relaxed);
+}
+static const dawn::register_t     plic_mmio_start = 0x0c000000;
+static const dawn::register_t     plic_mmio_stop  = 0x10000000;
+static const dawn::mmio_handler_t plic_handler{
+    .start = plic_mmio_start,
+    .stop  = plic_mmio_stop,
+    .load  = [](const dawn::mmio_handler_t *handler,
+               dawn::register_t            addr) -> dawn::register_t {
+      uint32_t offset = addr - plic_mmio_start;
+      if (offset < 0x1000) {  // priorities
+        uint32_t irq = offset >> 2;
+        return (irq < 32) ? plic_state.priorities[irq] : 0;
+      }
+      if (offset >= 0x1000 && offset < 0x1080) {  // pending
+        return plic_state.pending;
+      }
+      if (offset >= 0x2000 && offset < 0x2080) {  // enables
+        return plic_state.enables;
+      }
+      if (offset == 0x200000) {  // threshold
+        return plic_state.threshold;
+      }
+      if (offset == 0x200004) {  // claimed
+        uint32_t mask     = plic_state.pending & plic_state.enables;
+        uint32_t best_irq = 0;
+        uint32_t max_prio = plic_state.threshold;
+        for (uint32_t i = 1; i < 32; i++) {
+          if ((mask & (1u << i)) && plic_state.priorities[i] > max_prio) {
+            max_prio = plic_state.priorities[i];
+            best_irq = i;
+          }
+        }
+        if (best_irq > 0) {
+          plic_state.pending &= ~(1u << best_irq);
+          plic_update_interrupts();
+        }
+        return best_irq;
+      }
+      return 0;
+    },
+    .store =
+        [](const dawn::mmio_handler_t *handler, dawn::register_t addr,
+           dawn::register_t value) {
+          uint32_t offset = addr - plic_mmio_start;
+          if (offset < 0x1000) {
+            uint32_t irq = offset >> 2;
+            if (irq < 32) plic_state.priorities[irq] = value;
+          } else if (offset >= 0x2000 && offset < 0x2080) {
+            plic_state.enables = value;
+          } else if (offset == 0x200000) {
+            plic_state.threshold = value;
+          } else if (offset == 0x200004) {
+            plic_update_interrupts();
+          }
+        }};
+
+static const dawn::register_t uart_mmio_start    = 0x10000000;
+static const dawn::register_t uart_mmio_stop     = 0x10000100;
+static const uint64_t         timebase_frequency = 1000000;
+static const int              uart_interrupt     = 10;
+struct uart_state_t {
+  uint8_t uart_ier = 0;
+};
+static uart_state_t               uart_state{};
 static const dawn::mmio_handler_t uart_handler{
     .start = uart_mmio_start,
     .stop  = uart_mmio_stop,
     .load  = [](const dawn::mmio_handler_t *handler,
                dawn::register_t            addr) -> dawn::register_t {
       if (addr == uart_mmio_start && is_kbhit()) {  // data
-        return read_kbbyte();
+        int c = read_kbbyte();
+        if (is_kbhit() <= 0) plic_set_irq(uart_interrupt, false);
+        return (c == -1) ? 0 : uint8_t(c);
+      } else if (addr == uart_mmio_start + 1) {
+        return uart_state.uart_ier;
+      } else if (addr == uart_mmio_start + 2) {
+        if (is_kbhit() > 0) return 0x04;
+        if (uart_state.uart_ier & 0x02) return 0x02;
+        return 0x01;
       } else if (addr == uart_mmio_start + 0x5) {  // status
-        return 0x60 | is_kbhit();
+        return 0x60 | (is_kbhit() > 0 ? 1 : 0);
       }
       return 0;
     },
@@ -94,6 +198,8 @@ static const dawn::mmio_handler_t uart_handler{
           if (addr == uart_mmio_start) {  // data
             printf("%c", (int)value);
             fflush(stdout);
+          } else if (addr == uart_mmio_start + 1) {
+            uart_state.uart_ier = value & 0x0f;
           }
         }};
 
@@ -150,7 +256,14 @@ void clint_worker() {
     } else
       machine->fetch_and_csr(dawn::MIP, ~dawn::MIP_MTIP_MASK,
                              std::memory_order::release);  // set mtip
-    std::this_thread::sleep_for(std::chrono::microseconds{100});
+    // TODO: move to its own thread
+    bool has_data       = (is_kbhit() > 0);
+    bool rx_int_enabled = (uart_state.uart_ier & 0x01);
+    bool tx_int_enabled = (uart_state.uart_ier & 0x02);
+    if ((has_data && rx_int_enabled) || tx_int_enabled) {
+      plic_set_irq(uart_interrupt, true);
+    }
+    std::this_thread::sleep_for(std::chrono::microseconds{1000});
   }
 }
 
@@ -263,7 +376,33 @@ int add_fdt_soc_node(void *fdt) {
   return soc;
 }
 
-int add_fdt_uart_node(void *fdt, int soc) {
+int add_fdt_plic_node(void *fdt, int soc, uint32_t intc) {
+  std::string plic_node_name =
+      "interrupt-controller@" + to_hex_string_without_0x(plic_mmio_start);
+  int plic = fdt_add_subnode(fdt, soc, plic_node_name.c_str());
+  if (fdt_setprop_string(fdt, plic, "compatible", "riscv,plic0"))
+    throw std::runtime_error("failed to set plic compatible property");
+  if (fdt_setprop_cell(fdt, plic, "#interrupt-cells", 1))
+    throw std::runtime_error("failed to set plic #interrupt-cells property");
+  if (fdt_setprop(fdt, plic, "interrupt-controller", nullptr, 0))
+    throw std::runtime_error(
+        "failed to set plic interrupt-controller property");
+  if (fdt_setprop_cell(fdt, plic, "riscv,ndev", 32 - 1))
+    throw std::runtime_error("failed to set plic property");
+  uint64_t reg[] = {cpu_to_fdt64(plic_mmio_start),
+                    cpu_to_fdt64(plic_mmio_stop - plic_mmio_start)};
+  if (fdt_setprop(fdt, plic, "reg", reg, sizeof(reg)))
+    throw std::runtime_error("failed to set plic reg property");
+  uint32_t contexts[] = {cpu_to_fdt32(intc), cpu_to_fdt32(11)};
+  if (fdt_setprop(fdt, plic, "interrupts-extended", contexts, sizeof(contexts)))
+    throw std::runtime_error("failed to set plic interrupts-extended property");
+  uint32_t plic_phandle = 2;
+  if (fdt_setprop_cell(fdt, plic, "phandle", plic_phandle))
+    throw std::runtime_error("failed to set plic phandle property");
+  return plic_phandle;
+}
+
+int add_fdt_uart_node(void *fdt, int soc, int plic) {
   std::string uart_node_name =
       "uart@" + to_hex_string_without_0x(uart_mmio_start);
   int uart = fdt_add_subnode(fdt, soc, uart_node_name.c_str());
@@ -276,6 +415,10 @@ int add_fdt_uart_node(void *fdt, int soc) {
     throw std::runtime_error("failed to set uart reg property");
   if (fdt_setprop_string(fdt, uart, "compatible", "ns16550a"))
     throw std::runtime_error("failed to set uart compatible property");
+  if (fdt_setprop_cell(fdt, uart, "interrupt-parent", plic))
+    throw std::runtime_error("failed to set uart interrupt-parent property");
+  if (fdt_setprop_cell(fdt, uart, "interrupts", uart_interrupt))
+    throw std::runtime_error("failed to set uart interrupts property");
   return uart;
 }
 
@@ -311,14 +454,15 @@ std::vector<uint8_t> generate_dtb() {
 
   setup_fdt_root_properties(fdt);
 
-  int chosen = add_fdt_chosen_node(fdt);
-  int memory = add_fdt_memory_node(fdt, ram_size);
-  int cpus   = add_fdt_cpus_node(fdt);
-  int cpu0   = add_fdt_cpu_node(fdt, cpus);
-  int intc   = add_fdt_interrupt_controller(fdt, cpu0);
-  int soc    = add_fdt_soc_node(fdt);
-  int uart   = add_fdt_uart_node(fdt, soc);
-  int clint  = add_fdt_clint_node(fdt, soc, intc);
+  int chosen       = add_fdt_chosen_node(fdt);
+  int memory       = add_fdt_memory_node(fdt, ram_size);
+  int cpus         = add_fdt_cpus_node(fdt);
+  int cpu0         = add_fdt_cpu_node(fdt, cpus);
+  int intc         = add_fdt_interrupt_controller(fdt, cpu0);
+  int soc          = add_fdt_soc_node(fdt);
+  int plic_phandle = add_fdt_plic_node(fdt, soc, intc);
+  int uart         = add_fdt_uart_node(fdt, soc, plic_phandle);
+  int clint        = add_fdt_clint_node(fdt, soc, intc);
 
   return blob;
 }
@@ -346,9 +490,9 @@ void     deallocate(void *, uint8_t *ptr) { delete[] ptr; }
 int main(int argc, char **argv) {
   if (argc != 3) throw std::runtime_error("[dem] [Image] [initrd]");
 
-  machine = new dawn::machine_t<32, 12>(ram_size, {uart_handler, clint_handler},
-                                        nullptr, allocate, deallocate,
-                                        dawn::page_metadata_t::e_rwx);
+  machine = new dawn::machine_t<32, 12>(
+      ram_size, {uart_handler, plic_handler, clint_handler}, nullptr, allocate,
+      deallocate, dawn::page_metadata_t::e_rwx);
 
   // read kernel
   auto kernel = read_file(argv[1]);
@@ -404,8 +548,12 @@ int main(int argc, char **argv) {
   boot_time = get_time_now_us();
   while (!should_termiate) {
     machine->step(2048);
-    if (machine->_wfi.load(std::memory_order::relaxed))
-      std::this_thread::sleep_for(std::chrono::microseconds{100});
+    // TODO: fix this, for some reason if I sleep, the emulator runs slower
+    // sometimes, while run fine other times (running something like stress -c 1
+    // in the background fixes it ?)
+    // this is required for not hammering the cpu when wfi is active
+    // (machine->_wfi.load(std::memory_order::relaxed))
+    //   std::this_thread::sleep_for(std::chrono::microseconds{100});
   }
 
   return 0;
