@@ -69,6 +69,7 @@ int read_kbbyte() {
     return -1;
 }
 
+static bool                     should_termiate = false;
 static dawn::machine_t<32, 12> *machine;
 
 static const dawn::register_t     uart_mmio_start    = 0x10000000;
@@ -370,6 +371,7 @@ int main(int argc, char **argv) {
     tcgetattr(0, &term);
     term.c_lflag |= ICANON | ECHO;
     tcsetattr(0, TCSANOW, &term);
+    should_termiate = true;
   });
 
   signal(SIGINT, [](int sig) { exit(0); });
@@ -380,7 +382,7 @@ int main(int argc, char **argv) {
   tcsetattr(0, TCSANOW, &term);
 
   boot_time = get_time_now_us();
-  while (1) {
+  while (!should_termiate) {
     machine->step(10);
     timer = get_time_now_us() - boot_time;
     if (timer > timercmp)
