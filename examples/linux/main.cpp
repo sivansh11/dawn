@@ -15,6 +15,7 @@
 #include <libfdt_env.h>
 
 #define DAWN_RISCV64
+#define DAWN_INSTRUCTION_CACHE
 #include "dawn/dawn.hpp"
 
 std::string to_hex_string(uint64_t val) { return std::format("{:#x}", val); }

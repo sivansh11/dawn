@@ -1218,13 +1218,15 @@ struct machine_t {
 #endif
     }
 
-    uint32_t           _inst;
-    instruction_t      inst;
-    constexpr uint64_t cached_instruction_mask = (1ull << 32) - 1;
+    uint32_t      _inst;
+    instruction_t inst;
 
     // f f f o o o o o (f is func3, o is op)
-    // note, we ignore the first 2 bits of op since we dont implement compressed
+    // Note: we ignore the first 2 bits of op since we dont implement compressed
     // instructions
+
+#ifdef DAWN_INSTRUCTION_CACHE
+    constexpr uint64_t cached_instruction_mask = (1ull << 32) - 1;
 #define dispatch()                                                           \
   do {                                                                       \
     if (_wfi) [[unlikely]]                                                   \
@@ -1252,14 +1254,22 @@ struct machine_t {
       reinterpret_cast<uint32_t &>(inst) = _inst;                            \
       goto *_cached_instructions[cached_instruction_index].label;            \
     }                                                                        \
-    /* TODO: write a macro to disable and enable instruction cache           \
-      __fetch32(_memory, _inst, _pc);                                        \
-      const uint32_t dispatch_index = extract_bit_range(_inst, 2, 7) |       \
-                                      extract_bit_range(_inst, 12, 15) << 5; \
-      reinterpret_cast<uint32_t &>(inst) = _inst;                            \
-      goto *dispatch_table[dispatch_index];                                  \
-      */                                                                     \
   } while (false)
+#else
+#define dispatch()                                                         \
+  do {                                                                     \
+    if (_wfi) [[unlikely]]                                                 \
+      return n;                                                            \
+    _reg[0] = 0;                                                           \
+    if (n-- == 0) [[unlikely]]                                             \
+      return 0;                                                            \
+    __fetch32(_memory, _inst, _pc);                                        \
+    const uint32_t dispatch_index = extract_bit_range(_inst, 2, 7) |       \
+                                    extract_bit_range(_inst, 12, 15) << 5; \
+    reinterpret_cast<uint32_t &>(inst) = _inst;                            \
+    goto *dispatch_table[dispatch_index];                                  \
+  } while (false)
+#endif
 
 #ifdef DAWN_ENABLE_LOGGING
     auto logger = [&]() {
@@ -2032,7 +2042,9 @@ struct machine_t {
   _do_fence: {
     // fence not required ?
     _memory.invalidate_caches();
+#ifdef DAWN_INSTRUCTION_CACHE
     std::memset(_cached_instructions, 0xff, sizeof(_cached_instructions));
+#endif
     _pc += 4;
   }
     do_dispatch();
@@ -2603,10 +2615,12 @@ struct machine_t {
   // uint64_t     _offset{};
   // uint8_t     *_final{};
 
+#ifdef DAWN_INSTRUCTION_CACHE
   static const register_t _bits_per_instruction_cache = 12;
   static const register_t _num_instruction_cache =
       1 << _bits_per_instruction_cache;
   cached_instruction_t _cached_instructions[_num_instruction_cache];
+#endif
 
   const std::vector<mmio_handler_t> _mmios;
   std::list<mmio_page_data_t>       _mmio_page_data;
