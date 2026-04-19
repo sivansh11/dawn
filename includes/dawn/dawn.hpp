@@ -1088,7 +1088,6 @@ struct machine_t {
     return std::nullopt;
   }
 
-  // TODO: remove this, unused
   bool insert_page(register_t page_number, uint8_t *ptr,
                    page_metadata_t metadata) {
     page_t new_page = _memory.create_page(page_number, ptr, metadata);
@@ -1109,7 +1108,6 @@ struct machine_t {
     return true;
   }
 
-  // TODO: remove this, unused
   bool insert_new_page(register_t page_number, page_metadata_t metadata) {
     page_t new_page = _memory.allocate_page(page_number, metadata);
     _memory.page_table[page_number] = new_page;
