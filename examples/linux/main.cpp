@@ -6,6 +6,7 @@
 #include <chrono>
 #include <thread>
 #include <vector>
+#include <sys/types.h>
 #include <unistd.h>
 
 #include <asm-generic/ioctls.h>
@@ -14,6 +15,8 @@
 
 #include <libfdt.h>
 #include <libfdt_env.h>
+
+#include <X11/Xlib.h>
 
 #define DAWN_RISCV64
 #define DAWN_INSTRUCTION_CACHE
@@ -267,6 +270,29 @@ void clint_worker() {
   }
 }
 
+static const uint32_t framebuffer_width  = 800;
+static const uint32_t framebuffer_height = 600;
+static const uint32_t framebuffer_stride =
+    framebuffer_width * 4;  // 4 bytes per color channel
+static uint8_t framebuffer[framebuffer_width * framebuffer_height * 4];
+static const dawn::register_t framebuffer_mmio_start = 0x40000000;
+static const dawn::register_t framebuffer_mmio_stop =
+    framebuffer_mmio_start + (framebuffer_width * framebuffer_height * 4);
+static const dawn::mmio_handler_t framebuffer_handler{
+    .start = framebuffer_mmio_start,
+    .stop  = framebuffer_mmio_stop,
+    .load  = [](const dawn::mmio_handler_t *handler,
+               dawn::register_t            addr) -> dawn::register_t {
+      dawn::register_t offset = addr - framebuffer_mmio_start;
+      return *reinterpret_cast<dawn::register_t *>(&framebuffer[offset]);
+    },
+    .store =
+        [](const dawn::mmio_handler_t *handler, dawn::register_t addr,
+           dawn::register_t value) {
+          dawn::register_t offset = addr - framebuffer_mmio_start;
+          *reinterpret_cast<dawn::register_t *>(&framebuffer[offset]) = value;
+        }};
+
 static const uint64_t    ram_size = 1024 * 1024 * 1024;
 static const uint64_t    offset   = 0x80000000;
 static const std::string bootargs =
@@ -445,6 +471,31 @@ int add_fdt_clint_node(void *fdt, int soc, uint32_t intc_phandle) {
   return clint;
 }
 
+int add_fdt_framebuffer_node(void *fdt, int soc) {
+  std::string framebuffer_node_name =
+      "framebuffer@" + to_hex_string_without_0x(framebuffer_mmio_start);
+  int framebuffer = fdt_add_subnode(fdt, soc, framebuffer_node_name.c_str());
+  if (framebuffer < 0)
+    throw std::runtime_error("failed to add framebuffer subnode");
+  uint64_t framebuffer_reg[] = {
+      cpu_to_fdt64(framebuffer_mmio_start),
+      cpu_to_fdt64(framebuffer_width * framebuffer_height * 4)};
+  if (fdt_setprop(fdt, framebuffer, "reg", framebuffer_reg,
+                  sizeof(framebuffer_reg)))
+    throw std::runtime_error("failed to set framebuffer reg property");
+  if (fdt_setprop_string(fdt, framebuffer, "compatible", "simple-framebuffer"))
+    throw std::runtime_error("failed to set framebuffer compatible property");
+  if (fdt_setprop_cell(fdt, framebuffer, "width", framebuffer_width))
+    throw std::runtime_error("failed to set framebuffer width property");
+  if (fdt_setprop_cell(fdt, framebuffer, "height", framebuffer_height))
+    throw std::runtime_error("failed to set framebuffer height property");
+  if (fdt_setprop_cell(fdt, framebuffer, "stride", framebuffer_stride))
+    throw std::runtime_error("failed to set framebuffer stride property");
+  if (fdt_setprop_string(fdt, framebuffer, "format", "x8r8g8b8"))
+    throw std::runtime_error("failed to set framebuffer format property");
+  return framebuffer;
+}
+
 std::vector<uint8_t> generate_dtb() {
   std::vector<uint8_t> blob(64 * 1024);
 
@@ -463,6 +514,7 @@ std::vector<uint8_t> generate_dtb() {
   int plic_phandle = add_fdt_plic_node(fdt, soc, intc);
   int uart         = add_fdt_uart_node(fdt, soc, plic_phandle);
   int clint        = add_fdt_clint_node(fdt, soc, intc);
+  int framebuffer  = add_fdt_framebuffer_node(fdt, soc);
 
   return blob;
 }
@@ -487,12 +539,71 @@ typedef void (*deallocate_callback_t)(void *, uint8_t *);
 uint8_t *allocate(void *, uint64_t size) { return new uint8_t[size]; }
 void     deallocate(void *, uint8_t *ptr) { delete[] ptr; }
 
+void x11_worker() {
+  static Display *x11_display = nullptr;
+  static Window   x11_window  = 0;
+  static GC       x11_gc      = nullptr;
+  static XImage  *x11_image   = nullptr;
+  static KeySym   x11_keysym  = 0;
+
+  x11_display = XOpenDisplay(NULL);
+  if (!x11_display) {
+    fprintf(stderr, "Failed to open X11 display\n");
+    return;
+  }
+
+  int    screen = DefaultScreen(x11_display);
+  Window root   = RootWindow(x11_display, screen);
+
+  x11_window = XCreateSimpleWindow(
+      x11_display, root, 0, 0, framebuffer_width, framebuffer_height, 0,
+      BlackPixel(x11_display, screen), BlackPixel(x11_display, screen));
+
+  XSelectInput(x11_display, x11_window,
+               KeyPressMask | KeyReleaseMask | ExposureMask);
+
+  XMapWindow(x11_display, x11_window);
+
+  x11_image =
+      XCreateImage(x11_display, DefaultVisual(x11_display, screen), 24, ZPixmap,
+                   0, reinterpret_cast<char *>(framebuffer), framebuffer_width,
+                   framebuffer_height, 32, framebuffer_stride);
+
+  int x11_screen = DefaultScreen(x11_display);
+  while (!should_termiate) {
+    XPutImage(x11_display, x11_window, DefaultGC(x11_display, x11_screen),
+              x11_image, 0, 0, 0, 0, framebuffer_width, framebuffer_height);
+
+    while (XPending(x11_display)) {
+      XEvent event;
+      XNextEvent(x11_display, &event);
+
+      if (event.type == KeyRelease) {
+        KeySym release_keysym = XLookupKeysym(&event.xkey, 0);
+        if (XPending(x11_display)) {
+          XEvent next_event;
+          XPeekEvent(x11_display, &next_event);
+          if (next_event.type == KeyPress &&
+              next_event.xkey.time - event.xkey.time < 2 &&
+              XLookupKeysym(&next_event.xkey, 0) == release_keysym) {
+            XNextEvent(x11_display, &next_event);
+            continue;
+          }
+        }
+      }
+    }
+
+    std::this_thread::sleep_for(std::chrono::milliseconds(33));
+  }
+}
+
 int main(int argc, char **argv) {
   if (argc != 3) throw std::runtime_error("[dem] [Image] [initrd]");
 
   machine = new dawn::machine_t<32, 12>(
-      ram_size, {uart_handler, plic_handler, clint_handler}, nullptr, allocate,
-      deallocate, dawn::page_metadata_t::e_rwx);
+      ram_size,
+      {uart_handler, plic_handler, clint_handler, framebuffer_handler}, nullptr,
+      allocate, deallocate, dawn::page_metadata_t::e_rwx);
 
   // read kernel
   auto kernel = read_file(argv[1]);
@@ -537,6 +648,7 @@ int main(int argc, char **argv) {
   });
 
   std::thread clint_thread{clint_worker};
+  std::thread framebuffer_thread{x11_worker};
 
   signal(SIGINT, [](int sig) { exit(0); });
 
