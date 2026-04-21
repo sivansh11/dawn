@@ -907,13 +907,15 @@ struct machine_t {
   inline void fetch_or_csr(
       uint16_t csrno, register_t value,
       std::memory_order memory_order = std::memory_order::relaxed) {
-    _csr[csrno].fetch_or(value, memory_order);
+    register_t current = _csr[csrno].load(std::memory_order::relaxed);
+    if ((current & value) != value) _csr[csrno].fetch_or(value, memory_order);
   }
   // TODO: a more involved csr fetch and
   inline void fetch_and_csr(
       uint16_t csrno, register_t value,
       std::memory_order memory_order = std::memory_order::relaxed) {
-    _csr[csrno].fetch_and(value, memory_order);
+    register_t current = _csr[csrno].load(std::memory_order::relaxed);
+    if ((current & ~value) != 0) _csr[csrno].fetch_and(value, memory_order);
   }
 
   inline bool memcpy_host_to_guest(register_t dst_addr, const void *src_ptr,

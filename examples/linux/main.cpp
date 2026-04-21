@@ -206,8 +206,8 @@ static const dawn::mmio_handler_t uart_handler{
           }
         }};
 
-static std::atomic<dawn::register_t> timercmp         = 0;
-static std::atomic<dawn::register_t> timer            = 0;
+alignas(64) static std::atomic<dawn::register_t> timercmp         = 0;
+alignas(64) static std::atomic<dawn::register_t> timer            = 0;
 static dawn::register_t              boot_time        = 0;
 constexpr dawn::register_t           clint_mmio_start = 0x11000000;
 constexpr dawn::register_t           clint_mmio_stop  = 0x11010000;
@@ -660,12 +660,9 @@ int main(int argc, char **argv) {
   boot_time = get_time_now_us();
   while (!should_termiate) {
     machine->step(2048);
-    // TODO: fix this, for some reason if I sleep, the emulator runs slower
-    // sometimes, while run fine other times (running something like stress -c 1
-    // in the background fixes it ?)
     // this is required for not hammering the cpu when wfi is active
-    // (machine->_wfi.load(std::memory_order::relaxed))
-    //   std::this_thread::sleep_for(std::chrono::microseconds{100});
+    if (machine->_wfi.load(std::memory_order::relaxed))
+      std::this_thread::sleep_for(std::chrono::microseconds{100});
   }
 
   return 0;
