@@ -63,6 +63,8 @@ int main() {
   // copy string to mapped memory
   std::memcpy(mapped_memory, msg, std::strlen(msg) + 1);
 
+  std::cout << (char *)mapped_memory << '\n';
+
   std::cout << "mapped memory after writes as seen in guest\n";
   for (uint32_t i = 0; i < 64; i++) {
     std::cout << std::hex << std::setw(2) << std::setfill('0')

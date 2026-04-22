@@ -12,6 +12,7 @@
 #include <stdexcept>
 #include <unordered_map>
 
+#define DAWN_RISCV64
 #include "dawn/dawn.hpp"
 
 uint8_t* allocate(void*, uint64_t size) { return new uint8_t[size]; }

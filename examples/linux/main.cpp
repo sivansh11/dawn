@@ -14,7 +14,6 @@
 #include <termios.h>
 
 #include <libfdt.h>
-#include <libfdt_env.h>
 
 #include <X11/Xlib.h>
 
