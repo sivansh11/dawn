@@ -94,7 +94,7 @@ endif()
 if (NOT EXISTS ${CMAKE_CURRENT_BINARY_DIR}/libfdt/libfdt_env.h)
   file(DOWNLOAD
     https://raw.githubusercontent.com/dgibson/dtc/main/libfdt/libfdt_env.h
-    "${CMAKE_CURRENT_BINARY_DIR}/libfdt/libfdt_enf.h"
+    "${CMAKE_CURRENT_BINARY_DIR}/libfdt/libfdt_env.h"
     STATUS DOWNLOAD_STATUS
   )
 endif()
