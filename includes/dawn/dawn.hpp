@@ -2086,11 +2086,11 @@ struct machine_t {
         } else {
           do_trap(exception_code_t::e_ecall_u_mode, _pc);
         }
-      }
+      } break;
 
       case 0b000000000001: {  // ebreak
         do_trap(exception_code_t::e_breakpoint, _pc);
-      }
+      } break;
 
       case 0b001100000010: {  // mret
         if (_mode != 0b11)
