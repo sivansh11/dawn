@@ -1279,18 +1279,18 @@ struct machine_t {
     }                                                                        \
   } while (false)
 #else
-#define dispatch()                                                         \
-  do {                                                                     \
-    if (_wfi.load(std::memory_order::relaxed)) [[unlikely]]                \
-      return n;                                                            \
-    _reg[0] = 0;                                                           \
-    if (n-- == 0) [[unlikely]]                                             \
-      return 0;                                                            \
-    __fetch32(_memory, _inst, _pc);                                        \
-    const uint32_t dispatch_index = extract_bit_range(_inst, 2, 7) |       \
-                                    extract_bit_range(_inst, 12, 15) << 5; \
-    reinterpret_cast<uint32_t &>(inst) = _inst;                            \
-    goto *dispatch_table[dispatch_index];                                  \
+#define dispatch()                                                              \
+  do {                                                                          \
+    if (_wfi.load(std::memory_order::relaxed)) [[unlikely]]                     \
+      return n;                                                                 \
+    _reg[0] = 0;                                                                \
+    if (n-- == 0) [[unlikely]]                                                  \
+      return 0;                                                                 \
+    __fetch32(_memory, _inst, _pc);                                             \
+    const uint32_t dispatch_index      = extract_bit_range(_inst, 2, 7) |       \
+                                         extract_bit_range(_inst, 12, 15) << 5; \
+    reinterpret_cast<uint32_t &>(inst) = _inst;                                 \
+    goto *dispatch_table[dispatch_index];                                       \
   } while (false)
 #endif
 
@@ -1635,7 +1635,7 @@ struct machine_t {
   _do_slli: {
     constexpr uint32_t shamt_mask = (sizeof(register_t) * 8) - 1;
     _reg[inst.as.i_type.rd()]     = _reg[inst.as.i_type.rs1()]
-                                << (inst.as.i_type.imm() & shamt_mask);
+                                    << (inst.as.i_type.imm() & shamt_mask);
     _pc += 4;
   }
     do_dispatch();
@@ -1983,7 +1983,7 @@ struct machine_t {
     switch (inst.as.r_type.funct7()) {
       case 0b0000000: {  // srl
         constexpr uint32_t shamt_mask = (sizeof(register_t) * 8) - 1;
-        _reg[inst.as.r_type.rd()]     = _reg[inst.as.r_type.rs1()] >>
+        _reg[inst.as.r_type.rd()] = _reg[inst.as.r_type.rs1()] >>
                                     (_reg[inst.as.r_type.rs2()] & shamt_mask);
         _pc += 4;
         do_dispatch();
