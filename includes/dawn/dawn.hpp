@@ -858,6 +858,37 @@ bool store_straddling(memory_t<direct_cache_size, bits_per_page> &memory,
 typedef void (*trap_callback_t)(void *, exception_code_t cause,
                                 register_t value);
 
+#define csr_access_trap_if_illegal(__csrno, __is_write)              \
+  do {                                                               \
+    uint8_t min_mode = (__csrno >> 8) & 0b11;                        \
+    if (min_mode > _mode) [[unlikely]]                               \
+      do_trap(exception_code_t::e_illegal_instruction, _inst);       \
+    if (((__csrno >> 10) & 0b11) == 0b11 && __is_write) [[unlikely]] \
+      do_trap(exception_code_t::e_illegal_instruction, _inst);       \
+  } while (false)
+
+#define __read_csr(__csrno, __memory_order, __value) \
+  do {                                               \
+    csr_access_trap_if_illegal(__csrno, false);      \
+    __value = _csr[__csrno].load(__memory_order);    \
+  } while (false)
+
+#define __write_csr(__csrno, __memory_order, __value) \
+  do {                                                \
+    csr_access_trap_if_illegal(__csrno, true);        \
+    _csr[__csrno].store(__value, __memory_order);     \
+  } while (false)
+
+#define __read_csr_no_trap(__csrno, __memory_order, __value) \
+  do {                                                       \
+    __value = _csr[__csrno].load(__memory_order);            \
+  } while (false)
+
+#define __write_csr_no_trap(__csrno, __memory_order, __value) \
+  do {                                                        \
+    _csr[__csrno].store(__value, __memory_order);             \
+  } while (false)
+
 // TODO: accurate runtime memory bounds checking (account for size of
 // load/store)
 template <size_t direct_cache_size, size_t bits_per_page>
@@ -892,16 +923,16 @@ struct machine_t {
   }
   ~machine_t() {}
 
-  // TODO: a more involved csr read
   inline register_t read_csr(uint16_t csrno, std::memory_order memory_order =
                                                  std::memory_order::relaxed) {
-    return _csr[csrno].load(memory_order);
+    register_t value;
+    __read_csr_no_trap(csrno, memory_order, value);
+    return value;
   }
-  // TODO: a more involved csr write
   inline void write_csr(
       uint16_t csrno, register_t value,
       std::memory_order memory_order = std::memory_order_relaxed) {
-    _csr[csrno].store(value, memory_order);
+    __write_csr_no_trap(csrno, memory_order, value);
   }
   // TODO: a more involved csr fetch or
   inline void fetch_or_csr(
@@ -1323,11 +1354,14 @@ struct machine_t {
     // check pending interrupts
     // Note: only mip needs acquire since only this csr can be written to
     // outside of machine
-    register_t pending_interrupts =
-        read_csr(MIP, std::memory_order::acquire) & read_csr(MIE);
+    register_t mip, mie, pending_interrupts;
+    mip                = read_csr(MIP, std::memory_order::acquire);
+    mie                = read_csr(MIE);
+    pending_interrupts = mip & mie;
+    register_t mstatus = read_csr(MSTATUS);
     if (pending_interrupts) {
       _wfi.store(false, std::memory_order::relaxed);
-      if ((_mode & 0b11) < 0b11 || read_csr(MSTATUS) & MSTATUS_MIE_MASK) {
+      if ((_mode & 0b11) < 0b11 || mstatus & MSTATUS_MIE_MASK) {
         if (pending_interrupts & MIP_MEIP_MASK) {
           do_trap(exception_code_t::e_machine_external_interrupt, 0);
         } else if (pending_interrupts & MIP_MSIP_MASK) {
@@ -2123,16 +2157,14 @@ struct machine_t {
                     // continuity
 
   _do_csrrw: {
-    // TODO: can reading csr fail ?
     uint16_t addr = inst.as.i_type.imm();
-    uint64_t csr  = read_csr(addr);
+    uint64_t csr;
+    __read_csr(addr, std::memory_order::relaxed, csr);
 
     uint8_t rs1 = inst.as.i_type.rs1();
-    if ((addr >> 10) == 0b11 && rs1 != 0) {
-      do_trap(exception_code_t::e_illegal_instruction, inst);
-    }
 
-    write_csr(addr, _reg[rs1]);
+    // csrrw always writes even if rs1 is 0
+    __write_csr(addr, std::memory_order::relaxed, _reg[rs1]);
     // write old value to rd
     _reg[inst.as.i_type.rd()] = csr;
     _pc += 4;
@@ -2140,15 +2172,14 @@ struct machine_t {
     goto _check_for_interrupts;
 
   _do_csrrs: {
-    // TODO: can reading csr fail ?
     uint16_t addr = inst.as.i_type.imm();
-    uint64_t csr  = read_csr(addr);
+    uint64_t csr;
+    __read_csr(addr, std::memory_order::relaxed, csr);
 
     uint8_t rs1 = inst.as.i_type.rs1();
-    if ((addr >> 10) == 0b11 && rs1 != 0) [[unlikely]] {
-      do_trap(exception_code_t::e_illegal_instruction, inst);
-    }
-    write_csr(addr, csr | _reg[rs1]);
+
+    if (rs1 != 0)
+      __write_csr(addr, std::memory_order::relaxed, csr | _reg[rs1]);
     // write old value to rd
     _reg[inst.as.i_type.rd()] = csr;
     _pc += 4;
@@ -2156,15 +2187,14 @@ struct machine_t {
     goto _check_for_interrupts;
 
   _do_csrrc: {
-    // TODO: can reading csr fail ?
     uint16_t addr = inst.as.i_type.imm();
-    uint64_t csr  = read_csr(addr);
+    uint64_t csr;
+    __read_csr(addr, std::memory_order::relaxed, csr);
 
     uint8_t rs1 = inst.as.i_type.rs1();
-    if ((addr >> 10) == 0b11 && rs1 != 0) [[unlikely]] {
-      do_trap(exception_code_t::e_illegal_instruction, inst);
-    }
-    write_csr(addr, csr & ~_reg[rs1]);
+
+    if (rs1 != 0)
+      __write_csr(addr, std::memory_order::relaxed, csr & ~_reg[rs1]);
     // write old value to rd
     _reg[inst.as.i_type.rd()] = csr;
     _pc += 4;
@@ -2172,15 +2202,14 @@ struct machine_t {
     goto _check_for_interrupts;
 
   _do_csrrwi: {
-    // TODO: can reading csr fail ?
     uint16_t addr = inst.as.i_type.imm();
-    uint64_t csr  = read_csr(addr);
+    uint64_t csr;
+    __read_csr(addr, std::memory_order::relaxed, csr);
 
     uint8_t rs1 = inst.as.i_type.rs1();
-    if ((addr >> 10) == 0b11 && rs1 != 0) [[unlikely]] {
-      do_trap(exception_code_t::e_illegal_instruction, inst);
-    }
-    write_csr(addr, rs1);
+
+    // csrrwi always writes even if rs1 is 0
+    __write_csr(addr, std::memory_order::relaxed, rs1);
     // write old value to rd
     _reg[inst.as.i_type.rd()] = csr;
     _pc += 4;
@@ -2188,15 +2217,13 @@ struct machine_t {
     goto _check_for_interrupts;
 
   _do_csrrsi: {
-    // TODO: can reading csr fail ?
     uint16_t addr = inst.as.i_type.imm();
-    uint64_t csr  = read_csr(addr);
+    uint64_t csr;
+    __read_csr(addr, std::memory_order::relaxed, csr);
 
     uint8_t rs1 = inst.as.i_type.rs1();
-    if ((addr >> 10) == 0b11 && rs1 != 0) [[unlikely]] {
-      do_trap(exception_code_t::e_illegal_instruction, inst);
-    }
-    write_csr(addr, csr | rs1);
+
+    if (rs1 != 0) __write_csr(addr, std::memory_order::relaxed, csr | rs1);
     // write old value to rd
     _reg[inst.as.i_type.rd()] = csr;
     _pc += 4;
@@ -2204,15 +2231,13 @@ struct machine_t {
     goto _check_for_interrupts;
 
   _do_csrrci: {
-    // TODO: can reading csr fail ?
     uint16_t addr = inst.as.i_type.imm();
-    uint64_t csr  = read_csr(addr);
+    uint64_t csr;
+    __read_csr(addr, std::memory_order::relaxed, csr);
 
     uint8_t rs1 = inst.as.i_type.rs1();
-    if ((addr >> 10) == 0b11 && rs1 != 0) [[unlikely]] {
-      do_trap(exception_code_t::e_illegal_instruction, inst);
-    }
-    write_csr(addr, csr & ~rs1);
+
+    if (rs1 != 0) __write_csr(addr, std::memory_order::relaxed, csr & ~rs1);
     // write old value to rd
     _reg[inst.as.i_type.rd()] = csr;
     _pc += 4;
