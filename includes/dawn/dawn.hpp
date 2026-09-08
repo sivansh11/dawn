@@ -1339,6 +1339,7 @@ struct machine_t {
 
 #define do_dispatch() \
   do {                \
+    logger();         \
     dispatch();       \
   } while (false)
 #else
