@@ -2,9 +2,12 @@
 #include <cassert>
 #include <cstdio>
 #include <cstdlib>
+#include <cstring>
 #include <filesystem>
 #include <functional>
 #include <iostream>
+#include <string>
+#include <vector>
 
 #include <elfio/elfio.hpp>
 #include <limits>
@@ -24,6 +27,7 @@ struct data_t {
   uint64_t                heap_end;
   uint64_t                stack_top;
   uint64_t                stack_bottom;
+  uint64_t                environ_addr;
   uint64_t                custom_shared_memory_start;
   uint64_t                custom_shared_memory_end;
   std::unordered_map<uint64_t, std::function<void(data_t*)>> syscall_callbacks;
@@ -111,9 +115,10 @@ data_t* load_elf(const std::filesystem::path& path) {
                          other);
       if (name == "_end") {
         data->heap_start = value;
-        break;
       } else if (name == "__global_pointer$") {
         data->machine._reg[3] = value;
+      } else if (name == "environ") {
+        data->environ_addr = value;
       }
     }
     assert(data->heap_start != 0);
@@ -133,6 +138,61 @@ data_t* load_elf(const std::filesystem::path& path) {
   return data;
 }
 
+void setup_argv(dawn::machine_t<32, 12>& machine, uint64_t stack_top,
+                const std::vector<std::string>& argv,
+                const std::vector<std::string>& envp) {
+  // stack layout at entry, sp points to argc:
+  // [argc][argv ptrs... \0][envp ptrs... \0][argv str][envp str]
+  uint64_t argc       = argv.size();
+  uint64_t envp_count = envp.size();
+
+  uint64_t argv_strings_size = 0;
+  for (auto& s : argv) argv_strings_size += s.size() + 1;
+  uint64_t envp_strings_size = 0;
+  for (auto& s : envp) envp_strings_size += s.size() + 1;
+
+  uint64_t ptrs_size = 8 + (argc + 1) * 8 + (envp_count + 1) * 8;
+  uint64_t total_size =
+      (ptrs_size + argv_strings_size + envp_strings_size + 15) & ~0xFULL;
+
+  uint64_t sp = stack_top - total_size;
+
+  std::vector<uint8_t> buf(total_size, 0);
+  uint64_t             ptr_offset = 0;
+  uint64_t             str_offset = ptrs_size;
+
+  std::memcpy(buf.data() + ptr_offset, &argc, 8);
+  ptr_offset += 8;
+
+  uint64_t argv_ptrs_start = ptr_offset;
+  ptr_offset += (argc + 1) * 8;
+
+  uint64_t envp_ptrs_start = ptr_offset;
+  ptr_offset += (envp_count + 1) * 8;
+
+  for (uint64_t i = 0; i < argc; i++) {
+    uint64_t str_addr = sp + str_offset;
+    std::memcpy(buf.data() + argv_ptrs_start + i * 8, &str_addr, 8);
+    std::memcpy(buf.data() + str_offset, argv[i].c_str(), argv[i].size() + 1);
+    str_offset += argv[i].size() + 1;
+  }
+
+  for (uint64_t i = 0; i < envp_count; i++) {
+    uint64_t str_addr = sp + str_offset;
+    std::memcpy(buf.data() + envp_ptrs_start + i * 8, &str_addr, 8);
+    std::memcpy(buf.data() + str_offset, envp[i].c_str(), envp[i].size() + 1);
+    str_offset += envp[i].size() + 1;
+  }
+
+  machine.insert_memory(sp, buf.data(), buf.size(),
+                        dawn::page_metadata_t::e_rw);
+
+  machine._reg[2]  = sp;
+  machine._reg[10] = argc;
+  machine._reg[11] = sp + argv_ptrs_start;
+  machine._reg[12] = sp + envp_ptrs_start;
+}
+
 int main(int argc, char** argv) {
   if (argc < 2) {
     std::cerr << "Usage: [simple] [elf]\n";
@@ -141,6 +201,17 @@ int main(int argc, char** argv) {
 
   data_t* data = load_elf(argv[1]);
   if (!data) return -1;  // TODO: throw
+
+  std::vector<std::string> guest_argv = {"a.out", "arg1", "arg2", "arg3"};
+  std::vector<std::string> guest_envp = {"USER=root", "PATH=/bin"};
+  setup_argv(data->machine, data->stack_top, guest_argv, guest_envp);
+  data->stack_top = data->machine._reg[2];
+
+  // hack to pass env
+  if (data->environ_addr) {
+    data->machine.memcpy_host_to_guest(data->environ_addr,
+                                       &data->machine._reg[12], 8);
+  }
 
   bool running = true;
 
