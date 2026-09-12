@@ -2,9 +2,12 @@
 #include <cassert>
 #include <cstdio>
 #include <cstdlib>
+#include <cstring>
 #include <filesystem>
 #include <functional>
 #include <iostream>
+#include <string>
+#include <vector>
 
 #include <elfio/elfio.hpp>
 #include <limits>
@@ -24,12 +27,15 @@ struct data_t {
   uint64_t                heap_end;
   uint64_t                stack_top;
   uint64_t                stack_bottom;
+  uint64_t                environ_addr;
   uint64_t                custom_shared_memory_start;
   uint64_t                custom_shared_memory_end;
   std::unordered_map<uint64_t, std::function<void(data_t*)>> syscall_callbacks;
 };
 
-data_t* load_elf(const std::filesystem::path& path) {
+data_t* load_elf(const std::filesystem::path& path,
+                 const std::vector<std::string>& argv,
+                 const std::vector<std::string>& envp) {
   ELFIO::elfio reader;
   if (!reader.load(path)) return nullptr;
 
@@ -111,16 +117,77 @@ data_t* load_elf(const std::filesystem::path& path) {
                          other);
       if (name == "_end") {
         data->heap_start = value;
-        break;
       } else if (name == "__global_pointer$") {
         data->machine._reg[3] = value;
+      } else if (name == "environ") {
+        data->environ_addr = value;
       }
     }
     assert(data->heap_start != 0);
   }
-  data->machine._pc     = reader.get_entry();
+  data->machine._pc   = reader.get_entry();
+  data->machine._mode = 0b00;
+
+  // initial sp, near the top of the address space
   data->machine._reg[2] = std::numeric_limits<dawn::register_t>::max() - 15;
-  data->machine._mode   = 0b00;
+
+  // stack layout at entry, sp points to argc:
+  // [argc][argv ptrs... \0][envp ptrs... \0][argv strings][envp strings]
+  constexpr uint64_t xlen = sizeof(dawn::register_t);
+  dawn::register_t   argc       = argv.size();
+  dawn::register_t   envp_count = envp.size();
+
+  uint64_t argv_strings_size = 0;
+  for (auto& s : argv) argv_strings_size += s.size() + 1;
+  uint64_t envp_strings_size = 0;
+  for (auto& s : envp) envp_strings_size += s.size() + 1;
+
+  uint64_t ptrs_size = xlen + (argc + 1) * xlen + (envp_count + 1) * xlen;
+  uint64_t total_size =
+      (ptrs_size + argv_strings_size + envp_strings_size + 15) & ~0xFULL;
+
+  dawn::register_t sp = data->machine._reg[2] - total_size;
+
+  std::vector<uint8_t> buf(total_size, 0);
+  dawn::register_t ptr_offset = 0;
+  dawn::register_t str_offset = ptrs_size;
+
+  std::memcpy(buf.data() + ptr_offset, &argc, xlen);
+  ptr_offset += xlen;
+
+  dawn::register_t argv_ptrs_start = ptr_offset;
+  ptr_offset += (argc + 1) * xlen;
+
+  dawn::register_t envp_ptrs_start = ptr_offset;
+  ptr_offset += (envp_count + 1) * xlen;
+
+  for (dawn::register_t i = 0; i < argc; i++) {
+    dawn::register_t str_addr = sp + str_offset;
+    std::memcpy(buf.data() + argv_ptrs_start + i * xlen, &str_addr, xlen);
+    std::memcpy(buf.data() + str_offset, argv[i].c_str(), argv[i].size() + 1);
+    str_offset += argv[i].size() + 1;
+  }
+
+  for (dawn::register_t i = 0; i < envp_count; i++) {
+    dawn::register_t str_addr = sp + str_offset;
+    std::memcpy(buf.data() + envp_ptrs_start + i * xlen, &str_addr, xlen);
+    std::memcpy(buf.data() + str_offset, envp[i].c_str(), envp[i].size() + 1);
+    str_offset += envp[i].size() + 1;
+  }
+
+  data->machine.insert_memory(sp, buf.data(), buf.size(),
+                              dawn::page_metadata_t::e_rw);
+
+  data->machine._reg[2]  = sp;
+  data->machine._reg[10] = argc;
+  data->machine._reg[11] = sp + argv_ptrs_start;
+  data->machine._reg[12] = sp + envp_ptrs_start;
+
+  // in newlib, a2 == 0, so need to set that to the start of environ addr
+  if (data->environ_addr) {
+    data->machine.memcpy_host_to_guest(data->environ_addr,
+                                       &data->machine._reg[12], xlen);
+  }
 
   data->stack_top    = data->machine._reg[2];
   data->stack_bottom = data->stack_top - (8 * 1024);
@@ -139,7 +206,10 @@ int main(int argc, char** argv) {
     return -1;
   }
 
-  data_t* data = load_elf(argv[1]);
+  std::vector<std::string> guest_argv = {"a.out", "arg1", "arg2", "arg3"};
+  std::vector<std::string> guest_envp = {"USER=root", "PATH=/bin"};
+
+  data_t* data = load_elf(argv[1], guest_argv, guest_envp);
   if (!data) return -1;  // TODO: throw
 
   bool running = true;

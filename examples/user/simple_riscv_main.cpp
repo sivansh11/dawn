@@ -39,7 +39,17 @@ define_syscall(1001, get_mapped_memory, void *());
 // NOTE: no need to define newlib syscalls as they are handle by the
 // compiler
 
-int main() {
+int main(int argc, char** argv) {
+  std::cout << "argc: " << argc << '\n';
+  for (int i = 0; i < argc; i++) {
+    std::cout << "argv[" << i << "]: " << argv[i] << '\n';
+  }
+
+  std::cout << "envp:\n";
+  for (int i = 0; environ[i] != nullptr; i++) {
+    std::cout << "  " << environ[i] << '\n';
+  }
+
   // Note: this wont work since fork syscall, ie syscall 57 is not handled by
   // this example (exmaples/user/main.cpp)
   //
