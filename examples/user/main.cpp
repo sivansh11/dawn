@@ -86,14 +86,6 @@ data_t* load_elf(const std::filesystem::path& path,
                                     memory_size - file_size, permission))
         return nullptr;
     }
-
-    data->machine.memcpy_host_to_guest(
-        virtual_address, reinterpret_cast<const void*>(segment->get_data()),
-        file_size);
-    if (memory_size - file_size) {
-      data->machine.memset(virtual_address + file_size, 0,
-                           memory_size - file_size);
-    }
   }
   // TODO: add a empty frame with no permission for preventing stack overflow
   // maybe this is not required since I added stack_bottom ?
