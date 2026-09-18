@@ -403,7 +403,7 @@ struct mmio_page_data_t {
   std::vector<mmio_handler_t> mmios{};
 };
 
-register_t mmio_page_data_load(mmio_page_data_t &mmio_page_data,
+inline register_t mmio_page_data_load(mmio_page_data_t &mmio_page_data,
                                register_t        addr) {
   if (mmio_page_data.mru_mmio.start <= addr &&
       addr < mmio_page_data.mru_mmio.stop) {
@@ -418,7 +418,7 @@ register_t mmio_page_data_load(mmio_page_data_t &mmio_page_data,
   throw std::runtime_error("reached unreachable");
 }
 
-void mmio_page_data_store(mmio_page_data_t &mmio_page_data, register_t addr,
+inline void mmio_page_data_store(mmio_page_data_t &mmio_page_data, register_t addr,
                           register_t value) {
   if (mmio_page_data.mru_mmio.start <= addr &&
       addr < mmio_page_data.mru_mmio.stop) {
