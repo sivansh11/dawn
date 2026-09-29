@@ -404,7 +404,7 @@ struct mmio_page_data_t {
 };
 
 inline register_t mmio_page_data_load(mmio_page_data_t &mmio_page_data,
-                               register_t        addr) {
+                                      register_t        addr) {
   if (mmio_page_data.mru_mmio.start <= addr &&
       addr < mmio_page_data.mru_mmio.stop) {
     return mmio_page_data.mru_mmio.load(&mmio_page_data.mru_mmio, addr);
@@ -418,8 +418,8 @@ inline register_t mmio_page_data_load(mmio_page_data_t &mmio_page_data,
   throw std::runtime_error("reached unreachable");
 }
 
-inline void mmio_page_data_store(mmio_page_data_t &mmio_page_data, register_t addr,
-                          register_t value) {
+inline void mmio_page_data_store(mmio_page_data_t &mmio_page_data,
+                                 register_t addr, register_t value) {
   if (mmio_page_data.mru_mmio.start <= addr &&
       addr < mmio_page_data.mru_mmio.stop) {
     mmio_page_data.mru_mmio.store(&mmio_page_data.mru_mmio, addr, value);
@@ -1281,7 +1281,7 @@ struct machine_t {
 
 #ifdef DAWN_INSTRUCTION_CACHE
     constexpr uint64_t cached_instruction_mask = (1ull << 32) - 1;
-#define dispatch()                                                           \
+#define __dispatch()                                                         \
   do {                                                                       \
     if (_wfi.load(std::memory_order::relaxed)) [[unlikely]]                  \
       return n;                                                              \
@@ -1310,7 +1310,7 @@ struct machine_t {
     }                                                                        \
   } while (false)
 #else
-#define dispatch()                                                              \
+#define __dispatch()                                                            \
   do {                                                                          \
     if (_wfi.load(std::memory_order::relaxed)) [[unlikely]]                     \
       return n;                                                                 \
@@ -1340,10 +1340,10 @@ struct machine_t {
 #define do_dispatch() \
   do {                \
     logger();         \
-    dispatch();       \
+    __dispatch();     \
   } while (false)
 #else
-#define do_dispatch() dispatch()
+#define do_dispatch() __dispatch()
 #endif
 
     exception_code_t trap_cause;
