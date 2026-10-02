@@ -9,6 +9,7 @@
 #include <cstring>
 #include <functional>
 #include <fstream>
+#include <cmath>
 #include <iostream>
 #include <limits>
 #include <list>
@@ -26,12 +27,28 @@ namespace dawn {
 static_assert(false, "dawn can only work on little endian architecture");
 #endif
 
+#if defined(DAWN_RISCV_D) && !defined(DAWN_RISCV_F)
+#define DAWN_RISCV_F
+#endif
+
+#ifdef DAWN_RISCV_D
+#ifndef DAWN_RISCV64
+static_assert(false, "DAWN_RISCV_D requires DAWN_RISCV64 to be enabled");
+#endif
+#endif
+
 #ifndef DAWN_RISCV64
 using register_t  = uint32_t;
 using sregister_t = int32_t;
 #else
 using register_t  = uint64_t;
 using sregister_t = int64_t;
+#endif
+
+#ifdef DAWN_RISCV_D
+using fregister_t = uint64_t;
+#elif defined(DAWN_RISCV_F)
+using fregister_t = uint32_t;
 #endif
 
 struct mmio_handler_t;
@@ -177,6 +194,30 @@ constexpr register_t MCAUSE_INTERRUPT_BIT =
     (1ull << (sizeof(register_t) * 8 - 1));
 
 constexpr register_t MTVAL = 0x343;
+
+constexpr register_t FFLAGS = 0x001;
+constexpr register_t FRM    = 0x002;
+constexpr register_t FCSR = 0x003;  // both fflags and frm should be a view into
+                                    // fcsr in actual implementation
+
+constexpr register_t FCSR_NV_MASK = 0b10000;
+constexpr register_t FCSR_DZ_MASK = 0b1000;
+constexpr register_t FCSR_OF_MASK = 0b100;
+constexpr register_t FCSR_UF_MASK = 0b10;
+constexpr register_t FCSR_NX_MASK = 0b1;
+
+constexpr register_t FCSR_RM_MASK = 0b11100000;
+// floating point rounding modes
+constexpr uint8_t FP_RNE = 0b000;  // round to the nearest, ties to even
+constexpr uint8_t FP_RTZ = 0b001;  // round to zero
+constexpr uint8_t FP_RDN = 0b010;  // round down
+constexpr uint8_t FP_RUP = 0b011;  // round up
+constexpr uint8_t FP_RMM =
+    0b100;  // round to the nearest, ties to nearest magnitude
+constexpr uint8_t FP_DYN = 0b111;  // dynamic rounding mode
+
+constexpr uint32_t FP_NAN_F32 = 0x7fc00000u;
+constexpr uint64_t FP_NAN_F64 = 0x7ff8000000000000ull;
 
 // TODO: rewrite all instruction parsing to use extract_bit_range helper
 struct base_t {
@@ -363,6 +404,44 @@ constexpr inline void mul_64x64_u(uint64_t a, uint64_t b, uint64_t result[2]) {
   uint64_t carry_to_high_32 = (p0 >> 32) + (p1 & mask_32) + (p2 & mask_32);
   result[0]                 = (p0 & mask_32) | (carry_to_high_32 << 32);
   result[1] = p3 + (p1 >> 32) + (p2 >> 32) + (carry_to_high_32 >> 32);
+}
+
+#ifdef DAWN_RISCV_D
+constexpr inline fregister_t box_f32(uint32_t v) {
+  return 0xffffffff00000000ull | v;
+}
+constexpr inline uint32_t unbox_f32(fregister_t f) {
+  return ((f >> 32) == 0xffffffffu) ? (uint32_t)f : FP_NAN_F32;
+}
+#elif defined(DAWN_RISCV_F)
+constexpr inline fregister_t box_f32(uint32_t v) { return v; }
+constexpr inline uint32_t    unbox_f32(fregister_t f) { return f; }
+#endif
+
+constexpr inline bool fp32_is_nan(uint32_t v) {
+  return extract_bit_range(v, 23, 31) == 0xff && extract_bit_range(v, 0, 23);
+}
+
+constexpr inline bool fp32_is_snan(uint32_t v) {
+  return fp32_is_nan(v) && !extract_bit_range(v, 22, 23);
+}
+
+constexpr inline bool fp32_is_inf(uint32_t v) {
+  return extract_bit_range(v, 23, 31) == 0xff && !extract_bit_range(v, 0, 23);
+}
+
+constexpr inline bool fp64_is_nan(uint64_t v) {
+  return extract_bit_range(v >> 32, 20, 31) == 0x7ff &&
+         (v & 0xfffffffffffffull);
+}
+
+constexpr inline bool fp64_is_snan(uint64_t v) {
+  return fp64_is_nan(v) && !extract_bit_range(v >> 32, 19, 20);
+}
+
+constexpr inline bool fp64_is_inf(uint64_t v) {
+  return extract_bit_range(v >> 32, 20, 31) == 0x7ff &&
+         !(v & 0xfffffffffffffull);
 }
 
 #define do_trap(__cause, __value) \
@@ -2687,6 +2766,9 @@ struct machine_t {
   wfi_callback_t _wfi_callback = 0;
 
   register_t _reg[32] = {0};
+#ifdef DAWN_RISCV_F
+  fregister_t _freg[32] = {0};
+#endif
   register_t _pc{0};
   register_t _mode{0b11};
   register_t _reservation_address;
