@@ -1349,6 +1349,10 @@ struct machine_t {
 #ifdef DAWN_RISCV64
       register_instr(0b01011, 0b011, _do_atomic_d);
 #endif
+#ifdef DAWN_RISCV_F
+      register_range(0b00001, _do_load_fp);
+      register_range(0b01001, _do_store_fp);
+#endif
     }
 
     uint32_t      _inst;
@@ -2734,6 +2738,77 @@ struct machine_t {
     }
   }
     do_dispatch();
+#endif
+
+#ifdef DAWN_RISCV_F
+  _do_load_fp: {
+    const register_t addr =
+        _reg[inst.as.i_type.rs1()] + inst.as.i_type.imm_sext();
+
+    switch (inst.as.i_type.funct3()) {
+      case 0b010: {  // flw
+        if (addr % 4 != 0) [[unlikely]] {
+          do_trap(exception_code_t::e_load_address_misaligned, addr);
+        }
+        uint32_t value;
+        __load32(_memory, value, addr);  // may fault
+        _freg[inst.as.i_type.rd()] = box_f32(value);
+        _pc += 4;
+        do_dispatch();
+      } break;
+
+#ifdef DAWN_RISCV_D
+      case 0b011: {  // fld
+        if (addr % 8 != 0) [[unlikely]] {
+          do_trap(exception_code_t::e_load_address_misaligned, addr);
+        }
+        uint64_t value;
+        __load64(_memory, value, addr);  // may fault
+        _freg[inst.as.i_type.rd()] = value;
+        _pc += 4;
+        do_dispatch();
+      } break;
+#endif
+
+      default:
+        goto _do_unknown_instruction;
+    }
+  }
+    do_dispatch();
+
+  _do_store_fp: {
+    const register_t addr =
+        _reg[inst.as.s_type.rs1()] + inst.as.s_type.imm_sext();
+
+    switch (inst.as.s_type.funct3()) {
+      case 0b010: {  // fsw
+        if (addr % 4 != 0) [[unlikely]] {
+          do_trap(exception_code_t::e_store_address_misaligned, addr);
+        }
+        __store32(
+            _memory, addr,
+            static_cast<uint32_t>(_freg[inst.as.s_type.rs2()]));  // may fault
+        _pc += 4;
+        do_dispatch();
+      } break;
+
+#ifdef DAWN_RISCV_D
+      case 0b011: {  // fsd
+        if (addr % 8 != 0) [[unlikely]] {
+          do_trap(exception_code_t::e_store_address_misaligned, addr);
+        }
+        __store64(_memory, addr, _freg[inst.as.s_type.rs2()]);  // may fault
+        _pc += 4;
+        do_dispatch();
+      } break;
+#endif
+
+      default:
+        goto _do_unknown_instruction;
+    }
+  }
+    do_dispatch();
+
 #endif
 
   _do_unknown_instruction:
