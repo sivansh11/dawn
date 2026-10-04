@@ -3119,6 +3119,128 @@ struct machine_t {
         }
       } break;
 
+      case 0b1100000: {
+        switch (inst.as.r_type.rs2()) {
+          case 0b00000: {  // fcvt.w.s
+            const uint32_t rs1 = unbox_f32(_freg[inst.as.r_type.rs1()]);
+            float          f   = std::bit_cast<float>(rs1);
+            int32_t        res;
+            if (std::isnan(f)) [[unlikely]] {
+              res = 0x7fffffff;
+            } else if (f >= 2147483648.0f) [[unlikely]] {
+              res = 0x7fffffff;
+            } else if (f <= -2147483648.0f) [[unlikely]] {
+              res = static_cast<int32_t>(0x80000000);
+            } else {
+              res = static_cast<int32_t>(std::rint(f));
+            }
+            _reg[inst.as.r_type.rd()] = static_cast<register_t>(sext<32>(res));
+            _pc += 4;
+            do_dispatch();
+          } break;
+
+          case 0b00001: {  // fcvt.wu.s
+            const uint32_t rs1 = unbox_f32(_freg[inst.as.r_type.rs1()]);
+            float          f   = std::bit_cast<float>(rs1);
+            uint32_t       res;
+            if (std::isnan(f)) [[unlikely]] {
+              res = 0xffffffff;
+            } else if (f >= 4294967296.0f) [[unlikely]] {
+              res = 0xffffffff;
+            } else if (f <= 0.0f) [[unlikely]] {
+              res = 0;
+            } else {
+              res = static_cast<uint32_t>(std::rint(f));
+            }
+            _reg[inst.as.r_type.rd()] = static_cast<register_t>(sext<32>(res));
+            _pc += 4;
+            do_dispatch();
+          } break;
+
+#ifdef DAWN_RISCV64
+          case 0b00010: {  // fcvt.l.s
+            const uint32_t rs1 = unbox_f32(_freg[inst.as.r_type.rs1()]);
+            float          f   = std::bit_cast<float>(rs1);
+            int64_t        res;
+            if (std::isnan(f)) [[unlikely]] {
+              res = 0x7fffffffffffffffll;
+            } else if (f >= 9223372036854775808.0f) [[unlikely]] {
+              res = 0x7fffffffffffffffll;
+            } else if (f <= -9223372036854775808.0f) [[unlikely]] {
+              res = static_cast<int64_t>(0x8000000000000000ull);
+            } else {
+              res = static_cast<int64_t>(std::rint(f));
+            }
+            _reg[inst.as.r_type.rd()] = static_cast<register_t>(res);
+            _pc += 4;
+            do_dispatch();
+          } break;
+
+          case 0b00011: {  // fcvt.lu.s
+            const uint32_t rs1 = unbox_f32(_freg[inst.as.r_type.rs1()]);
+            float          f   = std::bit_cast<float>(rs1);
+            uint64_t       res;
+            if (std::isnan(f)) [[unlikely]] {
+              res = 0xffffffffffffffffull;
+            } else if (f >= 18446744073709551616.0f) [[unlikely]] {
+              res = 0xffffffffffffffffull;
+            } else if (f <= 0.0f) [[unlikely]] {
+              res = 0;
+            } else {
+              res = static_cast<uint64_t>(std::rint(f));
+            }
+            _reg[inst.as.r_type.rd()] = static_cast<register_t>(res);
+            _pc += 4;
+            do_dispatch();
+          } break;
+#endif
+
+          default:
+            goto _do_unknown_instruction;
+        }
+      } break;
+
+      case 0b1101000: {
+        switch (inst.as.r_type.rs2()) {
+          case 0b00000: {  // fcvt.s.w
+            int32_t rs1 = static_cast<int32_t>(_reg[inst.as.r_type.rs1()]);
+            float   r   = static_cast<float>(rs1);
+            _freg[inst.as.r_type.rd()] = box_f32(std::bit_cast<uint32_t>(r));
+            _pc += 4;
+            do_dispatch();
+          } break;
+
+          case 0b00001: {  // fcvt.s.wu
+            uint32_t rs1 = static_cast<uint32_t>(_reg[inst.as.r_type.rs1()]);
+            float    r   = static_cast<float>(rs1);
+            _freg[inst.as.r_type.rd()] = box_f32(std::bit_cast<uint32_t>(r));
+            _pc += 4;
+            do_dispatch();
+          } break;
+
+#ifdef DAWN_RISCV64
+          case 0b00010: {  // fcvt.s.l
+            int64_t rs1 = static_cast<int64_t>(_reg[inst.as.r_type.rs1()]);
+            float   r   = static_cast<float>(rs1);
+            _freg[inst.as.r_type.rd()] = box_f32(std::bit_cast<uint32_t>(r));
+            _pc += 4;
+            do_dispatch();
+          } break;
+
+          case 0b00011: {  // fcvt.s.lu
+            uint64_t rs1 = static_cast<uint64_t>(_reg[inst.as.r_type.rs1()]);
+            float    r   = static_cast<float>(rs1);
+            _freg[inst.as.r_type.rd()] = box_f32(std::bit_cast<uint32_t>(r));
+            _pc += 4;
+            do_dispatch();
+          } break;
+#endif
+
+          default:
+            goto _do_unknown_instruction;
+        }
+      } break;
+
 
 #ifdef DAWN_RISCV_D
       case 0b0000001: {  // fadd.d
@@ -3254,6 +3376,164 @@ struct machine_t {
             const uint64_t rs2 = _freg[inst.as.r_type.rs2()];
             _reg[inst.as.r_type.rd()] =
                 std::bit_cast<double>(rs1) == std::bit_cast<double>(rs2);
+            _pc += 4;
+            do_dispatch();
+          } break;
+
+          default:
+            goto _do_unknown_instruction;
+        }
+      } break;
+
+      case 0b1100001: {
+        switch (inst.as.r_type.rs2()) {
+          case 0b00000: {  // fcvt.w.d
+            const uint64_t rs1 = _freg[inst.as.r_type.rs1()];
+            double         d   = std::bit_cast<double>(rs1);
+            int32_t        res;
+            if (std::isnan(d)) [[unlikely]] {
+              res = 0x7fffffff;
+            } else if (d >= 2147483648.0) [[unlikely]] {
+              res = 0x7fffffff;
+            } else if (d <= -2147483648.0) [[unlikely]] {
+              res = static_cast<int32_t>(0x80000000);
+            } else {
+              double dd = std::rint(d);
+              if (dd >= 2147483648.0) [[unlikely]]
+                res = 0x7fffffff;
+              else
+                res = static_cast<int32_t>(dd);
+            }
+            _reg[inst.as.r_type.rd()] = static_cast<register_t>(sext<32>(res));
+            _pc += 4;
+            do_dispatch();
+          } break;
+
+          case 0b00001: {  // fcvt.wu.d
+            const uint64_t rs1 = _freg[inst.as.r_type.rs1()];
+            double         d   = std::bit_cast<double>(rs1);
+            uint32_t       res;
+            if (std::isnan(d)) [[unlikely]] {
+              res = 0xffffffff;
+            } else if (d >= 4294967296.0) [[unlikely]] {
+              res = 0xffffffff;
+            } else if (d <= 0.0) [[unlikely]] {
+              res = 0;
+            } else {
+              double dd = std::rint(d);
+              if (dd >= 4294967296.0) [[unlikely]]
+                res = 0xffffffff;
+              else
+                res = static_cast<uint32_t>(dd);
+            }
+            _reg[inst.as.r_type.rd()] = static_cast<register_t>(sext<32>(res));
+            _pc += 4;
+            do_dispatch();
+          } break;
+
+          case 0b00010: {  // fcvt.l.d
+            const uint64_t rs1 = _freg[inst.as.r_type.rs1()];
+            double         d   = std::bit_cast<double>(rs1);
+            int64_t        res;
+            if (std::isnan(d)) [[unlikely]] {
+              res = 0x7fffffffffffffffll;
+            } else if (d >= 9223372036854775808.0) [[unlikely]] {
+              res = 0x7fffffffffffffffll;
+            } else if (d <= -9223372036854775808.0) [[unlikely]] {
+              res = static_cast<int64_t>(0x8000000000000000ull);
+            } else {
+              res = static_cast<int64_t>(std::rint(d));
+            }
+            _reg[inst.as.r_type.rd()] = static_cast<register_t>(res);
+            _pc += 4;
+            do_dispatch();
+          } break;
+
+          case 0b00011: {  // fcvt.lu.d
+            const uint64_t rs1 = _freg[inst.as.r_type.rs1()];
+            double         d   = std::bit_cast<double>(rs1);
+            uint64_t       res;
+            if (std::isnan(d)) [[unlikely]] {
+              res = 0xffffffffffffffffull;
+            } else if (d >= 18446744073709551616.0) [[unlikely]] {
+              res = 0xffffffffffffffffull;
+            } else if (d <= 0.0) [[unlikely]] {
+              res = 0;
+            } else {
+              res = static_cast<uint64_t>(std::rint(d));
+            }
+            _reg[inst.as.r_type.rd()] = static_cast<register_t>(res);
+            _pc += 4;
+            do_dispatch();
+          } break;
+
+          default:
+            goto _do_unknown_instruction;
+        }
+      } break;
+
+      case 0b1101001: {
+        switch (inst.as.r_type.rs2()) {
+          case 0b00000: {  // fcvt.d.w
+            int32_t rs1 = static_cast<int32_t>(_reg[inst.as.r_type.rs1()]);
+            double  r   = static_cast<double>(rs1);
+            _freg[inst.as.r_type.rd()] = std::bit_cast<uint64_t>(r);
+            _pc += 4;
+            do_dispatch();
+          } break;
+
+          case 0b00001: {  // fcvt.d.wu
+            uint32_t rs1 = static_cast<uint32_t>(_reg[inst.as.r_type.rs1()]);
+            double   r   = static_cast<double>(rs1);
+            _freg[inst.as.r_type.rd()] = std::bit_cast<uint64_t>(r);
+            _pc += 4;
+            do_dispatch();
+          } break;
+
+          case 0b00010: {  // fcvt.d.l
+            int64_t rs1 = static_cast<int64_t>(_reg[inst.as.r_type.rs1()]);
+            double  r   = static_cast<double>(rs1);
+            _freg[inst.as.r_type.rd()] = std::bit_cast<uint64_t>(r);
+            _pc += 4;
+            do_dispatch();
+          } break;
+
+          case 0b00011: {  // fcvt.d.lu
+            uint64_t rs1 = static_cast<uint64_t>(_reg[inst.as.r_type.rs1()]);
+            double   r   = static_cast<double>(rs1);
+            _freg[inst.as.r_type.rd()] = std::bit_cast<uint64_t>(r);
+            _pc += 4;
+            do_dispatch();
+          } break;
+
+          default:
+            goto _do_unknown_instruction;
+        }
+      } break;
+
+      case 0b0100000: {
+        switch (inst.as.r_type.rs2()) {
+          case 0b00001: {  // fcvt.s.d
+            const uint64_t rs1         = _freg[inst.as.r_type.rs1()];
+            double         d           = std::bit_cast<double>(rs1);
+            float          f           = static_cast<float>(d);
+            _freg[inst.as.r_type.rd()] = box_f32(std::bit_cast<uint32_t>(f));
+            _pc += 4;
+            do_dispatch();
+          } break;
+
+          default:
+            goto _do_unknown_instruction;
+        }
+      } break;
+
+      case 0b0100001: {
+        switch (inst.as.r_type.rs2()) {
+          case 0b00000: {  // fcvt.d.s
+            const uint32_t rs1         = unbox_f32(_freg[inst.as.r_type.rs1()]);
+            float          f           = std::bit_cast<float>(rs1);
+            double         d           = static_cast<double>(f);
+            _freg[inst.as.r_type.rd()] = std::bit_cast<uint64_t>(d);
             _pc += 4;
             do_dispatch();
           } break;
