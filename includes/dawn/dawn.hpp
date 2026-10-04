@@ -3241,6 +3241,52 @@ struct machine_t {
         }
       } break;
 
+      case 0b1110000: {
+        switch (inst.as.r_type.funct3()) {
+          case 0b000: {  // fmv.x.s
+            _reg[inst.as.r_type.rd()] =
+                sext<32>(unbox_f32(_freg[inst.as.r_type.rs1()]));
+            _pc += 4;
+            do_dispatch();
+          } break;
+
+          case 0b001: {  // fclass.s
+            const uint32_t rs1 = unbox_f32(_freg[inst.as.r_type.rs1()]);
+            uint32_t       r;
+            if (fp32_is_nan(rs1)) {
+              r = 1u << (fp32_is_snan(rs1) ? 8 : 9);
+            } else if (fp32_is_inf(rs1)) {
+              r = 1u << ((rs1 & 0x80000000) ? 0 : 7);
+            } else if ((rs1 & 0x7fffffff) == 0) {
+              r = 1u << ((rs1 & 0x80000000) ? 3 : 4);
+            } else if (extract_bit_range(rs1, 23, 31) == 0) {
+              r = 1u << ((rs1 & 0x80000000) ? 2 : 5);
+            } else {
+              r = 1u << ((rs1 & 0x80000000) ? 1 : 6);
+            }
+            _reg[inst.as.r_type.rd()] = r;
+            _pc += 4;
+            do_dispatch();
+          } break;
+
+          default:
+            goto _do_unknown_instruction;
+        }
+      } break;
+
+      case 0b1111000: {
+        switch (inst.as.r_type.funct3()) {
+          case 0b000: {  // fmv.s.x
+            _freg[inst.as.r_type.rd()] =
+                box_f32(static_cast<uint32_t>(_reg[inst.as.r_type.rs1()]));
+            _pc += 4;
+            do_dispatch();
+          } break;
+
+          default:
+            goto _do_unknown_instruction;
+        }
+      } break;
 
 #ifdef DAWN_RISCV_D
       case 0b0000001: {  // fadd.d
@@ -3534,6 +3580,51 @@ struct machine_t {
             float          f           = std::bit_cast<float>(rs1);
             double         d           = static_cast<double>(f);
             _freg[inst.as.r_type.rd()] = std::bit_cast<uint64_t>(d);
+            _pc += 4;
+            do_dispatch();
+          } break;
+
+          default:
+            goto _do_unknown_instruction;
+        }
+      } break;
+
+      case 0b1110001: {
+        switch (inst.as.r_type.funct3()) {
+          case 0b000: {  // fmv.x.d
+            _reg[inst.as.r_type.rd()] = _freg[inst.as.r_type.rs1()];
+            _pc += 4;
+            do_dispatch();
+          } break;
+
+          case 0b001: {  // fclass.d
+            const uint64_t rs1 = _freg[inst.as.r_type.rs1()];
+            uint64_t       r;
+            if (fp64_is_nan(rs1)) {
+              r = 1ull << (fp64_is_snan(rs1) ? 8 : 9);
+            } else if (fp64_is_inf(rs1)) {
+              r = 1ull << ((rs1 & 0x8000000000000000ull) ? 0 : 7);
+            } else if ((rs1 & 0x7fffffffffffffffull) == 0) {
+              r = 1ull << ((rs1 & 0x8000000000000000ull) ? 3 : 4);
+            } else if (extract_bit_range(rs1 >> 32, 20, 31) == 0) {
+              r = 1ull << ((rs1 & 0x8000000000000000ull) ? 2 : 5);
+            } else {
+              r = 1ull << ((rs1 & 0x8000000000000000ull) ? 1 : 6);
+            }
+            _reg[inst.as.r_type.rd()] = r;
+            _pc += 4;
+            do_dispatch();
+          } break;
+
+          default:
+            goto _do_unknown_instruction;
+        }
+      } break;
+
+      case 0b1111001: {
+        switch (inst.as.r_type.funct3()) {
+          case 0b000: {  // fmv.d.x
+            _freg[inst.as.r_type.rd()] = _reg[inst.as.r_type.rs1()];
             _pc += 4;
             do_dispatch();
           } break;
