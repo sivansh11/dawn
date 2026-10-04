@@ -299,6 +299,27 @@ struct r_type_t {
   }
 };
 
+struct r4_type_t {
+  uint32_t _opcode : 7;  // 0-6
+  uint32_t _rd     : 5;  // 7-11
+  uint32_t _funct3 : 3;  // 12-14
+  uint32_t _rs1    : 5;  // 15-19
+  uint32_t _rs2    : 5;  // 20-24
+  uint32_t _funct2 : 2;  // 25-26
+  uint32_t _rs3    : 5;  // 27-31
+
+  constexpr uint32_t opcode() const { return _opcode; }
+  constexpr uint32_t rd() const { return _rd; }
+  constexpr uint32_t funct3() const { return _funct3; }
+  constexpr uint32_t rs1() const { return _rs1; }
+  constexpr uint32_t rs2() const { return _rs2; }
+  constexpr uint32_t funct2() const { return _funct2; }
+  constexpr uint32_t rs3() const { return _rs3; }
+                     operator uint64_t() const {
+    return *reinterpret_cast<const uint32_t *>(this);
+  }
+};
+
 struct a_type_t {
   uint32_t _opcode : 7;
   uint32_t _rd     : 5;
@@ -375,14 +396,15 @@ struct j_type_t {
 // TODO: add raw access
 struct instruction_t {
   union as_t {
-    base_t   base;
-    i_type_t i_type;
-    s_type_t s_type;
-    u_type_t u_type;
-    r_type_t r_type;
-    b_type_t b_type;
-    j_type_t j_type;
-    a_type_t a_type;
+    base_t    base;
+    i_type_t  i_type;
+    s_type_t  s_type;
+    u_type_t  u_type;
+    r_type_t  r_type;
+    r4_type_t r4_type;
+    b_type_t  b_type;
+    j_type_t  j_type;
+    a_type_t  a_type;
   } as;
   operator uint64_t() const {
     return *reinterpret_cast<const uint32_t *>(this);
@@ -1352,6 +1374,10 @@ struct machine_t {
 #ifdef DAWN_RISCV_F
       register_range(0b00001, _do_load_fp);
       register_range(0b01001, _do_store_fp);
+      register_range(0b10000, _do_fmadd);
+      register_range(0b10001, _do_fmsub);
+      register_range(0b10010, _do_fnmsub);
+      register_range(0b10011, _do_fnmadd);
 #endif
     }
 
@@ -2808,6 +2834,147 @@ struct machine_t {
     }
   }
     do_dispatch();
+
+  _do_fmadd: {
+    // TODO: add handling rm
+    switch (inst.as.r4_type.funct2()) {
+      case 0b00: {  // fmadd.s
+        const uint32_t rs1          = unbox_f32(_freg[inst.as.r4_type.rs1()]);
+        const uint32_t rs2          = unbox_f32(_freg[inst.as.r4_type.rs2()]);
+        const uint32_t rs3          = unbox_f32(_freg[inst.as.r4_type.rs3()]);
+        float          r            = std::fma(std::bit_cast<float>(rs1),  //
+                                               std::bit_cast<float>(rs2),  //
+                                               std::bit_cast<float>(rs3));
+        _freg[inst.as.r4_type.rd()] = box_f32(std::bit_cast<uint32_t>(r));
+        _pc += 4;
+        do_dispatch();
+      } break;
+
+#ifdef DAWN_RISCV_D
+      case 0b01: {  // fmadd.d
+        const uint64_t rs1          = _freg[inst.as.r4_type.rs1()];
+        const uint64_t rs2          = _freg[inst.as.r4_type.rs2()];
+        const uint64_t rs3          = _freg[inst.as.r4_type.rs3()];
+        double         r            = std::fma(std::bit_cast<double>(rs1),  //
+                                               std::bit_cast<double>(rs2),  //
+                                               std::bit_cast<double>(rs3));
+        _freg[inst.as.r4_type.rd()] = std::bit_cast<uint64_t>(r);
+        _pc += 4;
+        do_dispatch();
+      } break;
+#endif
+
+      default:
+        goto _do_unknown_instruction;
+    }
+  }
+    do_dispatch();
+
+  _do_fmsub: {
+    // TODO: add handling rm
+    switch (inst.as.r4_type.funct2()) {
+      case 0b00: {  // fmsub.s
+        const uint32_t rs1          = unbox_f32(_freg[inst.as.r4_type.rs1()]);
+        const uint32_t rs2          = unbox_f32(_freg[inst.as.r4_type.rs2()]);
+        const uint32_t rs3          = unbox_f32(_freg[inst.as.r4_type.rs3()]);
+        float          r            = std::fma(std::bit_cast<float>(rs1),  //
+                                               std::bit_cast<float>(rs2),  //
+                                               -std::bit_cast<float>(rs3));
+        _freg[inst.as.r4_type.rd()] = box_f32(std::bit_cast<uint32_t>(r));
+        _pc += 4;
+        do_dispatch();
+      } break;
+
+#ifdef DAWN_RISCV_D
+      case 0b01: {  // fmsub.d
+        const uint64_t rs1          = _freg[inst.as.r4_type.rs1()];
+        const uint64_t rs2          = _freg[inst.as.r4_type.rs2()];
+        const uint64_t rs3          = _freg[inst.as.r4_type.rs3()];
+        double         r            = std::fma(std::bit_cast<double>(rs1),  //
+                                               std::bit_cast<double>(rs2),  //
+                                               -std::bit_cast<double>(rs3));
+        _freg[inst.as.r4_type.rd()] = std::bit_cast<uint64_t>(r);
+        _pc += 4;
+        do_dispatch();
+      } break;
+#endif
+
+      default:
+        goto _do_unknown_instruction;
+    }
+  }
+    do_dispatch();
+
+  _do_fnmsub: {
+    // TODO: add handling rm
+    switch (inst.as.r4_type.funct2()) {
+      case 0b00: {  // fnmsub.s
+        const uint32_t rs1          = unbox_f32(_freg[inst.as.r4_type.rs1()]);
+        const uint32_t rs2          = unbox_f32(_freg[inst.as.r4_type.rs2()]);
+        const uint32_t rs3          = unbox_f32(_freg[inst.as.r4_type.rs3()]);
+        float          r            = std::fma(-std::bit_cast<float>(rs1),  //
+                                               std::bit_cast<float>(rs2),   //
+                                               std::bit_cast<float>(rs3));
+        _freg[inst.as.r4_type.rd()] = box_f32(std::bit_cast<uint32_t>(r));
+        _pc += 4;
+        do_dispatch();
+      } break;
+
+#ifdef DAWN_RISCV_D
+      case 0b01: {  // fnmsub.d
+        const uint64_t rs1          = _freg[inst.as.r4_type.rs1()];
+        const uint64_t rs2          = _freg[inst.as.r4_type.rs2()];
+        const uint64_t rs3          = _freg[inst.as.r4_type.rs3()];
+        double         r            = std::fma(-std::bit_cast<double>(rs1),  //
+                                               std::bit_cast<double>(rs2),   //
+                                               std::bit_cast<double>(rs3));
+        _freg[inst.as.r4_type.rd()] = std::bit_cast<uint64_t>(r);
+        _pc += 4;
+        do_dispatch();
+      } break;
+#endif
+
+      default:
+        goto _do_unknown_instruction;
+    }
+  }
+    do_dispatch();
+
+  _do_fnmadd: {
+    // TODO: add handling rm
+    switch (inst.as.r4_type.funct2()) {
+      case 0b00: {  // fnmadd.s
+        const uint32_t rs1          = unbox_f32(_freg[inst.as.r4_type.rs1()]);
+        const uint32_t rs2          = unbox_f32(_freg[inst.as.r4_type.rs2()]);
+        const uint32_t rs3          = unbox_f32(_freg[inst.as.r4_type.rs3()]);
+        float          r            = std::fma(-std::bit_cast<float>(rs1),  //
+                                               std::bit_cast<float>(rs2),   //
+                                               -std::bit_cast<float>(rs3));
+        _freg[inst.as.r4_type.rd()] = box_f32(std::bit_cast<uint32_t>(r));
+        _pc += 4;
+        do_dispatch();
+      } break;
+
+#ifdef DAWN_RISCV_D
+      case 0b01: {  // fnmadd.d
+        const uint64_t rs1          = _freg[inst.as.r4_type.rs1()];
+        const uint64_t rs2          = _freg[inst.as.r4_type.rs2()];
+        const uint64_t rs3          = _freg[inst.as.r4_type.rs3()];
+        double         r            = std::fma(-std::bit_cast<double>(rs1),  //
+                                               std::bit_cast<double>(rs2),   //
+                                               -std::bit_cast<double>(rs3));
+        _freg[inst.as.r4_type.rd()] = std::bit_cast<uint64_t>(r);
+        _pc += 4;
+        do_dispatch();
+      } break;
+#endif
+
+      default:
+        goto _do_unknown_instruction;
+    }
+  }
+    do_dispatch();
+
 
 #endif
 
