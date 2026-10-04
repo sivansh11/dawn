@@ -3024,6 +3024,101 @@ struct machine_t {
         do_dispatch();
       } break;
 
+      case 0b0010000: {
+        switch (inst.as.r_type.funct3()) {
+          case 0b000: {  // fsgnj.s
+            const uint32_t rs1 = unbox_f32(_freg[inst.as.r_type.rs1()]);
+            const uint32_t rs2 = unbox_f32(_freg[inst.as.r_type.rs2()]);
+            uint32_t       r   = (rs1 & ~0x80000000) | (rs2 & 0x80000000);
+            _freg[inst.as.r_type.rd()] = box_f32(r);
+            _pc += 4;
+            do_dispatch();
+          } break;
+
+          case 0b001: {  // fsgnjn.s
+            const uint32_t rs1 = unbox_f32(_freg[inst.as.r_type.rs1()]);
+            const uint32_t rs2 = unbox_f32(_freg[inst.as.r_type.rs2()]);
+            uint32_t       r   = (rs1 & ~0x80000000) | (~rs2 & 0x80000000);
+            _freg[inst.as.r_type.rd()] = box_f32(r);
+            _pc += 4;
+            do_dispatch();
+          } break;
+
+          case 0b010: {  // fsgnjx.s
+            const uint32_t rs1         = unbox_f32(_freg[inst.as.r_type.rs1()]);
+            const uint32_t rs2         = unbox_f32(_freg[inst.as.r_type.rs2()]);
+            uint32_t       r           = rs1 ^ (rs2 & 0x80000000);
+            _freg[inst.as.r_type.rd()] = box_f32(r);
+            _pc += 4;
+            do_dispatch();
+          } break;
+
+          default:
+            goto _do_unknown_instruction;
+        }
+      } break;
+
+      case 0b0010100: {
+        switch (inst.as.r_type.funct3()) {
+          case 0b000: {  // fmin.s
+            const uint32_t rs1 = unbox_f32(_freg[inst.as.r_type.rs1()]);
+            const uint32_t rs2 = unbox_f32(_freg[inst.as.r_type.rs2()]);
+            float          r =
+                std::fmin(std::bit_cast<float>(rs1), std::bit_cast<float>(rs2));
+            _freg[inst.as.r_type.rd()] = box_f32(std::bit_cast<uint32_t>(r));
+            _pc += 4;
+            do_dispatch();
+          } break;
+
+          case 0b001: {  // fmax.s
+            const uint32_t rs1 = unbox_f32(_freg[inst.as.r_type.rs1()]);
+            const uint32_t rs2 = unbox_f32(_freg[inst.as.r_type.rs2()]);
+            float          r =
+                std::fmax(std::bit_cast<float>(rs1), std::bit_cast<float>(rs2));
+            _freg[inst.as.r_type.rd()] = box_f32(std::bit_cast<uint32_t>(r));
+            _pc += 4;
+            do_dispatch();
+          } break;
+
+          default:
+            goto _do_unknown_instruction;
+        }
+      } break;
+
+      case 0b1010000: {
+        switch (inst.as.r_type.funct3()) {
+          case 0b000: {  // fle.s
+            const uint32_t rs1 = unbox_f32(_freg[inst.as.r_type.rs1()]);
+            const uint32_t rs2 = unbox_f32(_freg[inst.as.r_type.rs2()]);
+            _reg[inst.as.r_type.rd()] =
+                std::bit_cast<float>(rs1) <= std::bit_cast<float>(rs2);
+            _pc += 4;
+            do_dispatch();
+          } break;
+
+          case 0b001: {  // flt.s
+            const uint32_t rs1 = unbox_f32(_freg[inst.as.r_type.rs1()]);
+            const uint32_t rs2 = unbox_f32(_freg[inst.as.r_type.rs2()]);
+            _reg[inst.as.r_type.rd()] =
+                std::bit_cast<float>(rs1) < std::bit_cast<float>(rs2);
+            _pc += 4;
+            do_dispatch();
+          } break;
+
+          case 0b010: {  // feq.s
+            const uint32_t rs1 = unbox_f32(_freg[inst.as.r_type.rs1()]);
+            const uint32_t rs2 = unbox_f32(_freg[inst.as.r_type.rs2()]);
+            _reg[inst.as.r_type.rd()] =
+                std::bit_cast<float>(rs1) == std::bit_cast<float>(rs2);
+            _pc += 4;
+            do_dispatch();
+          } break;
+
+          default:
+            goto _do_unknown_instruction;
+        }
+      } break;
+
 
 #ifdef DAWN_RISCV_D
       case 0b0000001: {  // fadd.d
@@ -3069,6 +3164,103 @@ struct machine_t {
         _freg[inst.as.r_type.rd()] = std::bit_cast<uint64_t>(r);
         _pc += 4;
         do_dispatch();
+      } break;
+
+      case 0b0010001: {
+        switch (inst.as.r_type.funct3()) {
+          case 0b000: {  // fsgnj.d
+            const uint64_t rs1 = _freg[inst.as.r_type.rs1()];
+            const uint64_t rs2 = _freg[inst.as.r_type.rs2()];
+            uint64_t       r =
+                (rs1 & ~0x8000000000000000ull) | (rs2 & 0x8000000000000000ull);
+            _freg[inst.as.r_type.rd()] = r;
+            _pc += 4;
+            do_dispatch();
+          } break;
+
+          case 0b001: {  // fsgnjn.d
+            const uint64_t rs1 = _freg[inst.as.r_type.rs1()];
+            const uint64_t rs2 = _freg[inst.as.r_type.rs2()];
+            uint64_t       r =
+                (rs1 & ~0x8000000000000000ull) | (~rs2 & 0x8000000000000000ull);
+            _freg[inst.as.r_type.rd()] = r;
+            _pc += 4;
+            do_dispatch();
+          } break;
+
+          case 0b010: {  // fsgnjx.d
+            const uint64_t rs1         = _freg[inst.as.r_type.rs1()];
+            const uint64_t rs2         = _freg[inst.as.r_type.rs2()];
+            uint64_t       r           = rs1 ^ (rs2 & 0x8000000000000000ull);
+            _freg[inst.as.r_type.rd()] = r;
+            _pc += 4;
+            do_dispatch();
+          } break;
+
+          default:
+            goto _do_unknown_instruction;
+        }
+      } break;
+
+      case 0b0010101: {
+        switch (inst.as.r_type.funct3()) {
+          case 0b000: {  // fmin.d
+            const uint64_t rs1         = _freg[inst.as.r_type.rs1()];
+            const uint64_t rs2         = _freg[inst.as.r_type.rs2()];
+            double         r           = std::fmin(std::bit_cast<double>(rs1),
+                                                   std::bit_cast<double>(rs2));
+            _freg[inst.as.r_type.rd()] = std::bit_cast<uint64_t>(r);
+            _pc += 4;
+            do_dispatch();
+          } break;
+
+          case 0b001: {  // fmax.d
+            const uint64_t rs1         = _freg[inst.as.r_type.rs1()];
+            const uint64_t rs2         = _freg[inst.as.r_type.rs2()];
+            double         r           = std::fmax(std::bit_cast<double>(rs1),
+                                                   std::bit_cast<double>(rs2));
+            _freg[inst.as.r_type.rd()] = std::bit_cast<uint64_t>(r);
+            _pc += 4;
+            do_dispatch();
+          } break;
+
+          default:
+            goto _do_unknown_instruction;
+        }
+      } break;
+
+      case 0b1010001: {
+        switch (inst.as.r_type.funct3()) {
+          case 0b000: {  // fle.d
+            const uint64_t rs1 = _freg[inst.as.r_type.rs1()];
+            const uint64_t rs2 = _freg[inst.as.r_type.rs2()];
+            _reg[inst.as.r_type.rd()] =
+                std::bit_cast<double>(rs1) <= std::bit_cast<double>(rs2);
+            _pc += 4;
+            do_dispatch();
+          } break;
+
+          case 0b001: {  // flt.d
+            const uint64_t rs1 = _freg[inst.as.r_type.rs1()];
+            const uint64_t rs2 = _freg[inst.as.r_type.rs2()];
+            _reg[inst.as.r_type.rd()] =
+                std::bit_cast<double>(rs1) < std::bit_cast<double>(rs2);
+            _pc += 4;
+            do_dispatch();
+          } break;
+
+          case 0b010: {  // feq.d
+            const uint64_t rs1 = _freg[inst.as.r_type.rs1()];
+            const uint64_t rs2 = _freg[inst.as.r_type.rs2()];
+            _reg[inst.as.r_type.rd()] =
+                std::bit_cast<double>(rs1) == std::bit_cast<double>(rs2);
+            _pc += 4;
+            do_dispatch();
+          } break;
+
+          default:
+            goto _do_unknown_instruction;
+        }
       } break;
 
 #endif
