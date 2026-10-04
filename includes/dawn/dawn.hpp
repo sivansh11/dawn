@@ -1378,6 +1378,7 @@ struct machine_t {
       register_range(0b10001, _do_fmsub);
       register_range(0b10010, _do_fnmsub);
       register_range(0b10011, _do_fnmadd);
+      register_range(0b10100, _do_fop);
 #endif
     }
 
@@ -2975,6 +2976,108 @@ struct machine_t {
   }
     do_dispatch();
 
+  _do_fop: {
+    // TODO: add handling rm
+    switch (inst.as.r_type.funct7()) {
+      case 0b0000000: {  // fadd.s
+        const uint32_t rs1 = unbox_f32(_freg[inst.as.r_type.rs1()]);
+        const uint32_t rs2 = unbox_f32(_freg[inst.as.r_type.rs2()]);
+        float r = std::bit_cast<float>(rs1) + std::bit_cast<float>(rs2);
+        _freg[inst.as.r_type.rd()] = box_f32(std::bit_cast<uint32_t>(r));
+        _pc += 4;
+        do_dispatch();
+      } break;
+
+      case 0b0000100: {  // fsub.s
+        const uint32_t rs1 = unbox_f32(_freg[inst.as.r_type.rs1()]);
+        const uint32_t rs2 = unbox_f32(_freg[inst.as.r_type.rs2()]);
+        float r = std::bit_cast<float>(rs1) - std::bit_cast<float>(rs2);
+        _freg[inst.as.r_type.rd()] = box_f32(std::bit_cast<uint32_t>(r));
+        _pc += 4;
+        do_dispatch();
+      } break;
+
+      case 0b0001000: {  // fmul.s
+        const uint32_t rs1 = unbox_f32(_freg[inst.as.r_type.rs1()]);
+        const uint32_t rs2 = unbox_f32(_freg[inst.as.r_type.rs2()]);
+        float r = std::bit_cast<float>(rs1) * std::bit_cast<float>(rs2);
+        _freg[inst.as.r_type.rd()] = box_f32(std::bit_cast<uint32_t>(r));
+        _pc += 4;
+        do_dispatch();
+      } break;
+
+      case 0b0001100: {  // fdiv.s
+        const uint32_t rs1 = unbox_f32(_freg[inst.as.r_type.rs1()]);
+        const uint32_t rs2 = unbox_f32(_freg[inst.as.r_type.rs2()]);
+        float r = std::bit_cast<float>(rs1) / std::bit_cast<float>(rs2);
+        _freg[inst.as.r_type.rd()] = box_f32(std::bit_cast<uint32_t>(r));
+        _pc += 4;
+        do_dispatch();
+      } break;
+
+      case 0b0101100: {  // fsqrt.s
+        const uint32_t rs1         = unbox_f32(_freg[inst.as.r_type.rs1()]);
+        const uint32_t rs2         = unbox_f32(_freg[inst.as.r_type.rs2()]);
+        float          r           = std::sqrt(std::bit_cast<float>(rs1));
+        _freg[inst.as.r_type.rd()] = box_f32(std::bit_cast<uint32_t>(r));
+        _pc += 4;
+        do_dispatch();
+      } break;
+
+
+#ifdef DAWN_RISCV_D
+      case 0b0000001: {  // fadd.d
+        const uint64_t rs1 = _freg[inst.as.r_type.rs1()];
+        const uint64_t rs2 = _freg[inst.as.r_type.rs2()];
+        double r = std::bit_cast<double>(rs1) + std::bit_cast<double>(rs2);
+        _freg[inst.as.r_type.rd()] = std::bit_cast<uint64_t>(r);
+        _pc += 4;
+        do_dispatch();
+      } break;
+
+      case 0b0000101: {  // fsub.d
+        const uint64_t rs1 = _freg[inst.as.r_type.rs1()];
+        const uint64_t rs2 = _freg[inst.as.r_type.rs2()];
+        double r = std::bit_cast<double>(rs1) - std::bit_cast<double>(rs2);
+        _freg[inst.as.r_type.rd()] = std::bit_cast<uint64_t>(r);
+        _pc += 4;
+        do_dispatch();
+      } break;
+
+      case 0b0001001: {  // fmul.d
+        const uint64_t rs1 = _freg[inst.as.r_type.rs1()];
+        const uint64_t rs2 = _freg[inst.as.r_type.rs2()];
+        double r = std::bit_cast<double>(rs1) * std::bit_cast<double>(rs2);
+        _freg[inst.as.r_type.rd()] = std::bit_cast<uint64_t>(r);
+        _pc += 4;
+        do_dispatch();
+      } break;
+
+      case 0b0001101: {  // fdiv.d
+        const uint64_t rs1 = _freg[inst.as.r_type.rs1()];
+        const uint64_t rs2 = _freg[inst.as.r_type.rs2()];
+        double r = std::bit_cast<double>(rs1) / std::bit_cast<double>(rs2);
+        _freg[inst.as.r_type.rd()] = std::bit_cast<uint64_t>(r);
+        _pc += 4;
+        do_dispatch();
+      } break;
+
+      case 0b0101101: {  // fsqrt.d
+        const uint64_t rs1         = _freg[inst.as.r_type.rs1()];
+        const uint64_t rs2         = _freg[inst.as.r_type.rs2()];
+        double         r           = std::sqrt(std::bit_cast<double>(rs1));
+        _freg[inst.as.r_type.rd()] = std::bit_cast<uint64_t>(r);
+        _pc += 4;
+        do_dispatch();
+      } break;
+
+#endif
+
+      default:
+        goto _do_unknown_instruction;
+    }
+  }
+    do_dispatch();
 
 #endif
 
