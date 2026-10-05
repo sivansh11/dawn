@@ -2,7 +2,7 @@
 Dawn is a lightweight RiscV emulator designed to serve as a portable scripting bytecode for [Horizon](https://github.com/sivansh11/horizon)
 
 # Key Features
-- Target: implements rv64ima target (with more extensions planned for the future).
+- Target: implements rv64imafd target (NOTE: f and d extensions are not exactly spec compliant, more info below) with more extensions planned for the future.
 - Modes: implements (M)achine and (U)ser modes (no Supervisor mode).
 - VM call: supports a vmcall/hypercall system by "hooking" ecalls.
     This is required if the user script needs to interact with the underlying game engine or needs to perform os activities, for example opening a file.
@@ -63,7 +63,11 @@ FetchContent_MakeAvailable(dawn)
 target_link_libraries(your_target PUBLIC dawn)
 ```
 
+# Note on F and D extension
+- F and D extensions are not spec compliant, they ignore rounding mode in instruction and fcsr, they always follow host's rounding mode.
+- Maybe some day I will add a spec compliant macro toggle, but dont count on it, adding that will slow down all fp operations.
+- Due to ignoring of rounding mode, printing of floating points will be wrong, this is a known issue, a way to resolve this would be to add a custom print syscall or overwrite print.
 
 # Planned for the future
 - Jitted runtime.
-- f, v, c extension
+- v, c extension
